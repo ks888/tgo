@@ -10,6 +10,7 @@ const (
 	testdataHelloworldMacho    = testdataHelloworld + ".macho"
 	testdataHelloworldStripped = testdataHelloworld + ".stripped"
 	addrMain                   = 0x482070
+	addrFuncWithAbstractOrigin = 0x471340 // any function which corresponding DIE has the DW_AT_abstract_origin attribute.
 
 	testdataParameters          = "testdata/parameters"
 	addrNoParameter             = 0x482ed0
@@ -26,7 +27,11 @@ func TestNewBinary(t *testing.T) {
 	}
 
 	if binary.dwarf == nil {
-		t.Errorf("empty data: %v", binary)
+		t.Errorf("empty dwarf data")
+	}
+
+	if binary.symbols == nil {
+		t.Errorf("symbols empty")
 	}
 }
 
@@ -67,9 +72,28 @@ func TestFindFunction(t *testing.T) {
 	}
 }
 
+func TestFindEntry_FirstEntry(t *testing.T) {
+	binary, _ := NewBinary(testdataHelloworld)
+	entry := binary.findEntry(0)
+	if entry == nil {
+		t.Fatalf("failed to find entry")
+	}
+}
+
+func TestFindEntry_SecondEntry(t *testing.T) {
+	binary, _ := NewBinary(testdataHelloworld)
+	reader := binary.dwarf.Reader()
+	_, _ = reader.Next()
+	entry, _ := reader.Next()
+	actual := binary.findEntry(entry.Offset)
+	if actual == nil {
+		t.Fatalf("failed to find entry")
+	}
+}
+
 func TestSeekCompileUnit(t *testing.T) {
 	binary, _ := NewBinary(testdataHelloworld)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 
 	compileUnitReader, err := reader.seekCompileUnit(addrMain)
 	if err != nil {
@@ -82,7 +106,7 @@ func TestSeekCompileUnit(t *testing.T) {
 
 func TestSeekCompileUnit_InvalidPC(t *testing.T) {
 	binary, _ := NewBinary(testdataHelloworld)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 
 	_, err := reader.seekCompileUnit(invalidAddr)
 	if err == nil {
@@ -92,7 +116,7 @@ func TestSeekCompileUnit_InvalidPC(t *testing.T) {
 
 func TestSeekSubprogram(t *testing.T) {
 	binary, _ := NewBinary(testdataHelloworld)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 
 	compileUnitReader, _ := reader.seekCompileUnit(addrMain)
 	function, subprogramReader, err := compileUnitReader.seekSubprogram(addrMain)
@@ -112,7 +136,7 @@ func TestSeekSubprogram(t *testing.T) {
 
 func TestSeekSubprogram_NoMatchedSubprogram(t *testing.T) {
 	binary, _ := NewBinary(testdataHelloworld)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 
 	compileUnitReader, _ := reader.seekCompileUnit(addrMain)
 	_, _, err := compileUnitReader.seekSubprogram(invalidAddr)
@@ -121,9 +145,20 @@ func TestSeekSubprogram_NoMatchedSubprogram(t *testing.T) {
 	}
 }
 
+func TestSeekSubprogram_DIEHasAbstractOrigin(t *testing.T) {
+	binary, _ := NewBinary(testdataHelloworld)
+	reader := debugInfoReader{raw: binary.dwarf.Reader(), findEntry: binary.findEntry}
+
+	compileUnitReader, _ := reader.seekCompileUnit(addrFuncWithAbstractOrigin)
+	function, _, _ := compileUnitReader.seekSubprogram(addrFuncWithAbstractOrigin)
+	if function.name != "reflect.Value.Kind" {
+		t.Fatalf("invalid function name: %s", function.name)
+	}
+}
+
 func TestSeekParameters(t *testing.T) {
 	binary, _ := NewBinary(testdataParameters)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader(), findType: binary.findType}
 
 	compileUnitReader, _ := reader.seekCompileUnit(addrOneParameter)
 	_, subprogramReader, _ := compileUnitReader.seekSubprogram(addrOneParameter)
@@ -141,7 +176,7 @@ func TestSeekParameters(t *testing.T) {
 
 func TestSeekParameter(t *testing.T) {
 	binary, _ := NewBinary(testdataParameters)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader(), findType: binary.findType}
 
 	compileUnitReader, _ := reader.seekCompileUnit(addrOneParameter)
 	_, subprogramReader, _ := compileUnitReader.seekSubprogram(addrOneParameter)
@@ -155,8 +190,8 @@ func TestSeekParameter(t *testing.T) {
 	if param.name != "a" {
 		t.Errorf("invalid parameter name: %s", param.name)
 	}
-	if param.typeOffset == 0 {
-		t.Errorf("empty type offset")
+	if param.typ == nil {
+		t.Errorf("empty type")
 	}
 	if param.location == nil {
 		t.Errorf("empty location")
@@ -168,7 +203,7 @@ func TestSeekParameter(t *testing.T) {
 
 func TestSeekParameter_HasVariableBeforeParameter(t *testing.T) {
 	binary, _ := NewBinary(testdataParameters)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader(), findType: binary.findType}
 
 	compileUnitReader, _ := reader.seekCompileUnit(addrOneParameterAndVariable)
 	_, subprogramReader, _ := compileUnitReader.seekSubprogram(addrOneParameterAndVariable)
@@ -186,7 +221,7 @@ func TestSeekParameter_HasVariableBeforeParameter(t *testing.T) {
 
 func TestSeekParameter_NoParameter(t *testing.T) {
 	binary, _ := NewBinary(testdataParameters)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 
 	compileUnitReader, _ := reader.seekCompileUnit(addrNoParameter)
 	_, subprogramReader, _ := compileUnitReader.seekSubprogram(addrNoParameter)
@@ -199,9 +234,36 @@ func TestSeekParameter_NoParameter(t *testing.T) {
 	}
 }
 
+func TestSeekParameter_DIEHasAbstractOrigin(t *testing.T) {
+	binary, _ := NewBinary(testdataHelloworld)
+	reader := debugInfoReader{raw: binary.dwarf.Reader(), findEntry: binary.findEntry, findType: binary.findType}
+
+	compileUnitReader, _ := reader.seekCompileUnit(addrFuncWithAbstractOrigin)
+	_, subprogramReader, _ := compileUnitReader.seekSubprogram(addrFuncWithAbstractOrigin)
+	param, err := subprogramReader.seekParameter()
+	if err != nil {
+		t.Fatalf("failed to seek to parameter: %v", err)
+	}
+	if param == nil {
+		t.Fatalf("parameter is nil")
+	}
+	if param.name != "v" {
+		t.Errorf("invalid parameter name: %s", param.name)
+	}
+	if param.typ == nil {
+		t.Errorf("empty type")
+	}
+	if param.location == nil {
+		t.Errorf("empty location")
+	}
+	if param.isOutput {
+		t.Errorf("wrong flag")
+	}
+}
+
 func TestAddressClassAttr(t *testing.T) {
 	binary, _ := NewBinary(testdataHelloworld)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 	compileUnitReader, _ := reader.seekCompileUnit(addrMain)
 	subprogram, _ := compileUnitReader.raw.Next()
 
@@ -216,7 +278,7 @@ func TestAddressClassAttr(t *testing.T) {
 
 func TestAddressClassAttr_InvalidAttr(t *testing.T) {
 	binary, _ := NewBinary(testdataHelloworld)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 	compileUnitReader, _ := reader.seekCompileUnit(addrMain)
 	subprogram, _ := compileUnitReader.raw.Next()
 
@@ -228,7 +290,7 @@ func TestAddressClassAttr_InvalidAttr(t *testing.T) {
 
 func TestAddressClassAttr_InvalidClass(t *testing.T) {
 	binary, _ := NewBinary(testdataHelloworld)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 	compileUnitReader, _ := reader.seekCompileUnit(addrMain)
 	subprogram, _ := compileUnitReader.raw.Next()
 
@@ -240,7 +302,7 @@ func TestAddressClassAttr_InvalidClass(t *testing.T) {
 
 func TestStringClassAttr(t *testing.T) {
 	binary, _ := NewBinary(testdataHelloworld)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 	compileUnitReader, _ := reader.seekCompileUnit(addrMain)
 	subprogram, _ := compileUnitReader.raw.Next()
 
@@ -255,7 +317,7 @@ func TestStringClassAttr(t *testing.T) {
 
 func TestReferenceClassAttr(t *testing.T) {
 	binary, _ := NewBinary(testdataParameters)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 
 	compileUnitReader, _ := reader.seekCompileUnit(addrOneParameter)
 	_, subprogramReader, _ := compileUnitReader.seekSubprogram(addrOneParameter)
@@ -272,7 +334,7 @@ func TestReferenceClassAttr(t *testing.T) {
 
 func TestLocClassAttr(t *testing.T) {
 	binary, _ := NewBinary(testdataParameters)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 
 	compileUnitReader, _ := reader.seekCompileUnit(addrOneParameter)
 	_, subprogramReader, _ := compileUnitReader.seekSubprogram(addrOneParameter)
@@ -289,7 +351,7 @@ func TestLocClassAttr(t *testing.T) {
 
 func TestFlagClassAttr(t *testing.T) {
 	binary, _ := NewBinary(testdataParameters)
-	reader := debugInfoReader{binary.dwarf.Reader()}
+	reader := debugInfoReader{raw: binary.dwarf.Reader()}
 
 	compileUnitReader, _ := reader.seekCompileUnit(addrOneParameter)
 	_, subprogramReader, _ := compileUnitReader.seekSubprogram(addrOneParameter)
