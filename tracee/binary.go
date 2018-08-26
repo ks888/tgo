@@ -12,7 +12,8 @@ const AttrVariableParameter = 0x4b
 
 // Binary represents the program the tracee process executes
 type Binary struct {
-	dwarf   *dwarf.Data
+	dwarf *dwarf.Data
+	// TODO: support other binary formats
 	symbols []elf.Symbol
 }
 
