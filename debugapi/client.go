@@ -4,6 +4,7 @@ package debugapi
 type Client interface {
 	LaunchProcess()
 	AttachProcess()
+	DetachProcess()
 	ReadMemory()
 	WriteMemory()
 	ReadRegisters()
