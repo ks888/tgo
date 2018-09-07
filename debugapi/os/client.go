@@ -93,13 +93,27 @@ func (c Client) WriteMemory(pid int, addr uintptr, out []byte) error {
 }
 
 // ReadRegisters reads the registers of the prcoess.
-func (c Client) ReadRegisters(pid int, regs *unix.PtraceRegs) error {
-	return unix.PtraceGetRegs(pid, regs)
+func (c Client) ReadRegisters(pid int, regs *debugapi.Registers) error {
+	var rawRegs unix.PtraceRegs
+	if err := unix.PtraceGetRegs(pid, &rawRegs); err != nil {
+		return err
+	}
+
+	regs.Rip = rawRegs.Rip
+	regs.Rsp = rawRegs.Rsp
+	return nil
 }
 
 // WriteRegisters change the registers of the prcoess.
-func (c Client) WriteRegisters(pid int, regs *unix.PtraceRegs) error {
-	return unix.PtraceSetRegs(pid, regs)
+func (c Client) WriteRegisters(pid int, regs *debugapi.Registers) error {
+	var rawRegs unix.PtraceRegs
+	if err := unix.PtraceGetRegs(pid, &rawRegs); err != nil {
+		return err
+	}
+
+	rawRegs.Rip = regs.Rip
+	rawRegs.Rsp = regs.Rsp
+	return unix.PtraceSetRegs(pid, &rawRegs)
 }
 
 // ContinueAndWait restart the list of processes and waits until an event happens.

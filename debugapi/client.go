@@ -1,18 +1,5 @@
 package debugapi
 
-// Client is the wrapper to transparently call the debug api which depends on the underlying OS and user's preference.
-type Client interface {
-	LaunchProcess()
-	AttachProcess()
-	DetachProcess()
-	ReadMemory()
-	WriteMemory()
-	ReadRegisters()
-	WriteRegisters()
-	ContinueAndWait()
-	StepAndWait()
-}
-
 // EventType represents the type of the event.
 type EventType int
 
@@ -34,4 +21,10 @@ const (
 type Event struct {
 	Type EventType
 	Data int
+}
+
+// Registers represents the target's registers.
+type Registers struct {
+	Rip uint64
+	Rsp uint64
 }
