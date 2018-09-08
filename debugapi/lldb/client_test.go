@@ -2,7 +2,6 @@ package lldb
 
 import (
 	"net"
-	"reflect"
 	"testing"
 
 	"github.com/ks888/tgo/debugapi"
@@ -73,6 +72,45 @@ func TestWriteRegisters(t *testing.T) {
 	if actualRegs.Rsp != 0x2 {
 		t.Errorf("wrong rsp: %x", actualRegs.Rsp)
 	}
+}
+
+func TestReadMemory(t *testing.T) {
+	client := NewClient()
+	tid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	out := make([]byte, 2)
+	err = client.ReadMemory(tid, beginTextSection, out)
+	if err != nil {
+		t.Fatalf("failed to read memory: %v", err)
+	}
+
+	if out[0] != 0xcf || out[1] != 0xfa {
+		t.Errorf("wrong memory: %v", out)
+	}
+}
+
+func TestWriteMemory(t *testing.T) {
+	client := NewClient()
+	tid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	data := []byte{0x1, 0x2, 0x3, 0x4}
+	err = client.WriteMemory(tid, beginTextSection, data)
+	if err != nil {
+		t.Fatalf("failed to write memory: %v", err)
+	}
+
+	actual := make([]byte, 4)
+	_ = client.ReadMemory(tid, beginTextSection, actual)
+	if actual[0] != 0x1 || actual[1] != 0x2 || actual[2] != 0x3 || actual[3] != 0x4 {
+		t.Errorf("wrong memory: %v", actual)
+	}
+
 }
 
 func TestSetNoAckMode(t *testing.T) {
@@ -373,39 +411,6 @@ func TestVerifyPacket(t *testing.T) {
 		} else if !test.expectError && actual != nil {
 			t.Errorf("[%d] error returned: %v", i, actual)
 		}
-	}
-}
-
-func TestHexToBytes(t *testing.T) {
-	for i, test := range []struct {
-		data     string
-		expected []byte
-	}{
-		{data: "aa", expected: []byte{0xaa}},
-		{data: "aabb", expected: []byte{0xaa, 0xbb}},
-		{data: "", expected: nil},
-	} {
-		actual, err := hexToBytes(test.data)
-		if err != nil {
-			t.Fatalf("error returned: %v", err)
-		}
-		if !reflect.DeepEqual(actual, test.expected) {
-			t.Errorf("[%d] failed to decode hex array: %v, %v", i, actual, test.expected)
-		}
-	}
-}
-
-func TestHexToBytes_NotHexArray(t *testing.T) {
-	_, err := hexToBytes("zz")
-	if err == nil {
-		t.Fatalf("error not returned: %v", err)
-	}
-}
-
-func TestHexToBytes_TooShortArray(t *testing.T) {
-	_, err := hexToBytes("z")
-	if err == nil {
-		t.Fatalf("error not returned: %v", err)
 	}
 }
 

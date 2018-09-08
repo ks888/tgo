@@ -93,15 +93,15 @@ func (c Client) WriteMemory(pid int, addr uintptr, out []byte) error {
 }
 
 // ReadRegisters reads the registers of the prcoess.
-func (c Client) ReadRegisters(pid int, regs *debugapi.Registers) error {
+func (c Client) ReadRegisters(pid int) (regs debugapi.Registers, err error) {
 	var rawRegs unix.PtraceRegs
-	if err := unix.PtraceGetRegs(pid, &rawRegs); err != nil {
-		return err
+	if err = unix.PtraceGetRegs(pid, &rawRegs); err != nil {
+		return regs, err
 	}
 
 	regs.Rip = rawRegs.Rip
 	regs.Rsp = rawRegs.Rsp
-	return nil
+	return regs, nil
 }
 
 // WriteRegisters change the registers of the prcoess.

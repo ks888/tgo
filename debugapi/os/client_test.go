@@ -201,8 +201,7 @@ func TestReadRegisters(t *testing.T) {
 	pid, _ := client.LaunchProcess(infloopProgram)
 	defer terminateProcess(pid)
 
-	var regs debugapi.Registers
-	err := client.ReadRegisters(pid, &regs)
+	regs, err := client.ReadRegisters(pid)
 	if err != nil {
 		t.Fatalf("failed to read registers (pid: %d): %v", pid, err)
 	}
@@ -217,9 +216,7 @@ func TestWriteRegisters(t *testing.T) {
 	pid, _ := client.LaunchProcess(infloopProgram)
 	defer terminateProcess(pid)
 
-	var regs debugapi.Registers
-	_ = client.ReadRegisters(pid, &regs)
-
+	regs, _ := client.ReadRegisters(pid)
 	regs.Rip = uint64(addrTextSection)
 	err := client.WriteRegisters(pid, &regs)
 	if err != nil {

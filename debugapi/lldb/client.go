@@ -130,6 +130,44 @@ func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
 	return c.receiveAndCheck()
 }
 
+// ReadMemory reads the specified memory region.
+func (c *Client) ReadMemory(tid int, addr uintptr, out []byte) error {
+	command := fmt.Sprintf("m%x,%x", addr, len(out))
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < len(data); i += 2 {
+		value, err := strconv.ParseUint(data[i:i+2], 16, 8)
+		if err != nil {
+			return err
+		}
+
+		out[i/2] = uint8(value)
+	}
+
+	return nil
+}
+
+// WriteMemory write the data to the specified region
+func (c *Client) WriteMemory(tid int, addr uintptr, data []byte) error {
+	dataInHex := ""
+	for _, b := range data {
+		dataInHex += fmt.Sprintf("%02x", b)
+	}
+	command := fmt.Sprintf("M%x,%x:%s", addr, len(data), dataInHex)
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	return c.receiveAndCheck()
+}
+
 func (c *Client) waitConnectOrExit(listener net.Listener, cmd *exec.Cmd) (net.Conn, error) {
 	waitCh := make(chan error)
 	go func(ch chan error) {
@@ -390,24 +428,6 @@ func verifyPacket(packet string) error {
 
 func hexToUint64(hex string) (uint64, error) {
 	return strconv.ParseUint(hex, 16, 64)
-}
-
-func hexToBytes(hex string) ([]byte, error) {
-	if len(hex)%2 != 0 {
-		return nil, fmt.Errorf("invalid data: %s", hex)
-	}
-
-	var values []byte
-	for i := 0; i < len(hex); i += 2 {
-		value, err := strconv.ParseUint(hex[i:i+2], 16, 8)
-		if err != nil {
-			return nil, err
-		}
-
-		values = append(values, uint8(value))
-	}
-
-	return values, nil
 }
 
 func calcChecksum(buff []byte) uint8 {
