@@ -64,8 +64,6 @@ func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
 		return debugapi.Registers{}, err
 	}
 
-	// TODO: handle data starts with 'E'
-
 	return c.parseRegisterData(data)
 }
 
@@ -75,7 +73,13 @@ func (c *Client) readRegisters(tid int) (string, error) {
 		return "", err
 	}
 
-	return c.receive()
+	data, err := c.receive()
+	if err != nil {
+		return "", err
+	} else if strings.HasPrefix(data, "E") {
+		return data, fmt.Errorf("error response: %s", data)
+	}
+	return data, nil
 }
 
 func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
@@ -140,6 +144,8 @@ func (c *Client) ReadMemory(tid int, addr uintptr, out []byte) error {
 	data, err := c.receive()
 	if err != nil {
 		return err
+	} else if strings.HasPrefix(data, "E") {
+		return fmt.Errorf("error response: %s", data)
 	}
 
 	for i := 0; i < len(data); i += 2 {
@@ -276,7 +282,7 @@ func (c *Client) qRegisterInfo(registerID int) (registerMetadata, error) {
 		if data == "E45" {
 			return registerMetadata{}, errEndOfList
 		}
-		return registerMetadata{}, fmt.Errorf("unknown error code: %s", data)
+		return registerMetadata{}, fmt.Errorf("error response: %s", data)
 	}
 
 	return c.parseRegisterMetaData(registerID, data)

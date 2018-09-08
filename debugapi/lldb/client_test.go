@@ -13,7 +13,8 @@ var (
 	mainAddr         uintptr = 0x1051430
 )
 
-// TODO: terminate process
+// The debugserver exits when the connection is closed.
+// So do not need to kill the process here.
 
 func TestLaunchProcess(t *testing.T) {
 	client := NewClient()
