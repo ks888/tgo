@@ -59,14 +59,32 @@ func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
 
 // ReadRegisters reads the target tid's registers.
 func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
+	command := fmt.Sprintf("g;thread:%x;", tid)
+	if err := c.send(command); err != nil {
+		return debugapi.Registers{}, err
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return debugapi.Registers{}, err
+	}
+
+	// TODO: handle data starts with 'E'
+
+	return c.parseRegisterData(data)
+}
+
+func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
 	var regs debugapi.Registers
 	for _, metadata := range c.registerMetadataList {
+		rawValue := data[metadata.offset*2 : (metadata.offset+metadata.size)*2]
+
 		var err error
 		switch metadata.name {
 		case "rip":
-			regs.Rip, err = c.readRegister(tid, metadata.id)
+			regs.Rip, err = hexToUint64(rawValue)
 		case "rsp":
-			regs.Rsp, err = c.readRegister(tid, metadata.id)
+			regs.Rsp, err = hexToUint64(rawValue)
 		}
 		if err != nil {
 			return debugapi.Registers{}, err
@@ -76,47 +94,10 @@ func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
 	return regs, nil
 }
 
-func (c *Client) readRegister(tid int, registerID int) (uint64, error) {
-	command := fmt.Sprintf("p%x;thread:%x;", registerID, tid)
-	if err := c.send(command); err != nil {
-		return 0, err
-	}
-
-	data, err := c.receive()
-	if err != nil {
-		return 0, err
-	}
-	// TODO: handle data starts with 'E'
-
-	return hexToUint64(data)
-}
-
 // WriteRegisters updates the registers' value.
-func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
-	for _, metadata := range c.registerMetadataList {
-		var err error
-		switch metadata.name {
-		case "rip":
-			err = c.writeRegister(tid, metadata.id, regs.Rip)
-		case "rsp":
-			err = c.writeRegister(tid, metadata.id, regs.Rsp)
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (c *Client) writeRegister(tid int, registerID int, value uint64) error {
-	command := fmt.Sprintf("P%x=%x;thread:%x;", registerID, value, tid)
-	if err := c.send(command); err != nil {
-		return err
-	}
-
-	return c.receiveAndCheck()
-}
+// func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
+// 	return nil
+// }
 
 func (c *Client) waitConnectOrExit(listener net.Listener, cmd *exec.Cmd) (net.Conn, error) {
 	waitCh := make(chan error)
