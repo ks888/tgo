@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,76 @@ type Client struct {
 // NewClient returns the new debug api client which depends on OS API.
 func NewClient() *Client {
 	return &Client{buffer: make([]byte, maxPacketSize)}
+}
+
+// LaunchProcess lets the debugserver launch the new prcoess.
+func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
+	listener, err := net.Listen("tcp", "localhost:")
+	if err != nil {
+		return 0, err
+	}
+
+	debugServerArgs := []string{"-F", "-R", listener.Addr().String(), "--", name}
+	debugServerArgs = append(debugServerArgs, arg...)
+	cmd := exec.Command(debugServerPath, debugServerArgs...)
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+
+	c.conn, err = c.waitConnectOrExit(listener, cmd)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := c.initialize(); err != nil {
+		return 0, err
+	}
+
+	return c.firstTid()
+}
+
+func (c *Client) waitConnectOrExit(listener net.Listener, cmd *exec.Cmd) (net.Conn, error) {
+	waitCh := make(chan error)
+	go func(ch chan error) {
+		ch <- cmd.Wait()
+	}(waitCh)
+
+	connCh := make(chan net.Conn)
+	go func(ch chan net.Conn) {
+		conn, err := listener.Accept()
+		if err != nil {
+			connCh <- nil
+		}
+		connCh <- conn
+	}(connCh)
+
+	select {
+	case <-waitCh:
+		return nil, errors.New("the command exits immediately")
+	case conn := <-connCh:
+		if conn == nil {
+			return nil, errors.New("failed to accept the connection")
+		}
+		return conn, nil
+	}
+}
+
+func (c *Client) initialize() error {
+	if err := c.setNoAckMode(); err != nil {
+		return err
+	}
+
+	if err := c.qSupported(); err != nil {
+		return err
+	}
+
+	var err error
+	c.registerMetadataList, err = c.collectRegisterMetadata()
+	if err != nil {
+		return err
+	}
+
+	return c.qListThreadsInStopReply()
 }
 
 func (c *Client) setNoAckMode() error {
@@ -167,6 +238,15 @@ func (c *Client) qListThreadsInStopReply() error {
 	}
 
 	return nil
+}
+
+func (c *Client) firstTid() (int, error) {
+	tidInHex, err := c.qfThreadInfo()
+	if err != nil {
+		return 0, err
+	}
+	tid, err := hexToUint64(tidInHex)
+	return int(tid), err
 }
 
 func (c *Client) qfThreadInfo() (string, error) {

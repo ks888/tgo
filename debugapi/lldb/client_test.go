@@ -14,6 +14,25 @@ var (
 
 // TODO: terminate process
 
+func TestLaunchProcess(t *testing.T) {
+	client := NewClient()
+	tid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	if tid == 0 {
+		t.Errorf("invalid tid: %d", tid)
+	}
+}
+
+func TestLaunchProcess_ProgramNotExist(t *testing.T) {
+	client := NewClient()
+	_, err := client.LaunchProcess("notexist")
+	if err == nil {
+		t.Fatalf("error not returned")
+	}
+}
+
 func TestSetNoAckMode(t *testing.T) {
 	connForReceive, connForSend := net.Pipe()
 
