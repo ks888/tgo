@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/ks888/tgo/debugapi"
 )
@@ -12,15 +13,16 @@ import (
 const debugServerPath = "/Library/Developer/CommandLineTools/Library/PrivateFrameworks/LLDB.framework/Versions/A/Resources/debugserver"
 
 // Assumes the packet size is not larger than this.
-// TODO: use the PacketSize the qSupported query tells us.
 const maxPacketSize = 256
 
 // Client is the debug api client which depends on lldb's debugserver.
+// See the gdb's doc for the reference: https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html
+// Some commands use the lldb extension: https://github.com/llvm-mirror/lldb/blob/master/docs/lldb-gdb-remote.txt
 type Client struct {
-	buildRegisterList func(rawData []byte) (*debugapi.Registers, error)
-	conn              net.Conn
-	buffer            []byte
-	noAckMode         bool
+	registerMetadataList []registerMetadata
+	conn                 net.Conn
+	buffer               []byte
+	noAckMode            bool
 }
 
 // NewClient returns the new debug api client which depends on OS API.
@@ -42,6 +44,145 @@ func (c *Client) setNoAckMode() error {
 
 	c.noAckMode = true
 	return nil
+}
+
+func (c *Client) qSupported() error {
+	var supportedFeatures = []string{"swbreak+", "hwbreak+", "no-resumed+"}
+	command := fmt.Sprintf("qSupported:%s", strings.Join(supportedFeatures, ";"))
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	// TODO: adjust the buffer size so that it doesn't exceed the PacketSize in the response.
+	_, err := c.receive()
+	return err
+}
+
+var errEndOfList = errors.New("the end of list")
+
+type registerMetadata struct {
+	name         string
+	offset, size int
+}
+
+func (c *Client) collectRegisterMetadata() ([]registerMetadata, error) {
+	var regs []registerMetadata
+	for i := 0; ; i++ {
+		reg, err := c.qRegisterInfo(i)
+		if err != nil {
+			if err == errEndOfList {
+				break
+			}
+			return nil, err
+		}
+		regs = append(regs, reg)
+	}
+
+	return regs, nil
+}
+
+func (c *Client) qRegisterInfo(registerID int) (registerMetadata, error) {
+	command := fmt.Sprintf("qRegisterInfo%x", registerID)
+	if err := c.send(command); err != nil {
+		return registerMetadata{}, err
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return registerMetadata{}, err
+	}
+
+	if strings.HasPrefix(data, "E") {
+		if data == "E45" {
+			return registerMetadata{}, errEndOfList
+		}
+		return registerMetadata{}, fmt.Errorf("unknown error code: %s", data)
+	}
+
+	return c.parseRegisterMetaData(data)
+}
+
+func (c *Client) parseRegisterMetaData(data string) (registerMetadata, error) {
+	var reg registerMetadata
+	for _, chunk := range strings.Split(data, ";") {
+		keyValue := strings.SplitN(chunk, ":", 2)
+		if len(keyValue) < 2 {
+			continue
+		}
+
+		key, value := keyValue[0], keyValue[1]
+		if key == "name" {
+			reg.name = value
+
+		} else if key == "bitsize" {
+			num, err := strconv.Atoi(value)
+			if err != nil {
+				return registerMetadata{}, err
+			}
+			reg.size = num / 8
+
+		} else if key == "offset" {
+			num, err := strconv.Atoi(value)
+			if err != nil {
+				return registerMetadata{}, err
+			}
+
+			reg.offset = num
+		}
+	}
+
+	return reg, nil
+}
+
+func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
+	var regs debugapi.Registers
+	for _, metadata := range c.registerMetadataList {
+		rawValue := data[metadata.offset*2 : (metadata.offset+metadata.size)*2]
+		value, err := hexToUint64(rawValue)
+		if err != nil {
+			return debugapi.Registers{}, err
+		}
+
+		switch metadata.name {
+		case "rip":
+			regs.Rip = value
+		case "rsp":
+			regs.Rsp = value
+		}
+	}
+
+	return regs, nil
+}
+
+func (c *Client) qListThreadsInStopReply() error {
+	const command = "QListThreadsInStopReply"
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	if data, err := c.receive(); err != nil {
+		return err
+	} else if data != "OK" {
+		return fmt.Errorf("the error response is returned: %s", data)
+	}
+
+	return nil
+}
+
+func (c *Client) qfThreadInfo() (string, error) {
+	const command = "qfThreadInfo"
+	if err := c.send(command); err != nil {
+		return "", err
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return "", err
+	} else if !strings.HasPrefix(data, "m") {
+		return "", fmt.Errorf("unexpected response: %s", data)
+	}
+
+	return data[1:len(data)], nil
 }
 
 func (c *Client) send(command string) error {
@@ -66,14 +207,15 @@ func (c *Client) receive() (string, error) {
 	}
 
 	packet := string(c.buffer[0:n])
-	if err := verifyPacket(packet); err != nil {
-		return "", err
-	}
-
 	data := string(packet[1 : n-3])
 	if !c.noAckMode {
+		if err := verifyPacket(packet); err != nil {
+			return "", err
+		}
+
 		return data, c.sendAck()
 	}
+
 	return data, nil
 }
 
@@ -111,15 +253,18 @@ func verifyPacket(packet string) error {
 	return nil
 }
 
-func decodeHexArray(hexArray string) ([]byte, error) {
-	if len(hexArray)%2 != 0 {
-		return nil, fmt.Errorf("invalid data: %s", hexArray)
+func hexToUint64(hex string) (uint64, error) {
+	return strconv.ParseUint(hex, 16, 64)
+}
+
+func hexToBytes(hex string) ([]byte, error) {
+	if len(hex)%2 != 0 {
+		return nil, fmt.Errorf("invalid data: %s", hex)
 	}
 
 	var values []byte
-	for i := 0; i < len(hexArray); i += 2 {
-		hex := hexArray[i : i+2]
-		value, err := strconv.ParseUint(hex, 16, 8)
+	for i := 0; i < len(hex); i += 2 {
+		value, err := strconv.ParseUint(hex[i:i+2], 16, 8)
 		if err != nil {
 			return nil, err
 		}
