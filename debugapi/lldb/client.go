@@ -14,7 +14,7 @@ import (
 const debugServerPath = "/Library/Developer/CommandLineTools/Library/PrivateFrameworks/LLDB.framework/Versions/A/Resources/debugserver"
 
 // Assumes the packet size is not larger than this.
-const maxPacketSize = 256
+const maxPacketSize = 4096
 
 // Client is the debug api client which depends on lldb's debugserver.
 // See the gdb's doc for the reference: https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html
@@ -55,6 +55,67 @@ func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
 	}
 
 	return c.firstTid()
+}
+
+// ReadRegisters reads the target tid's registers.
+func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
+	var regs debugapi.Registers
+	for _, metadata := range c.registerMetadataList {
+		var err error
+		switch metadata.name {
+		case "rip":
+			regs.Rip, err = c.readRegister(tid, metadata.id)
+		case "rsp":
+			regs.Rsp, err = c.readRegister(tid, metadata.id)
+		}
+		if err != nil {
+			return debugapi.Registers{}, err
+		}
+	}
+
+	return regs, nil
+}
+
+func (c *Client) readRegister(tid int, registerID int) (uint64, error) {
+	command := fmt.Sprintf("p%x;thread:%x;", registerID, tid)
+	if err := c.send(command); err != nil {
+		return 0, err
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return 0, err
+	}
+	// TODO: handle data starts with 'E'
+
+	return hexToUint64(data)
+}
+
+// WriteRegisters updates the registers' value.
+func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
+	for _, metadata := range c.registerMetadataList {
+		var err error
+		switch metadata.name {
+		case "rip":
+			err = c.writeRegister(tid, metadata.id, regs.Rip)
+		case "rsp":
+			err = c.writeRegister(tid, metadata.id, regs.Rsp)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) writeRegister(tid int, registerID int, value uint64) error {
+	command := fmt.Sprintf("P%x=%x;thread:%x;", registerID, value, tid)
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	return c.receiveAndCheck()
 }
 
 func (c *Client) waitConnectOrExit(listener net.Listener, cmd *exec.Cmd) (net.Conn, error) {
@@ -107,10 +168,8 @@ func (c *Client) setNoAckMode() error {
 		return err
 	}
 
-	if data, err := c.receive(); err != nil {
+	if err := c.receiveAndCheck(); err != nil {
 		return err
-	} else if data != "OK" {
-		return fmt.Errorf("the error response is returned: %s", data)
 	}
 
 	c.noAckMode = true
@@ -132,8 +191,8 @@ func (c *Client) qSupported() error {
 var errEndOfList = errors.New("the end of list")
 
 type registerMetadata struct {
-	name         string
-	offset, size int
+	name             string
+	id, offset, size int
 }
 
 func (c *Client) collectRegisterMetadata() ([]registerMetadata, error) {
@@ -170,11 +229,11 @@ func (c *Client) qRegisterInfo(registerID int) (registerMetadata, error) {
 		return registerMetadata{}, fmt.Errorf("unknown error code: %s", data)
 	}
 
-	return c.parseRegisterMetaData(data)
+	return c.parseRegisterMetaData(registerID, data)
 }
 
-func (c *Client) parseRegisterMetaData(data string) (registerMetadata, error) {
-	var reg registerMetadata
+func (c *Client) parseRegisterMetaData(registerID int, data string) (registerMetadata, error) {
+	reg := registerMetadata{id: registerID}
 	for _, chunk := range strings.Split(data, ";") {
 		keyValue := strings.SplitN(chunk, ":", 2)
 		if len(keyValue) < 2 {
@@ -205,39 +264,13 @@ func (c *Client) parseRegisterMetaData(data string) (registerMetadata, error) {
 	return reg, nil
 }
 
-func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
-	var regs debugapi.Registers
-	for _, metadata := range c.registerMetadataList {
-		rawValue := data[metadata.offset*2 : (metadata.offset+metadata.size)*2]
-		value, err := hexToUint64(rawValue)
-		if err != nil {
-			return debugapi.Registers{}, err
-		}
-
-		switch metadata.name {
-		case "rip":
-			regs.Rip = value
-		case "rsp":
-			regs.Rsp = value
-		}
-	}
-
-	return regs, nil
-}
-
 func (c *Client) qListThreadsInStopReply() error {
 	const command = "QListThreadsInStopReply"
 	if err := c.send(command); err != nil {
 		return err
 	}
 
-	if data, err := c.receive(); err != nil {
-		return err
-	} else if data != "OK" {
-		return fmt.Errorf("the error response is returned: %s", data)
-	}
-
-	return nil
+	return c.receiveAndCheck()
 }
 
 func (c *Client) firstTid() (int, error) {
@@ -277,6 +310,16 @@ func (c *Client) send(command string) error {
 	if !c.noAckMode {
 		return c.receiveAck()
 	}
+	return nil
+}
+
+func (c *Client) receiveAndCheck() error {
+	if data, err := c.receive(); err != nil {
+		return err
+	} else if data != "OK" {
+		return fmt.Errorf("the error response is returned: %s", data)
+	}
+
 	return nil
 }
 

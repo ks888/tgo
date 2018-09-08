@@ -4,6 +4,8 @@ import (
 	"net"
 	"reflect"
 	"testing"
+
+	"github.com/ks888/tgo/debugapi"
 )
 
 var (
@@ -30,6 +32,46 @@ func TestLaunchProcess_ProgramNotExist(t *testing.T) {
 	_, err := client.LaunchProcess("notexist")
 	if err == nil {
 		t.Fatalf("error not returned")
+	}
+}
+
+func TestReadRegisters(t *testing.T) {
+	client := NewClient()
+	tid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	regs, err := client.ReadRegisters(tid)
+	if err != nil {
+		t.Fatalf("failed to read registers: %v", err)
+	}
+	if regs.Rip == 0 {
+		t.Fatalf("empty rip: %x", regs.Rip)
+	}
+	if regs.Rsp == 0 {
+		t.Fatalf("empty rsp: %x", regs.Rsp)
+	}
+}
+
+func TestWriteRegisters(t *testing.T) {
+	client := NewClient()
+	tid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	regs := debugapi.Registers{Rip: 0x1, Rsp: 0x2}
+	if err := client.WriteRegisters(tid, regs); err != nil {
+		t.Fatalf("failed to write registers: %v", err)
+	}
+
+	actualRegs, _ := client.ReadRegisters(tid)
+	if actualRegs.Rip != 0x1 {
+		t.Errorf("wrong rip: %x", actualRegs.Rip)
+	}
+	if actualRegs.Rsp != 0x2 {
+		t.Errorf("wrong rsp: %x", actualRegs.Rsp)
 	}
 }
 
@@ -201,25 +243,6 @@ func TestQRegisterInfo_EndOfRegisterList(t *testing.T) {
 	}
 
 	<-sendDone
-}
-
-func TestParseRegisterData(t *testing.T) {
-	client := newTestClient(nil, true)
-	client.registerMetadataList = []registerMetadata{
-		registerMetadata{name: "rip", offset: 0, size: 8},
-		registerMetadata{name: "rsp", offset: 8, size: 8},
-	}
-
-	registers, err := client.parseRegisterData("00000000000000010000000000000002")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if registers.Rip != 0x1 {
-		t.Errorf("wrong rip: %x", registers.Rip)
-	}
-	if registers.Rsp != 0x2 {
-		t.Errorf("wrong rsp: %x", registers.Rsp)
-	}
 }
 
 func TestQListThreadsInStopReply(t *testing.T) {
