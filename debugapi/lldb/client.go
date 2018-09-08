@@ -59,12 +59,7 @@ func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
 
 // ReadRegisters reads the target tid's registers.
 func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
-	command := fmt.Sprintf("g;thread:%x;", tid)
-	if err := c.send(command); err != nil {
-		return debugapi.Registers{}, err
-	}
-
-	data, err := c.receive()
+	data, err := c.readRegisters(tid)
 	if err != nil {
 		return debugapi.Registers{}, err
 	}
@@ -72,6 +67,15 @@ func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
 	// TODO: handle data starts with 'E'
 
 	return c.parseRegisterData(data)
+}
+
+func (c *Client) readRegisters(tid int) (string, error) {
+	command := fmt.Sprintf("g;thread:%x;", tid)
+	if err := c.send(command); err != nil {
+		return "", err
+	}
+
+	return c.receive()
 }
 
 func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
@@ -95,9 +99,36 @@ func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
 }
 
 // WriteRegisters updates the registers' value.
-// func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
-// 	return nil
-// }
+// The 'P' command is not used here due to the bug explained here: https://github.com/llvm-mirror/lldb/commit/d8d7a40ca5377aa777e3840f3e9b6a63c6b09445
+func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
+	data, err := c.readRegisters(tid)
+	if err != nil {
+		return err
+	}
+
+	for _, metadata := range c.registerMetadataList {
+		prefix := data[0 : metadata.offset*2]
+		suffix := data[(metadata.offset+metadata.size)*2 : len(data)]
+
+		var err error
+		switch metadata.name {
+		case "rip":
+			data = fmt.Sprintf("%s%016x%s", prefix, regs.Rip, suffix)
+		case "rsp":
+			data = fmt.Sprintf("%s%016x%s", prefix, regs.Rsp, suffix)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	command := fmt.Sprintf("G%s;thread:%x;", data, tid)
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	return c.receiveAndCheck()
+}
 
 func (c *Client) waitConnectOrExit(listener net.Listener, cmd *exec.Cmd) (net.Conn, error) {
 	waitCh := make(chan error)
@@ -280,7 +311,7 @@ func (c *Client) qfThreadInfo() (string, error) {
 }
 
 func (c *Client) send(command string) error {
-	packet := fmt.Sprintf("$%s#%x", command, calcChecksum([]byte(command)))
+	packet := fmt.Sprintf("$%s#%02x", command, calcChecksum([]byte(command)))
 
 	if n, err := c.conn.Write([]byte(packet)); err != nil {
 		return err

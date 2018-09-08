@@ -4,6 +4,8 @@ import (
 	"net"
 	"reflect"
 	"testing"
+
+	"github.com/ks888/tgo/debugapi"
 )
 
 var (
@@ -52,26 +54,26 @@ func TestReadRegisters(t *testing.T) {
 	}
 }
 
-// func TestWriteRegisters(t *testing.T) {
-// 	client := NewClient()
-// 	tid, err := client.LaunchProcess(infloopProgram)
-// 	if err != nil {
-// 		t.Fatalf("failed to launch process: %v", err)
-// 	}
+func TestWriteRegisters(t *testing.T) {
+	client := NewClient()
+	tid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
 
-// 	regs := debugapi.Registers{Rip: 0x1, Rsp: 0x2}
-// 	if err := client.WriteRegisters(tid, regs); err != nil {
-// 		t.Fatalf("failed to write registers: %v", err)
-// 	}
+	regs := debugapi.Registers{Rip: 0x1, Rsp: 0x2}
+	if err := client.WriteRegisters(tid, regs); err != nil {
+		t.Fatalf("failed to write registers: %v", err)
+	}
 
-// 	actualRegs, _ := client.ReadRegisters(tid)
-// 	if actualRegs.Rip != 0x1 {
-// 		t.Errorf("wrong rip: %x", actualRegs.Rip)
-// 	}
-// 	if actualRegs.Rsp != 0x2 {
-// 		t.Errorf("wrong rsp: %x", actualRegs.Rsp)
-// 	}
-// }
+	actualRegs, _ := client.ReadRegisters(tid)
+	if actualRegs.Rip != 0x1 {
+		t.Errorf("wrong rip: %x", actualRegs.Rip)
+	}
+	if actualRegs.Rsp != 0x2 {
+		t.Errorf("wrong rsp: %x", actualRegs.Rsp)
+	}
+}
 
 func TestSetNoAckMode(t *testing.T) {
 	connForReceive, connForSend := net.Pipe()
