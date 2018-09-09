@@ -7,8 +7,10 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/ks888/tgo/debugapi"
+	"golang.org/x/sys/unix"
 )
 
 const debugServerPath = "/Library/Developer/CommandLineTools/Library/PrivateFrameworks/LLDB.framework/Versions/A/Resources/debugserver"
@@ -54,7 +56,7 @@ func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
 		return 0, err
 	}
 
-	return c.firstTid()
+	return cmd.Process.Pid, nil
 }
 
 // ReadRegisters reads the target tid's registers.
@@ -172,6 +174,68 @@ func (c *Client) WriteMemory(tid int, addr uintptr, data []byte) error {
 	}
 
 	return c.receiveAndCheck()
+}
+
+func (c *Client) ContinueAndWait() (int, debugapi.Event, error) {
+	const command = "vCont;c"
+	if err := c.send(command); err != nil {
+		return 0, debugapi.Event{}, fmt.Errorf("send error: %v", err)
+	}
+
+	data, err := c.receive()
+	fmt.Println(data)
+	if err != nil {
+		return 0, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
+	}
+
+	return c.handleStopReply(data)
+}
+
+func (c *Client) handleStopReply(data string) (int, debugapi.Event, error) {
+	switch data[0] {
+	case 'T':
+		return c.handleTPacket(data)
+	case 'O':
+		// console output
+		return c.ContinueAndWait()
+	case 'W':
+		return c.handleWPacket(data)
+	}
+
+	return 0, debugapi.Event{}, fmt.Errorf("unknown packet type: %s", data)
+}
+
+func (c *Client) handleTPacket(data string) (int, debugapi.Event, error) {
+	signalNumber, err := hexToUint64(data[1:3])
+	if err != nil {
+		return 0, debugapi.Event{}, err
+	}
+
+	var threadID int
+	for _, kvInStr := range strings.Split(data[3:len(data)-1], ";") {
+		kvArr := strings.Split(kvInStr, ":")
+		key, value := kvArr[0], kvArr[1]
+		if key == "thread" {
+			valueInNum, err := hexToUint64(value)
+			if err != nil {
+				return 0, debugapi.Event{}, err
+			}
+			threadID = int(valueInNum)
+			break
+		}
+	}
+
+	switch syscall.Signal(signalNumber) {
+	case unix.SIGTRAP:
+		return threadID, debugapi.Event{Type: debugapi.EventTypeTrapped}, nil
+	}
+
+	return 0, debugapi.Event{}, nil
+}
+
+func (c *Client) handleWPacket(data string) (int, debugapi.Event, error) {
+	exitStatus, err := hexToUint64(data[1:len(data)])
+	return 0, debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
 }
 
 func (c *Client) waitConnectOrExit(listener net.Listener, cmd *exec.Cmd) (net.Conn, error) {

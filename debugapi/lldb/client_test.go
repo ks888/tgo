@@ -2,15 +2,22 @@ package lldb
 
 import (
 	"net"
+	"os"
+	"os/exec"
+	"strconv"
+	"syscall"
 	"testing"
 
 	"github.com/ks888/tgo/debugapi"
 )
 
 var (
-	infloopProgram           = "testdata/infloop"
-	beginTextSection uintptr = 0x1000000
-	mainAddr         uintptr = 0x1051430
+	helloworldFilename         = "helloworld"
+	helloworldProgram          = "testdata/" + helloworldFilename
+	infloopFilename            = "infloop"
+	infloopProgram             = "testdata/" + infloopFilename
+	beginTextSection   uintptr = 0x1000000
+	mainAddr           uintptr = 0x1051430
 )
 
 // The debugserver exits when the connection is closed.
@@ -112,6 +119,90 @@ func TestWriteMemory(t *testing.T) {
 		t.Errorf("wrong memory: %v", actual)
 	}
 
+}
+
+func TestContinueAndWait_Trapped(t *testing.T) {
+	client := NewClient()
+	tid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	out := []byte{0xcc}
+	err = client.WriteMemory(tid, mainAddr, out)
+	if err != nil {
+		t.Fatalf("failed to write memory: %v", err)
+	}
+
+	tid, event, err := client.ContinueAndWait()
+	if err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+	if tid == 0 {
+		t.Errorf("empty tid")
+	}
+	if event != (debugapi.Event{Type: debugapi.EventTypeTrapped}) {
+		t.Errorf("wrong event: %v", event)
+	}
+}
+
+func TestContinueAndWait_Exited(t *testing.T) {
+	client := NewClient()
+	_, err := client.LaunchProcess(helloworldProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	for {
+		_, event, err := client.ContinueAndWait()
+		if err != nil {
+			t.Fatalf("failed to continue and wait: %v", err)
+		}
+		if event == (debugapi.Event{Type: debugapi.EventTypeExited}) {
+			break
+		}
+	}
+}
+
+// support this after the exit event is implemented
+// func TestContinueAndWait_Stopped(t *testing.T) {
+// 	client := NewClient()
+// 	ppid, err := client.LaunchProcess(infloopProgram)
+// 	if err != nil {
+// 		t.Fatalf("failed to launch process: %v", err)
+// 	}
+
+// 	pid, err := findProcessID(infloopFilename, ppid)
+// 	if err != nil {
+// 		t.Fatalf("failed to find process: %v", err)
+// 	}
+
+// 	if err := sendSignal(pid, unix.SIGUSR1); err != nil {
+// 		t.Fatalf("failed to send signal: %v", err)
+// 	}
+
+// 	_, _, err := client.ContinueAndWait()
+// 	if err != nil {
+// 		t.Fatalf("failed to continue and wait: %v", err)
+// 	}
+// }
+
+func findProcessID(progName string, parentPID int) (int, error) {
+	out, err := exec.Command("pgrep", "-P", strconv.Itoa(parentPID), progName).Output()
+	if err != nil {
+		return 0, err
+	}
+
+	return strconv.Atoi(string(out[0 : len(out)-1])) // remove newline
+}
+
+func sendSignal(pid int, signal syscall.Signal) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+
+	return proc.Signal(signal)
 }
 
 func TestSetNoAckMode(t *testing.T) {
