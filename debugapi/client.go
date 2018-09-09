@@ -5,10 +5,8 @@ type EventType int
 
 // TODO: should integrate CoreDump, Exited, Terminated?
 const (
-	// EventTypeCreated event happens when the new thread is created
-	EventTypeCreated EventType = iota
 	// EventTypeTrapped event happens when the process is trapped.
-	EventTypeTrapped
+	EventTypeTrapped EventType = iota
 	// EventTypeCoreDump event happens when the process terminates unexpectedly.
 	EventTypeCoreDump
 	// EventTypeExited event happens when the process exits.

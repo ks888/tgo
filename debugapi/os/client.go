@@ -118,6 +118,8 @@ func (c Client) WriteRegisters(pid int, regs *debugapi.Registers) error {
 
 // ContinueAndWait restart the list of processes and waits until an event happens.
 // Note that an event happens to any children of the current process is reported.
+// TODO: Remove the pidsToContinue args. Instaed, save the waited pid internally and
+//       use that pid when the ContinueAndWait is called next time. That's enough in our case.
 func (c Client) ContinueAndWait(pidsToContinue ...int) (waitedPID int, event debugapi.Event, err error) {
 	return c.continueAndWait(pidsToContinue, 0)
 }
@@ -153,15 +155,15 @@ func (c Client) wait(pid int) (int, debugapi.Event, error) {
 	if status.Stopped() {
 		if status.StopSignal() == unix.SIGTRAP {
 			if status.TrapCause() == unix.PTRACE_EVENT_CLONE {
-				clonedPid, err := c.continueClone(waitedPid)
+				_, err := c.continueClone(waitedPid)
 				if err != nil {
 					return 0, debugapi.Event{}, err
 				}
 
-				event = debugapi.Event{Type: debugapi.EventTypeCreated, Data: clonedPid}
-			} else {
-				event = debugapi.Event{Type: debugapi.EventTypeTrapped}
+				return c.continueAndWait([]int{waitedPid}, 0)
 			}
+
+			event = debugapi.Event{Type: debugapi.EventTypeTrapped}
 		} else {
 			return c.continueAndWait([]int{waitedPid}, int(status.StopSignal()))
 		}

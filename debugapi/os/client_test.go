@@ -136,38 +136,6 @@ func TestDetachProcess(t *testing.T) {
 	}
 }
 
-func TestDetachProcess_DetachChildrenImplicitly(t *testing.T) {
-	client := NewClient()
-	pid, err := client.LaunchProcess(infloopProgram)
-	if err != nil {
-		t.Fatalf("failed to launch process: %v", err)
-	}
-	defer terminateProcess(pid)
-
-	var childPid int
-	for {
-		_, event, err := client.ContinueAndWait(pid)
-		if err != nil {
-			t.Fatalf("failed to continue and wait: %v", err)
-		}
-		if event.Type == debugapi.EventTypeCreated && event.Data != pid {
-			childPid = event.Data
-			break
-		}
-	}
-
-	err = client.DetachProcess(pid)
-	if err != nil {
-		t.Fatalf("failed to detach process: %v", err)
-	}
-
-	// Do some ptrace action for testing
-	_, err = syscall.PtracePeekData(childPid, addrTextSection, []byte{0x0})
-	if err == nil {
-		t.Errorf("error is not returned")
-	}
-}
-
 func TestReadMemory(t *testing.T) {
 	client := NewClient()
 	pid, _ := client.LaunchProcess(infloopProgram)
@@ -258,22 +226,6 @@ func TestContinueAndWait_Exited(t *testing.T) {
 			break
 		}
 		wpid = stoppedPID
-	}
-}
-
-func TestContinueAndWait_ThreadCreated(t *testing.T) {
-	client := NewClient()
-	pid, _ := client.LaunchProcess(helloworldProgram)
-	defer terminateProcess(pid)
-
-	for {
-		_, event, err := client.ContinueAndWait(pid)
-		if err != nil {
-			t.Fatalf("failed to continue and wait: %v", err)
-		}
-		if event.Type == debugapi.EventTypeCreated && event.Data != pid {
-			break
-		}
 	}
 }
 
