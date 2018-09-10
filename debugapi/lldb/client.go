@@ -176,14 +176,24 @@ func (c *Client) WriteMemory(tid int, addr uintptr, data []byte) error {
 	return c.receiveAndCheck()
 }
 
+// ContinueAndWait resumes the list of processes and waits until an event happens.
+// The exited event is reported when the main process exits and not when its threads exit.
 func (c *Client) ContinueAndWait() (int, debugapi.Event, error) {
-	const command = "vCont;c"
+	return c.continueAndWait(0)
+}
+
+func (c *Client) continueAndWait(signalNumber int) (int, debugapi.Event, error) {
+	var command string
+	if signalNumber == 0 {
+		command = "vCont;c"
+	} else {
+		command = fmt.Sprintf("vCont;C%02x", signalNumber)
+	}
 	if err := c.send(command); err != nil {
 		return 0, debugapi.Event{}, fmt.Errorf("send error: %v", err)
 	}
 
 	data, err := c.receive()
-	fmt.Println(data)
 	if err != nil {
 		return 0, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
 	}
@@ -200,6 +210,8 @@ func (c *Client) handleStopReply(data string) (int, debugapi.Event, error) {
 		return c.ContinueAndWait()
 	case 'W':
 		return c.handleWPacket(data)
+	case 'X':
+		return c.handleXPacket(data)
 	}
 
 	return 0, debugapi.Event{}, fmt.Errorf("unknown packet type: %s", data)
@@ -228,14 +240,22 @@ func (c *Client) handleTPacket(data string) (int, debugapi.Event, error) {
 	switch syscall.Signal(signalNumber) {
 	case unix.SIGTRAP:
 		return threadID, debugapi.Event{Type: debugapi.EventTypeTrapped}, nil
+	default:
+		return c.continueAndWait(int(signalNumber))
 	}
-
-	return 0, debugapi.Event{}, nil
 }
 
 func (c *Client) handleWPacket(data string) (int, debugapi.Event, error) {
-	exitStatus, err := hexToUint64(data[1:len(data)])
+	exitStatus, err := hexToUint64(data[1:3])
+	// TODO: set pid.
 	return 0, debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
+}
+
+func (c *Client) handleXPacket(data string) (int, debugapi.Event, error) {
+	signalNumber, err := hexToUint64(data[1:3])
+	// TODO: set pid.
+	// TODO: signalNumber here looks always 0. The number in the description looks correct, so use it.
+	return 0, debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
 }
 
 func (c *Client) waitConnectOrExit(listener net.Listener, cmd *exec.Cmd) (net.Conn, error) {

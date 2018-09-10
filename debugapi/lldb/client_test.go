@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ks888/tgo/debugapi"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -164,28 +165,45 @@ func TestContinueAndWait_Exited(t *testing.T) {
 	}
 }
 
-// support this after the exit event is implemented
-// func TestContinueAndWait_Stopped(t *testing.T) {
-// 	client := NewClient()
-// 	ppid, err := client.LaunchProcess(infloopProgram)
-// 	if err != nil {
-// 		t.Fatalf("failed to launch process: %v", err)
-// 	}
+func TestContinueAndWait_Signaled(t *testing.T) {
+	client := NewClient()
+	ppid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
 
-// 	pid, err := findProcessID(infloopFilename, ppid)
-// 	if err != nil {
-// 		t.Fatalf("failed to find process: %v", err)
-// 	}
+	pid, _ := findProcessID(infloopFilename, ppid)
+	// Note that the lldb does not pass the signals like SIGTERM and SIGINT to the debugee.
+	_ = sendSignal(pid, unix.SIGKILL)
 
-// 	if err := sendSignal(pid, unix.SIGUSR1); err != nil {
-// 		t.Fatalf("failed to send signal: %v", err)
-// 	}
+	_, event, err := client.ContinueAndWait()
+	if err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+	if event != (debugapi.Event{Type: debugapi.EventTypeTerminated}) {
+		t.Fatalf("wrong event: %v", event)
+	}
+}
 
-// 	_, _, err := client.ContinueAndWait()
-// 	if err != nil {
-// 		t.Fatalf("failed to continue and wait: %v", err)
-// 	}
-// }
+func TestContinueAndWait_Stopped(t *testing.T) {
+	client := NewClient()
+	ppid, err := client.LaunchProcess(helloworldProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	pid, _ := findProcessID(helloworldFilename, ppid)
+	_ = sendSignal(pid, unix.SIGUSR1)
+
+	// non-SIGTRAP signal is handled internally.
+	_, event, err := client.ContinueAndWait()
+	if err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+	if event != (debugapi.Event{Type: debugapi.EventTypeExited}) {
+		t.Fatalf("wrong event: %v", event)
+	}
+}
 
 func findProcessID(progName string, parentPID int) (int, error) {
 	out, err := exec.Command("pgrep", "-P", strconv.Itoa(parentPID), progName).Output()

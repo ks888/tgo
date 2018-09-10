@@ -116,7 +116,7 @@ func (c Client) WriteRegisters(pid int, regs *debugapi.Registers) error {
 	return unix.PtraceSetRegs(pid, &rawRegs)
 }
 
-// ContinueAndWait restart the list of processes and waits until an event happens.
+// ContinueAndWait resumes the list of processes and waits until an event happens.
 // Note that an event happens to any children of the current process is reported.
 // TODO: Remove the pidsToContinue args. Instaed, save the waited pid internally and
 //       use that pid when the ContinueAndWait is called next time. That's enough in our case.
