@@ -43,6 +43,32 @@ func TestLaunchProcess_ProgramNotExist(t *testing.T) {
 	}
 }
 
+func TestAttachProcess(t *testing.T) {
+	cmd := exec.Command(infloopProgram)
+	_ = cmd.Start()
+
+	client := NewClient()
+	tid, err := client.AttachProcess(cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	if tid == 0 {
+		t.Errorf("invalid tid: %d", tid)
+	}
+}
+
+func TestAttachProcess_WrongPID(t *testing.T) {
+	client := NewClient()
+	cmd := exec.Command(helloworldProgram)
+	_ = cmd.Run()
+
+	// the program already exits, so the pid is wrong
+	_, err := client.AttachProcess(cmd.Process.Pid)
+	if err == nil {
+		t.Fatalf("error should be returned")
+	}
+}
+
 func TestReadRegisters(t *testing.T) {
 	client := NewClient()
 	tid, err := client.LaunchProcess(infloopProgram)

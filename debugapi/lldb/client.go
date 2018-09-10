@@ -218,11 +218,11 @@ func (c *Client) qListThreadsInStopReply() error {
 }
 
 func (c *Client) firstTid() (int, error) {
-	tidInHex, err := c.qfThreadInfo()
+	tids, err := c.qfThreadInfo()
 	if err != nil {
 		return 0, err
 	}
-	tid, err := hexToUint64(tidInHex, false)
+	tid, err := hexToUint64(strings.Split(tids, ",")[0], false)
 	return int(tid), err
 }
 
@@ -240,6 +240,32 @@ func (c *Client) qfThreadInfo() (string, error) {
 	}
 
 	return data[1:len(data)], nil
+}
+
+// AttachProcess lets the debugserver attach the new prcoess.
+func (c *Client) AttachProcess(pid int) (int, error) {
+	listener, err := net.Listen("tcp", "localhost:")
+	if err != nil {
+		return 0, err
+	}
+
+	debugServerArgs := []string{"-F", "-R", listener.Addr().String(), fmt.Sprintf("--attach=%d", pid)}
+	cmd := exec.Command(debugServerPath, debugServerArgs...)
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+
+	c.conn, err = c.waitConnectOrExit(listener, cmd)
+	if err != nil {
+		return 0, err
+	}
+	c.pid = cmd.Process.Pid
+
+	if err := c.initialize(); err != nil {
+		return 0, err
+	}
+
+	return c.firstTid()
 }
 
 // ReadRegisters reads the target tid's registers.
