@@ -1,6 +1,7 @@
 package lldb
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net"
@@ -22,10 +23,11 @@ const maxPacketSize = 4096
 // See the gdb's doc for the reference: https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html
 // Some commands use the lldb extension: https://github.com/llvm-mirror/lldb/blob/master/docs/lldb-gdb-remote.txt
 type Client struct {
-	registerMetadataList []registerMetadata
 	conn                 net.Conn
-	buffer               []byte
+	pid                  int
 	noAckMode            bool
+	registerMetadataList []registerMetadata
+	buffer               []byte
 }
 
 // NewClient returns the new debug api client which depends on OS API.
@@ -51,211 +53,13 @@ func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	c.pid = cmd.Process.Pid
 
 	if err := c.initialize(); err != nil {
 		return 0, err
 	}
 
-	return cmd.Process.Pid, nil
-}
-
-// ReadRegisters reads the target tid's registers.
-func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
-	data, err := c.readRegisters(tid)
-	if err != nil {
-		return debugapi.Registers{}, err
-	}
-
-	return c.parseRegisterData(data)
-}
-
-func (c *Client) readRegisters(tid int) (string, error) {
-	command := fmt.Sprintf("g;thread:%x;", tid)
-	if err := c.send(command); err != nil {
-		return "", err
-	}
-
-	data, err := c.receive()
-	if err != nil {
-		return "", err
-	} else if strings.HasPrefix(data, "E") {
-		return data, fmt.Errorf("error response: %s", data)
-	}
-	return data, nil
-}
-
-func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
-	var regs debugapi.Registers
-	for _, metadata := range c.registerMetadataList {
-		rawValue := data[metadata.offset*2 : (metadata.offset+metadata.size)*2]
-
-		var err error
-		switch metadata.name {
-		case "rip":
-			regs.Rip, err = hexToUint64(rawValue)
-		case "rsp":
-			regs.Rsp, err = hexToUint64(rawValue)
-		}
-		if err != nil {
-			return debugapi.Registers{}, err
-		}
-	}
-
-	return regs, nil
-}
-
-// WriteRegisters updates the registers' value.
-// The 'P' command is not used here due to the bug explained here: https://github.com/llvm-mirror/lldb/commit/d8d7a40ca5377aa777e3840f3e9b6a63c6b09445
-func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
-	data, err := c.readRegisters(tid)
-	if err != nil {
-		return err
-	}
-
-	for _, metadata := range c.registerMetadataList {
-		prefix := data[0 : metadata.offset*2]
-		suffix := data[(metadata.offset+metadata.size)*2 : len(data)]
-
-		var err error
-		switch metadata.name {
-		case "rip":
-			data = fmt.Sprintf("%s%016x%s", prefix, regs.Rip, suffix)
-		case "rsp":
-			data = fmt.Sprintf("%s%016x%s", prefix, regs.Rsp, suffix)
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	command := fmt.Sprintf("G%s;thread:%x;", data, tid)
-	if err := c.send(command); err != nil {
-		return err
-	}
-
-	return c.receiveAndCheck()
-}
-
-// ReadMemory reads the specified memory region.
-func (c *Client) ReadMemory(tid int, addr uintptr, out []byte) error {
-	command := fmt.Sprintf("m%x,%x", addr, len(out))
-	if err := c.send(command); err != nil {
-		return err
-	}
-
-	data, err := c.receive()
-	if err != nil {
-		return err
-	} else if strings.HasPrefix(data, "E") {
-		return fmt.Errorf("error response: %s", data)
-	}
-
-	for i := 0; i < len(data); i += 2 {
-		value, err := strconv.ParseUint(data[i:i+2], 16, 8)
-		if err != nil {
-			return err
-		}
-
-		out[i/2] = uint8(value)
-	}
-
-	return nil
-}
-
-// WriteMemory write the data to the specified region
-func (c *Client) WriteMemory(tid int, addr uintptr, data []byte) error {
-	dataInHex := ""
-	for _, b := range data {
-		dataInHex += fmt.Sprintf("%02x", b)
-	}
-	command := fmt.Sprintf("M%x,%x:%s", addr, len(data), dataInHex)
-	if err := c.send(command); err != nil {
-		return err
-	}
-
-	return c.receiveAndCheck()
-}
-
-// ContinueAndWait resumes the list of processes and waits until an event happens.
-// The exited event is reported when the main process exits and not when its threads exit.
-func (c *Client) ContinueAndWait() (int, debugapi.Event, error) {
-	return c.continueAndWait(0)
-}
-
-func (c *Client) continueAndWait(signalNumber int) (int, debugapi.Event, error) {
-	var command string
-	if signalNumber == 0 {
-		command = "vCont;c"
-	} else {
-		command = fmt.Sprintf("vCont;C%02x", signalNumber)
-	}
-	if err := c.send(command); err != nil {
-		return 0, debugapi.Event{}, fmt.Errorf("send error: %v", err)
-	}
-
-	data, err := c.receive()
-	if err != nil {
-		return 0, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
-	}
-
-	return c.handleStopReply(data)
-}
-
-func (c *Client) handleStopReply(data string) (int, debugapi.Event, error) {
-	switch data[0] {
-	case 'T':
-		return c.handleTPacket(data)
-	case 'O':
-		// console output
-		return c.ContinueAndWait()
-	case 'W':
-		return c.handleWPacket(data)
-	case 'X':
-		return c.handleXPacket(data)
-	}
-
-	return 0, debugapi.Event{}, fmt.Errorf("unknown packet type: %s", data)
-}
-
-func (c *Client) handleTPacket(data string) (int, debugapi.Event, error) {
-	signalNumber, err := hexToUint64(data[1:3])
-	if err != nil {
-		return 0, debugapi.Event{}, err
-	}
-
-	var threadID int
-	for _, kvInStr := range strings.Split(data[3:len(data)-1], ";") {
-		kvArr := strings.Split(kvInStr, ":")
-		key, value := kvArr[0], kvArr[1]
-		if key == "thread" {
-			valueInNum, err := hexToUint64(value)
-			if err != nil {
-				return 0, debugapi.Event{}, err
-			}
-			threadID = int(valueInNum)
-			break
-		}
-	}
-
-	switch syscall.Signal(signalNumber) {
-	case unix.SIGTRAP:
-		return threadID, debugapi.Event{Type: debugapi.EventTypeTrapped}, nil
-	default:
-		return c.continueAndWait(int(signalNumber))
-	}
-}
-
-func (c *Client) handleWPacket(data string) (int, debugapi.Event, error) {
-	exitStatus, err := hexToUint64(data[1:3])
-	// TODO: set pid.
-	return 0, debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
-}
-
-func (c *Client) handleXPacket(data string) (int, debugapi.Event, error) {
-	signalNumber, err := hexToUint64(data[1:3])
-	// TODO: set pid.
-	// TODO: signalNumber here looks always 0. The number in the description looks correct, so use it.
-	return 0, debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
+	return c.firstTid()
 }
 
 func (c *Client) waitConnectOrExit(listener net.Listener, cmd *exec.Cmd) (net.Conn, error) {
@@ -418,7 +222,7 @@ func (c *Client) firstTid() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	tid, err := hexToUint64(tidInHex)
+	tid, err := hexToUint64(tidInHex, false)
 	return int(tid), err
 }
 
@@ -438,8 +242,224 @@ func (c *Client) qfThreadInfo() (string, error) {
 	return data[1:len(data)], nil
 }
 
+// ReadRegisters reads the target tid's registers.
+func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
+	data, err := c.readRegisters(tid)
+	if err != nil {
+		return debugapi.Registers{}, err
+	}
+
+	return c.parseRegisterData(data)
+}
+
+func (c *Client) readRegisters(tid int) (string, error) {
+	command := fmt.Sprintf("g;thread:%x;", tid)
+	if err := c.send(command); err != nil {
+		return "", err
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return "", err
+	} else if strings.HasPrefix(data, "E") {
+		return data, fmt.Errorf("error response: %s", data)
+	}
+	return data, nil
+}
+
+func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
+	var regs debugapi.Registers
+	for _, metadata := range c.registerMetadataList {
+		rawValue := data[metadata.offset*2 : (metadata.offset+metadata.size)*2]
+
+		var err error
+		switch metadata.name {
+		case "rip":
+			regs.Rip, err = hexToUint64(rawValue, true)
+		case "rsp":
+			regs.Rsp, err = hexToUint64(rawValue, true)
+		}
+		if err != nil {
+			return debugapi.Registers{}, err
+		}
+	}
+
+	return regs, nil
+}
+
+// WriteRegisters updates the registers' value.
+// The 'P' command is not used here due to the bug explained here: https://github.com/llvm-mirror/lldb/commit/d8d7a40ca5377aa777e3840f3e9b6a63c6b09445
+func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
+	data, err := c.readRegisters(tid)
+	if err != nil {
+		return err
+	}
+
+	for _, metadata := range c.registerMetadataList {
+		prefix := data[0 : metadata.offset*2]
+		suffix := data[(metadata.offset+metadata.size)*2 : len(data)]
+
+		var err error
+		switch metadata.name {
+		case "rip":
+			data = fmt.Sprintf("%s%s%s", prefix, uint64ToHex(regs.Rip, true), suffix)
+		case "rsp":
+			data = fmt.Sprintf("%s%s%s", prefix, uint64ToHex(regs.Rsp, true), suffix)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	command := fmt.Sprintf("G%s;thread:%x;", data, tid)
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	return c.receiveAndCheck()
+}
+
+// ReadMemory reads the specified memory region.
+func (c *Client) ReadMemory(tid int, addr uintptr, out []byte) error {
+	command := fmt.Sprintf("m%x,%x", addr, len(out))
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return err
+	} else if strings.HasPrefix(data, "E") {
+		return fmt.Errorf("error response: %s", data)
+	}
+
+	for i := 0; i < len(data); i += 2 {
+		value, err := strconv.ParseUint(data[i:i+2], 16, 8)
+		if err != nil {
+			return err
+		}
+
+		out[i/2] = uint8(value)
+	}
+
+	return nil
+}
+
+// WriteMemory write the data to the specified region
+func (c *Client) WriteMemory(tid int, addr uintptr, data []byte) error {
+	dataInHex := ""
+	for _, b := range data {
+		dataInHex += fmt.Sprintf("%02x", b)
+	}
+	command := fmt.Sprintf("M%x,%x:%s", addr, len(data), dataInHex)
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	return c.receiveAndCheck()
+}
+
+// ContinueAndWait resumes the list of processes and waits until an event happens.
+// The exited event is reported when the main process exits and not when its threads exit.
+func (c *Client) ContinueAndWait() (int, debugapi.Event, error) {
+	return c.continueAndWait(0)
+}
+
+func (c *Client) StepAndWait(threadID int) (int, debugapi.Event, error) {
+	command := fmt.Sprintf("vCont;s:%x", threadID)
+	if err := c.send(command); err != nil {
+		return 0, debugapi.Event{}, fmt.Errorf("send error: %v", err)
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return 0, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
+	}
+
+	return c.handleStopReply(data)
+}
+
+func (c *Client) continueAndWait(signalNumber int) (int, debugapi.Event, error) {
+	var command string
+	if signalNumber == 0 {
+		command = "vCont;c"
+	} else {
+		command = fmt.Sprintf("vCont;C%02x", signalNumber)
+	}
+	if err := c.send(command); err != nil {
+		return 0, debugapi.Event{}, fmt.Errorf("send error: %v", err)
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return 0, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
+	}
+
+	return c.handleStopReply(data)
+}
+
+func (c *Client) handleStopReply(data string) (int, debugapi.Event, error) {
+	switch data[0] {
+	case 'T':
+		return c.handleTPacket(data)
+	case 'O':
+		// console output
+		return c.ContinueAndWait()
+	case 'W':
+		return c.handleWPacket(data)
+	case 'X':
+		return c.handleXPacket(data)
+	}
+
+	return 0, debugapi.Event{}, fmt.Errorf("unknown packet type: %s", data)
+}
+
+func (c *Client) handleTPacket(data string) (int, debugapi.Event, error) {
+	signalNumber, err := hexToUint64(data[1:3], false)
+	if err != nil {
+		return 0, debugapi.Event{}, err
+	}
+
+	var threadID int
+	for _, kvInStr := range strings.Split(data[3:len(data)-1], ";") {
+		kvArr := strings.Split(kvInStr, ":")
+		key, value := kvArr[0], kvArr[1]
+		if key == "thread" {
+			valueInNum, err := hexToUint64(value, false)
+			if err != nil {
+				return 0, debugapi.Event{}, err
+			}
+			threadID = int(valueInNum)
+			break
+		}
+	}
+
+	switch syscall.Signal(signalNumber) {
+	case unix.SIGTRAP:
+		return threadID, debugapi.Event{Type: debugapi.EventTypeTrapped}, nil
+	default:
+		return c.continueAndWait(int(signalNumber))
+	}
+}
+
+func (c *Client) handleWPacket(data string) (int, debugapi.Event, error) {
+	exitStatus, err := hexToUint64(data[1:3], false)
+	// TODO: set pid.
+	return 0, debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
+}
+
+func (c *Client) handleXPacket(data string) (int, debugapi.Event, error) {
+	signalNumber, err := hexToUint64(data[1:3], false)
+	// TODO: set pid.
+	// TODO: signalNumber here looks always 0. The number in the description looks correct, so use it.
+	return 0, debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
+}
+
 func (c *Client) send(command string) error {
-	packet := fmt.Sprintf("$%s#%02x", command, calcChecksum([]byte(command)))
+	packet := fmt.Sprintf("$%s#00", command)
+	if !c.noAckMode {
+		packet = fmt.Sprintf("$%s#%02x", command, calcChecksum([]byte(command)))
+	}
 
 	if n, err := c.conn.Write([]byte(packet)); err != nil {
 		return err
@@ -516,8 +536,27 @@ func verifyPacket(packet string) error {
 	return nil
 }
 
-func hexToUint64(hex string) (uint64, error) {
+func hexToUint64(hex string, littleEndian bool) (uint64, error) {
+	if littleEndian {
+		var reversedHex bytes.Buffer
+		for i := len(hex) - 2; i >= 0; i -= 2 {
+			reversedHex.WriteString(hex[i : i+2])
+		}
+		hex = reversedHex.String()
+	}
 	return strconv.ParseUint(hex, 16, 64)
+}
+
+func uint64ToHex(input uint64, littleEndian bool) string {
+	hex := fmt.Sprintf("%016x", input)
+	if littleEndian {
+		var reversedHex bytes.Buffer
+		for i := len(hex) - 2; i >= 0; i -= 2 {
+			reversedHex.WriteString(hex[i : i+2])
+		}
+		hex = reversedHex.String()
+	}
+	return hex
 }
 
 func calcChecksum(buff []byte) uint8 {

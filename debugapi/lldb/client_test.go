@@ -50,12 +50,15 @@ func TestReadRegisters(t *testing.T) {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
+	_ = client.WriteMemory(tid, mainAddr, []byte{0xcc})
+	_, _, _ = client.ContinueAndWait()
+
 	regs, err := client.ReadRegisters(tid)
 	if err != nil {
 		t.Fatalf("failed to read registers: %v", err)
 	}
-	if regs.Rip == 0 {
-		t.Fatalf("empty rip: %x", regs.Rip)
+	if regs.Rip != uint64(mainAddr+1) {
+		t.Fatalf("wrong rip: %x", regs.Rip)
 	}
 	if regs.Rsp == 0 {
 		t.Fatalf("empty rsp: %x", regs.Rsp)
@@ -167,12 +170,12 @@ func TestContinueAndWait_Exited(t *testing.T) {
 
 func TestContinueAndWait_Signaled(t *testing.T) {
 	client := NewClient()
-	ppid, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(infloopProgram)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	pid, _ := findProcessID(infloopFilename, ppid)
+	pid, _ := findProcessID(infloopFilename, client.pid)
 	// Note that the lldb does not pass the signals like SIGTERM and SIGINT to the debugee.
 	_ = sendSignal(pid, unix.SIGKILL)
 
@@ -187,12 +190,12 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 
 func TestContinueAndWait_Stopped(t *testing.T) {
 	client := NewClient()
-	ppid, err := client.LaunchProcess(helloworldProgram)
+	_, err := client.LaunchProcess(helloworldProgram)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	pid, _ := findProcessID(helloworldFilename, ppid)
+	pid, _ := findProcessID(helloworldFilename, client.pid)
 	_ = sendSignal(pid, unix.SIGUSR1)
 
 	// non-SIGTRAP signal is handled internally.
@@ -202,6 +205,53 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 	}
 	if event != (debugapi.Event{Type: debugapi.EventTypeExited}) {
 		t.Fatalf("wrong event: %v", event)
+	}
+}
+
+func TestStepAndWait(t *testing.T) {
+	client := NewClient()
+	tid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	newTid, event, err := client.StepAndWait(tid)
+	if err != nil {
+		t.Fatalf("failed to step and wait: %v", err)
+	}
+	if event != (debugapi.Event{Type: debugapi.EventTypeTrapped}) {
+		t.Fatalf("wrong event: %v", event)
+	}
+	if tid != newTid {
+		t.Fatalf("wrong tid: %d != %d", tid, newTid)
+	}
+}
+
+func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
+	client := NewClient()
+	tid, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	orgInsts := make([]byte, 1)
+	_ = client.ReadMemory(tid, mainAddr, orgInsts)
+	_ = client.WriteMemory(tid, mainAddr, []byte{0xcc})
+	tid, _, _ = client.ContinueAndWait()
+
+	regs, _ := client.ReadRegisters(tid)
+	regs.Rip--
+	_ = client.WriteRegisters(tid, regs)
+	_ = client.WriteMemory(tid, mainAddr, orgInsts)
+
+	_, _, err = client.StepAndWait(tid)
+	if err != nil {
+		t.Fatalf("failed to step and wait: %v", err)
+	}
+
+	regs, _ = client.ReadRegisters(tid)
+	if regs.Rip != uint64(mainAddr)+9 {
+		t.Errorf("wrong pc: %x", regs.Rip)
 	}
 }
 
@@ -520,6 +570,40 @@ func TestVerifyPacket(t *testing.T) {
 			t.Errorf("[%d] error not returned", i)
 		} else if !test.expectError && actual != nil {
 			t.Errorf("[%d] error returned: %v", i, actual)
+		}
+	}
+}
+
+func TestHexToUint64(t *testing.T) {
+	for i, test := range []struct {
+		hex          string
+		littleEndian bool
+		expected     uint64
+	}{
+		{hex: "00000001", littleEndian: false, expected: 1},
+		{hex: "00000102", littleEndian: false, expected: 258},
+		{hex: "02010000", littleEndian: true, expected: 258},
+	} {
+		actual, _ := hexToUint64(test.hex, test.littleEndian)
+		if test.expected != actual {
+			t.Errorf("[%d] not expected value: %d", i, actual)
+		}
+	}
+}
+
+func TestUint64ToHex(t *testing.T) {
+	for i, test := range []struct {
+		input        uint64
+		littleEndian bool
+		expected     string
+	}{
+		{input: 1, littleEndian: false, expected: "0000000000000001"},
+		{input: 258, littleEndian: false, expected: "0000000000000102"},
+		{input: 258, littleEndian: true, expected: "0201000000000000"},
+	} {
+		actual := uint64ToHex(test.input, test.littleEndian)
+		if test.expected != actual {
+			t.Errorf("[%d] not expected value: %s", i, actual)
 		}
 	}
 }
