@@ -1,9 +1,27 @@
 package debugapi
 
+// WIP interface.
+// TODO: should pid/tid be exposed? For our use case, it seems it's enough to hold the current thread id internally.
+//       Also ,the user will not use the thread id, unlike go routine id which is necessary to identify stack, .
+type client interface {
+	// LaunchProcess launches the new prcoess.
+	// When returned, the process is stopped at the beginning of the program.
+	LaunchProcess(name string, arg ...string) (tid int, err error)
+	// AttachProcess attaches to the existing process.
+	// When returned, the process is stopped.
+	AttachProcess(pid int) (tid int, err error)
+	DetachProcess()
+	ReadMemory()
+	WriteMemory()
+	ReadRegisters()
+	WriteRegisters()
+	ContinueAndWait()
+	StepAndWait()
+}
+
 // EventType represents the type of the event.
 type EventType int
 
-// TODO: should integrate CoreDump, Exited, Terminated?
 const (
 	// EventTypeTrapped event happens when the process is trapped.
 	EventTypeTrapped EventType = iota

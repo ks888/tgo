@@ -215,7 +215,7 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 	}
 
 	pid, _ := findProcessID(infloopFilename, client.pid)
-	// Note that the lldb does not pass the signals like SIGTERM and SIGINT to the debugee.
+	// Note that the debugserver does not pass the signals like SIGTERM and SIGINT to the debugee.
 	_ = sendSignal(pid, unix.SIGKILL)
 
 	_, event, err := client.ContinueAndWait()
@@ -246,6 +246,8 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 		t.Fatalf("wrong event: %v", event)
 	}
 }
+
+// No test for CoreDump as the debugserver does not pass the signals like SIGQUIT to the debugee.
 
 func TestStepAndWait(t *testing.T) {
 	client := NewClient()
