@@ -69,6 +69,19 @@ func TestAttachProcess_WrongPID(t *testing.T) {
 	}
 }
 
+func TestDetachProcess(t *testing.T) {
+	client := NewClient()
+	_, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	err = client.DetachProcess()
+	if err != nil {
+		t.Fatalf("failed to detach from the process: %v", err)
+	}
+}
+
 func TestReadRegisters(t *testing.T) {
 	client := NewClient()
 	tid, err := client.LaunchProcess(infloopProgram)

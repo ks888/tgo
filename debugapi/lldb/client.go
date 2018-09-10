@@ -268,6 +268,15 @@ func (c *Client) AttachProcess(pid int) (int, error) {
 	return c.firstTid()
 }
 
+// DetachProcess detaches from the prcoess.
+func (c *Client) DetachProcess() error {
+	if err := c.send("D"); err != nil {
+		return err
+	}
+
+	return c.receiveAndCheck()
+}
+
 // ReadRegisters reads the target tid's registers.
 func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
 	data, err := c.readRegisters(tid)
