@@ -2,6 +2,7 @@ package lldb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -28,6 +29,9 @@ type Client struct {
 	noAckMode            bool
 	registerMetadataList []registerMetadata
 	buffer               []byte
+
+	readTLSFuncAddr uint64
+	currentOffset   uint32
 }
 
 // NewClient returns the new debug api client which depends on OS API.
@@ -103,7 +107,13 @@ func (c *Client) initialize() error {
 		return err
 	}
 
-	return c.qListThreadsInStopReply()
+	if err := c.qListThreadsInStopReply(); err != nil {
+		return err
+	}
+
+	readTLSFunction := c.buildReadTLSFunction(0) // need the function length here. So the offset doesn't matter.
+	c.readTLSFuncAddr, err = c.allocateMemory(len(readTLSFunction))
+	return err
 }
 
 func (c *Client) setNoAckMode() error {
@@ -217,6 +227,31 @@ func (c *Client) qListThreadsInStopReply() error {
 	return c.receiveAndCheck()
 }
 
+func (c *Client) allocateMemory(size int) (uint64, error) {
+	command := fmt.Sprintf("_M%x,rwx", size)
+	if err := c.send(command); err != nil {
+		return 0, err
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return 0, err
+	} else if data == "" || strings.HasPrefix(data, "E") {
+		return 0, fmt.Errorf("error response: %s", data)
+	}
+
+	return hexToUint64(data, false)
+}
+
+func (c *Client) deallocateMemory(addr uint64) error {
+	command := fmt.Sprintf("_m%x", addr)
+	if err := c.send(command); err != nil {
+		return err
+	}
+
+	return c.receiveAndCheck()
+}
+
 func (c *Client) firstTid() (int, error) {
 	tids, err := c.qfThreadInfo()
 	if err != nil {
@@ -313,6 +348,8 @@ func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
 			regs.Rip, err = hexToUint64(rawValue, true)
 		case "rsp":
 			regs.Rsp, err = hexToUint64(rawValue, true)
+		case "rcx":
+			regs.Rcx, err = hexToUint64(rawValue, true)
 		}
 		if err != nil {
 			return debugapi.Registers{}, err
@@ -340,6 +377,8 @@ func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
 			data = fmt.Sprintf("%s%s%s", prefix, uint64ToHex(regs.Rip, true), suffix)
 		case "rsp":
 			data = fmt.Sprintf("%s%s%s", prefix, uint64ToHex(regs.Rsp, true), suffix)
+		case "rcx":
+			data = fmt.Sprintf("%s%s%s", prefix, uint64ToHex(regs.Rcx, true), suffix)
 		}
 		if err != nil {
 			return err
@@ -355,7 +394,7 @@ func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
 }
 
 // ReadMemory reads the specified memory region.
-func (c *Client) ReadMemory(tid int, addr uintptr, out []byte) error {
+func (c *Client) ReadMemory(addr uint64, out []byte) error {
 	command := fmt.Sprintf("m%x,%x", addr, len(out))
 	if err := c.send(command); err != nil {
 		return err
@@ -381,7 +420,7 @@ func (c *Client) ReadMemory(tid int, addr uintptr, out []byte) error {
 }
 
 // WriteMemory write the data to the specified region
-func (c *Client) WriteMemory(tid int, addr uintptr, data []byte) error {
+func (c *Client) WriteMemory(addr uint64, data []byte) error {
 	dataInHex := ""
 	for _, b := range data {
 		dataInHex += fmt.Sprintf("%02x", b)
@@ -392,6 +431,54 @@ func (c *Client) WriteMemory(tid int, addr uintptr, data []byte) error {
 	}
 
 	return c.receiveAndCheck()
+}
+
+// ReadTLS reads the offset from the beginning of the TLS block.
+func (c *Client) ReadTLS(tid int, offset uint32) (uint64, error) {
+	if err := c.updateReadTLSFunction(offset); err != nil {
+		return 0, err
+	}
+
+	originalRegs, err := c.ReadRegisters(tid)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { err = c.WriteRegisters(tid, originalRegs) }()
+
+	modifiedRegs := originalRegs
+	modifiedRegs.Rip = c.readTLSFuncAddr
+	if err = c.WriteRegisters(tid, modifiedRegs); err != nil {
+		return 0, err
+	}
+
+	if _, _, err = c.StepAndWait(tid); err != nil {
+		return 0, err
+	}
+
+	modifiedRegs, err = c.ReadRegisters(tid)
+	return modifiedRegs.Rcx, err
+}
+
+func (c *Client) updateReadTLSFunction(offset uint32) error {
+	if c.currentOffset == offset {
+		return nil
+	}
+
+	readTLSFunction := c.buildReadTLSFunction(offset)
+	if err := c.WriteMemory(c.readTLSFuncAddr, readTLSFunction); err != nil {
+		return err
+	}
+	c.currentOffset = offset
+	return nil
+}
+
+func (c *Client) buildReadTLSFunction(offset uint32) []byte {
+	offsetBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(offsetBytes, offset)
+
+	// TODO: do not assume gs_base. fs_base is used in linux.
+	readTLSFunction := []byte{0x65, 0x48, 0x8b, 0x0c, 0x25}
+	return append(readTLSFunction, offsetBytes...)
 }
 
 // ContinueAndWait resumes the list of processes and waits until an event happens.

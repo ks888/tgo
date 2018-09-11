@@ -101,6 +101,7 @@ func (c Client) ReadRegisters(pid int) (regs debugapi.Registers, err error) {
 
 	regs.Rip = rawRegs.Rip
 	regs.Rsp = rawRegs.Rsp
+	regs.Rcx = rawRegs.Rcx
 	return regs, nil
 }
 
@@ -113,6 +114,7 @@ func (c Client) WriteRegisters(pid int, regs *debugapi.Registers) error {
 
 	rawRegs.Rip = regs.Rip
 	rawRegs.Rsp = regs.Rsp
+	rawRegs.Rcx = regs.Rcx
 	return unix.PtraceSetRegs(pid, &rawRegs)
 }
 

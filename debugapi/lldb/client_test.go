@@ -13,12 +13,12 @@ import (
 )
 
 var (
-	helloworldFilename         = "helloworld"
-	helloworldProgram          = "testdata/" + helloworldFilename
-	infloopFilename            = "infloop"
-	infloopProgram             = "testdata/" + infloopFilename
-	beginTextSection   uintptr = 0x1000000
-	mainAddr           uintptr = 0x1051430
+	helloworldFilename        = "helloworld"
+	helloworldProgram         = "testdata/" + helloworldFilename
+	infloopFilename           = "infloop"
+	infloopProgram            = "testdata/" + infloopFilename
+	beginTextSection   uint64 = 0x1000000
+	mainAddr           uint64 = 0x1051430
 )
 
 // The debugserver exits when the connection is closed.
@@ -89,7 +89,7 @@ func TestReadRegisters(t *testing.T) {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	_ = client.WriteMemory(tid, mainAddr, []byte{0xcc})
+	_ = client.WriteMemory(mainAddr, []byte{0xcc})
 	_, _, _ = client.ContinueAndWait()
 
 	regs, err := client.ReadRegisters(tid)
@@ -111,7 +111,7 @@ func TestWriteRegisters(t *testing.T) {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	regs := debugapi.Registers{Rip: 0x1, Rsp: 0x2}
+	regs := debugapi.Registers{Rip: 0x1, Rsp: 0x2, Rcx: 0x3}
 	if err := client.WriteRegisters(tid, regs); err != nil {
 		t.Fatalf("failed to write registers: %v", err)
 	}
@@ -123,17 +123,51 @@ func TestWriteRegisters(t *testing.T) {
 	if actualRegs.Rsp != 0x2 {
 		t.Errorf("wrong rsp: %x", actualRegs.Rsp)
 	}
+	if actualRegs.Rcx != 0x3 {
+		t.Errorf("wrong rcx: %x", actualRegs.Rcx)
+	}
+}
+
+func TestAllocateMemory(t *testing.T) {
+	client := NewClient()
+	_, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	addr, err := client.allocateMemory(1)
+	if err != nil {
+		t.Fatalf("failed to allocate memory: %v", err)
+	}
+
+	if addr == 0 {
+		t.Errorf("empty addr: %x", addr)
+	}
+}
+
+func TestDeallocateMemory(t *testing.T) {
+	client := NewClient()
+	_, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	addr, _ := client.allocateMemory(1)
+	err = client.deallocateMemory(addr)
+	if err != nil {
+		t.Fatalf("failed to deallocate memory: %v", err)
+	}
 }
 
 func TestReadMemory(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(infloopProgram)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
 	out := make([]byte, 2)
-	err = client.ReadMemory(tid, beginTextSection, out)
+	err = client.ReadMemory(beginTextSection, out)
 	if err != nil {
 		t.Fatalf("failed to read memory: %v", err)
 	}
@@ -145,34 +179,63 @@ func TestReadMemory(t *testing.T) {
 
 func TestWriteMemory(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(infloopProgram)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
 	data := []byte{0x1, 0x2, 0x3, 0x4}
-	err = client.WriteMemory(tid, beginTextSection, data)
+	err = client.WriteMemory(beginTextSection, data)
 	if err != nil {
 		t.Fatalf("failed to write memory: %v", err)
 	}
 
 	actual := make([]byte, 4)
-	_ = client.ReadMemory(tid, beginTextSection, actual)
+	_ = client.ReadMemory(beginTextSection, actual)
 	if actual[0] != 0x1 || actual[1] != 0x2 || actual[2] != 0x3 || actual[3] != 0x4 {
 		t.Errorf("wrong memory: %v", actual)
 	}
 
 }
 
-func TestContinueAndWait_Trapped(t *testing.T) {
+func TestReadTLS(t *testing.T) {
 	client := NewClient()
 	tid, err := client.LaunchProcess(infloopProgram)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
+	_ = client.WriteMemory(mainAddr, []byte{0xcc})
+	_, _, _ = client.ContinueAndWait()
+
+	var offset uint32 = 0xf
+	_, err = client.ReadTLS(tid, offset)
+	if err != nil {
+		t.Fatalf("failed to read tls: %v", err)
+	}
+	if client.currentOffset != offset {
+		t.Errorf("wrong offset: %x", client.currentOffset)
+	}
+
+	// depends on os and cpu
+	// buff := make([]byte, 8)
+	// var offsetToID uint64 = 8*2 + 8 + 8 + 8 + 8 + 8 + 8*7 + 8 + 8 + 8 + 8 + 4 + 4
+	// _ = client.ReadMemory(gAddr+offsetToID, buff)
+	// goRoutineID := binary.LittleEndian.Uint64(buff)
+	// if goRoutineID != 1 {
+	// 	t.Errorf("unexpected go routine id: %d", goRoutineID)
+	// }
+}
+
+func TestContinueAndWait_Trapped(t *testing.T) {
+	client := NewClient()
+	_, err := client.LaunchProcess(infloopProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
 	out := []byte{0xcc}
-	err = client.WriteMemory(tid, mainAddr, out)
+	err = client.WriteMemory(mainAddr, out)
 	if err != nil {
 		t.Fatalf("failed to write memory: %v", err)
 	}
@@ -270,20 +333,20 @@ func TestStepAndWait(t *testing.T) {
 
 func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(infloopProgram)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
 	orgInsts := make([]byte, 1)
-	_ = client.ReadMemory(tid, mainAddr, orgInsts)
-	_ = client.WriteMemory(tid, mainAddr, []byte{0xcc})
-	tid, _, _ = client.ContinueAndWait()
+	_ = client.ReadMemory(mainAddr, orgInsts)
+	_ = client.WriteMemory(mainAddr, []byte{0xcc})
+	tid, _, _ := client.ContinueAndWait()
 
 	regs, _ := client.ReadRegisters(tid)
 	regs.Rip--
 	_ = client.WriteRegisters(tid, regs)
-	_ = client.WriteMemory(tid, mainAddr, orgInsts)
+	_ = client.WriteMemory(mainAddr, orgInsts)
 
 	_, _, err = client.StepAndWait(tid)
 	if err != nil {

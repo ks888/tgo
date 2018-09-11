@@ -15,6 +15,7 @@ type client interface {
 	WriteMemory()
 	ReadRegisters()
 	WriteRegisters()
+	ReadTLS(offset uint64) (value uint64)
 	ContinueAndWait()
 	StepAndWait()
 }
@@ -43,4 +44,5 @@ type Event struct {
 type Registers struct {
 	Rip uint64
 	Rsp uint64
+	Rcx uint64
 }
