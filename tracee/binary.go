@@ -12,9 +12,23 @@ const AttrVariableParameter = 0x4b
 
 // Binary represents the program the tracee process executes
 type Binary struct {
-	dwarf *dwarf.Data
-	// TODO: support other binary formats
-	symbols []elf.Symbol
+	dwarf     *dwarf.Data
+	functions []*Function
+}
+
+// Function represents a function info in the debug info section.
+type Function struct {
+	name          string
+	lowPC, highPC uint64
+	parameters    []Parameter
+}
+
+// Parameter represents a parameter given to or the returned from the function.
+type Parameter struct {
+	name     string
+	typ      dwarf.Type
+	location []byte
+	isOutput bool
 }
 
 // NewBinary returns the new binary object associated to the program.
@@ -29,99 +43,79 @@ func NewBinary(pathToProgram string) (*Binary, error) {
 		return nil, err
 	}
 
-	symbols, err := elfFile.Symbols()
+	functions, err := ListFunctions(dwarfData)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Binary{dwarf: dwarfData, symbols: symbols}, nil
-}
-
-// Function represents a function info in the debug info section.
-type Function struct {
-	name       string
-	parameters []Parameter
-}
-
-// Parameter represents a parameter given to or the returned from the function.
-type Parameter struct {
-	name     string
-	typ      dwarf.Type
-	location []byte
-	isOutput bool
+	return &Binary{dwarf: dwarfData, functions: functions}, nil
 }
 
 // FindFunction looks up the function info described in the debug info section.
 func (binary *Binary) FindFunction(pc uint64) (*Function, error) {
-	reader := debugInfoReader{raw: binary.dwarf.Reader(), findEntry: binary.findEntry, findType: binary.findType}
-	unitReader, err := reader.seekCompileUnit(pc)
-	if err != nil {
-		return nil, err
-	}
-
-	function, subprogReader, err := unitReader.seekSubprogram(pc)
-	if err != nil {
-		return nil, err
-	}
-
-	params, err := subprogReader.seekParameters()
-	if err != nil {
-		return nil, err
-	}
-	function.parameters = params
-
-	return function, nil
+	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
+	return reader.Seek(pc)
 }
 
-func (binary *Binary) findEntry(offset dwarf.Offset) *dwarf.Entry {
-	reader := binary.dwarf.Reader()
-	reader.Seek(offset)
-	entry, err := reader.Next()
-	if err != nil {
-		return nil
+// ListFunctions lists the subprograms in the debug info section. They don't include parameters info.
+func ListFunctions(dwarfData *dwarf.Data) ([]*Function, error) {
+	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
+
+	var funcs []*Function
+	for {
+		function, err := reader.Next(false)
+		if err != nil {
+			return nil, err
+		}
+		if function == nil {
+			return funcs, nil
+		}
+		funcs = append(funcs, function)
 	}
-	return entry
 }
 
-func (binary *Binary) findType(offset dwarf.Offset) dwarf.Type {
-	typ, err := binary.dwarf.Type(offset)
-	if err != nil {
-		return nil
-	}
-	return typ
-}
-
-type debugInfoReader struct {
+type subprogramReader struct {
 	raw       *dwarf.Reader
-	findEntry func(dwarf.Offset) *dwarf.Entry
-	findType  func(dwarf.Offset) dwarf.Type
+	dwarfData *dwarf.Data
 }
 
-func (r debugInfoReader) seekCompileUnit(pc uint64) (*compileUnitReader, error) {
+func (r subprogramReader) Next(setParameters bool) (*Function, error) {
+	for {
+		entry, err := r.raw.Next()
+		if err != nil || entry == nil {
+			return nil, err
+		}
+
+		if entry.Tag != dwarf.TagSubprogram || r.isInline(entry) {
+			continue
+		}
+
+		function, err := r.buildFunction(entry)
+		if err != nil {
+			return nil, err
+		}
+
+		if setParameters {
+			function.parameters, err = r.parameters()
+		}
+		return function, err
+
+	}
+}
+
+func (r subprogramReader) Seek(pc uint64) (*Function, error) {
 	_, err := r.raw.SeekPC(pc)
 	if err != nil {
 		return nil, err
 	}
 
-	// if no error, SeekPC returns the Entry for the compilation unit.
-	// https://golang.org/pkg/debug/dwarf/#Reader.SeekPC
-	return &compileUnitReader{raw: r.raw, findEntry: r.findEntry, findType: r.findType}, nil
-}
-
-type compileUnitReader struct {
-	raw       *dwarf.Reader
-	findEntry func(dwarf.Offset) *dwarf.Entry
-	findType  func(dwarf.Offset) dwarf.Type
-}
-
-func (r *compileUnitReader) seekSubprogram(pc uint64) (*Function, *subprogramReader, error) {
 	for {
 		subprogram, err := r.raw.Next()
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if subprogram == nil {
-			return nil, nil, errors.New("subprogram not found")
+			return nil, errors.New("subprogram not found")
 		}
 
 		if subprogram.Tag != dwarf.TagSubprogram || !r.includesPC(subprogram, pc) {
@@ -129,20 +123,17 @@ func (r *compileUnitReader) seekSubprogram(pc uint64) (*Function, *subprogramRea
 			continue
 		}
 
-		var name string
-		err = walkUpOrigins(subprogram, r.findEntry, func(entry *dwarf.Entry) (err error) {
-			name, err = stringClassAttr(entry, dwarf.AttrName)
-			return err
-		})
+		function, err := r.buildFunction(subprogram)
 		if err != nil {
-			return nil, nil, errors.New("name attr not found")
+			return nil, err
 		}
 
-		return &Function{name: name}, &subprogramReader{raw: r.raw, findEntry: r.findEntry, findType: r.findType}, nil
+		function.parameters, err = r.parameters()
+		return function, err
 	}
 }
 
-func (r *compileUnitReader) includesPC(subprogram *dwarf.Entry, pc uint64) bool {
+func (r subprogramReader) includesPC(subprogram *dwarf.Entry, pc uint64) bool {
 	lowPC, err := addressClassAttr(subprogram, dwarf.AttrLowpc)
 	if err != nil {
 		return false
@@ -159,16 +150,38 @@ func (r *compileUnitReader) includesPC(subprogram *dwarf.Entry, pc uint64) bool 
 	return true
 }
 
-type subprogramReader struct {
-	raw       *dwarf.Reader
-	findEntry func(dwarf.Offset) *dwarf.Entry
-	findType  func(dwarf.Offset) dwarf.Type
+func (r subprogramReader) isInline(subprogram *dwarf.Entry) bool {
+	return subprogram.AttrField(dwarf.AttrInline) != nil
 }
 
-func (r *subprogramReader) seekParameters() ([]Parameter, error) {
+func (r subprogramReader) buildFunction(subprogram *dwarf.Entry) (*Function, error) {
+	var name string
+	err := walkUpOrigins(subprogram, r.dwarfData, func(entry *dwarf.Entry) bool {
+		var err error
+		name, err = stringClassAttr(entry, dwarf.AttrName)
+		return err == nil
+	})
+	if err != nil {
+		return nil, errors.New("name attr not found")
+	}
+
+	lowPC, err := addressClassAttr(subprogram, dwarf.AttrLowpc)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", name, err)
+	}
+
+	highPC, err := addressClassAttr(subprogram, dwarf.AttrHighpc)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", name, err)
+	}
+
+	return &Function{name: name, lowPC: lowPC, highPC: highPC}, nil
+}
+
+func (r subprogramReader) parameters() ([]Parameter, error) {
 	var params []Parameter
 	for {
-		param, err := r.seekParameter()
+		param, err := r.nextParameter()
 		if err != nil || param == nil {
 			return params, err
 		}
@@ -178,7 +191,7 @@ func (r *subprogramReader) seekParameters() ([]Parameter, error) {
 	}
 }
 
-func (r *subprogramReader) seekParameter() (*Parameter, error) {
+func (r subprogramReader) nextParameter() (*Parameter, error) {
 	for {
 		param, err := r.raw.Next()
 		if err != nil || param.Tag == 0 {
@@ -194,31 +207,32 @@ func (r *subprogramReader) seekParameter() (*Parameter, error) {
 	}
 }
 
-func (r *subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error) {
+func (r subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error) {
 	var name string
 	var typeOffset dwarf.Offset
 	var isOutput bool
-	err := walkUpOrigins(param, r.findEntry, func(entry *dwarf.Entry) (err error) {
+	err := walkUpOrigins(param, r.dwarfData, func(entry *dwarf.Entry) bool {
+		var err error
 		name, err = stringClassAttr(entry, dwarf.AttrName)
 		if err != nil {
-			return err
+			return false
 		}
 
 		typeOffset, err = referenceClassAttr(entry, dwarf.AttrType)
 		if err != nil {
-			return err
+			return false
 		}
 
 		isOutput, err = flagClassAttr(entry, AttrVariableParameter)
-		return err
+		return err == nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	typ := r.findType(typeOffset)
-	if typ == nil {
-		return nil, fmt.Errorf("type not found: %d", typeOffset)
+	typ, err := r.dwarfData.Type(typeOffset)
+	if err != nil {
+		return nil, err
 	}
 
 	loc, err := locationClassAttr(param, dwarf.AttrLocation)
@@ -304,30 +318,35 @@ func flagClassAttr(entry *dwarf.Entry, attrName dwarf.Attr) (bool, error) {
 	return val, nil
 }
 
-// walkUpOrigins follows the entry's origins until the walkFn returns *nil*.
+// walkUpOrigins follows the entry's origins until the walkFn returns true.
 //
 // It can find the DIE of the inlined instance from the DIE of the out-of-line instance (see the DWARF spec for the terminology).
-func walkUpOrigins(entry *dwarf.Entry, findEntry func(dwarf.Offset) *dwarf.Entry, walkFn func(*dwarf.Entry) error) error {
-	err := walkFn(entry)
-	if err == nil {
+func walkUpOrigins(entry *dwarf.Entry, dwarfData *dwarf.Data, walkFn func(*dwarf.Entry) bool) error {
+	if ok := walkFn(entry); ok {
 		return nil
 	}
 
-	origin := findAbstractOrigin(entry, findEntry)
+	origin := findAbstractOrigin(entry, dwarfData)
 	if origin == nil {
-		return err
+		return errors.New("failed to find abstract origin")
 	}
 
-	return walkUpOrigins(origin, findEntry, walkFn)
+	return walkUpOrigins(origin, dwarfData, walkFn)
 }
 
-func findAbstractOrigin(entry *dwarf.Entry, findEntry func(dwarf.Offset) *dwarf.Entry) *dwarf.Entry {
+func findAbstractOrigin(entry *dwarf.Entry, dwarfData *dwarf.Data) *dwarf.Entry {
 	ref, err := referenceClassAttr(entry, dwarf.AttrAbstractOrigin)
 	if err != nil {
 		return nil
 	}
 
-	return findEntry(ref)
+	reader := dwarfData.Reader()
+	reader.Seek(ref)
+	originEntry, err := reader.Next()
+	if err != nil {
+		return nil
+	}
+	return originEntry
 }
 
 func decodeSignedLEB128(input []byte) (val int) {
