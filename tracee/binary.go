@@ -2,7 +2,6 @@ package tracee
 
 import (
 	"debug/dwarf"
-	"debug/elf"
 	"errors"
 	"fmt"
 )
@@ -33,12 +32,7 @@ type Parameter struct {
 
 // NewBinary returns the new binary object associated to the program.
 func NewBinary(pathToProgram string) (*Binary, error) {
-	elfFile, err := elf.Open(pathToProgram)
-	if err != nil {
-		return nil, err
-	}
-
-	dwarfData, err := elfFile.DWARF()
+	dwarfData, err := findDWARF(pathToProgram)
 	if err != nil {
 		return nil, err
 	}
