@@ -31,22 +31,22 @@ type Parameter struct {
 }
 
 // NewBinary returns the new binary object associated to the program.
-func NewBinary(pathToProgram string) (*Binary, error) {
+func NewBinary(pathToProgram string) (Binary, error) {
 	dwarfData, err := findDWARF(pathToProgram)
 	if err != nil {
-		return nil, err
+		return Binary{}, err
 	}
 
 	functions, err := ListFunctions(dwarfData)
 	if err != nil {
-		return nil, err
+		return Binary{}, err
 	}
 
-	return &Binary{dwarf: dwarfData, functions: functions}, nil
+	return Binary{dwarf: dwarfData, functions: functions}, nil
 }
 
 // FindFunction looks up the function info described in the debug info section.
-func (binary *Binary) FindFunction(pc uint64) (*Function, error) {
+func (binary Binary) FindFunction(pc uint64) (*Function, error) {
 	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
 	return reader.Seek(pc)
 }
