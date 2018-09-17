@@ -4,30 +4,37 @@ import (
 	"debug/dwarf"
 	"errors"
 	"fmt"
+	"log"
+	"strings"
+	"unicode"
 )
 
-// AttrVariableParameter is the extended DWARF attribute. If true, the parameter is output. Else, it's input.
-const AttrVariableParameter = 0x4b
+const (
+	// AttrVariableParameter is the extended DWARF attribute. If true, the parameter is output. Else, it's input.
+	attrVariableParameter = 0x4b
+	dwarfOpCallFrameCFA   = 0x9c // DW_OP_call_frame_cfa
+	dwarfOpFbreg          = 0x91 // DW_OP_fbreg
+)
 
 // Binary represents the program the tracee process executes
 type Binary struct {
-	dwarf     *dwarf.Data
-	functions []*Function
+	dwarf *dwarf.Data
 }
 
 // Function represents a function info in the debug info section.
 type Function struct {
-	name          string
-	lowPC, highPC uint64
-	parameters    []Parameter
+	Name       string
+	Value      uint64
+	Parameters []Parameter
 }
 
 // Parameter represents a parameter given to or the returned from the function.
 type Parameter struct {
-	name     string
-	typ      dwarf.Type
-	location []byte
-	isOutput bool
+	Name string
+	Typ  dwarf.Type
+	// Offset is the memory offset of the parameter.
+	Offset   int
+	IsOutput bool
 }
 
 // NewBinary returns the new binary object associated to the program.
@@ -37,12 +44,7 @@ func NewBinary(pathToProgram string) (Binary, error) {
 		return Binary{}, err
 	}
 
-	functions, err := ListFunctions(dwarfData)
-	if err != nil {
-		return Binary{}, err
-	}
-
-	return Binary{dwarf: dwarfData, functions: functions}, nil
+	return Binary{dwarf: dwarfData}, nil
 }
 
 // FindFunction looks up the function info described in the debug info section.
@@ -52,8 +54,8 @@ func (binary Binary) FindFunction(pc uint64) (*Function, error) {
 }
 
 // ListFunctions lists the subprograms in the debug info section. They don't include parameters info.
-func ListFunctions(dwarfData *dwarf.Data) ([]*Function, error) {
-	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
+func (binary Binary) ListFunctions() ([]*Function, error) {
+	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
 
 	var funcs []*Function
 	for {
@@ -66,6 +68,16 @@ func ListFunctions(dwarfData *dwarf.Data) ([]*Function, error) {
 		}
 		funcs = append(funcs, function)
 	}
+}
+
+// IsExported returns true if the function is exported.
+// See https://golang.org/ref/spec#Exported_identifiers for the spec.
+func (f Function) IsExported() bool {
+	elems := strings.Split(f.Name, ".")
+	for _, ch := range elems[len(elems)-1] {
+		return unicode.IsUpper(ch)
+	}
+	return false
 }
 
 type subprogramReader struct {
@@ -90,7 +102,7 @@ func (r subprogramReader) Next(setParameters bool) (*Function, error) {
 		}
 
 		if setParameters {
-			function.parameters, err = r.parameters()
+			function.Parameters, err = r.parameters()
 		}
 		return function, err
 
@@ -122,7 +134,7 @@ func (r subprogramReader) Seek(pc uint64) (*Function, error) {
 			return nil, err
 		}
 
-		function.parameters, err = r.parameters()
+		function.Parameters, err = r.parameters()
 		return function, err
 	}
 }
@@ -164,12 +176,19 @@ func (r subprogramReader) buildFunction(subprogram *dwarf.Entry) (*Function, err
 		return nil, fmt.Errorf("%s: %v", name, err)
 	}
 
-	highPC, err := addressClassAttr(subprogram, dwarf.AttrHighpc)
+	_, err = addressClassAttr(subprogram, dwarf.AttrHighpc)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %v", name, err)
 	}
 
-	return &Function{name: name, lowPC: lowPC, highPC: highPC}, nil
+	frameBase, err := locationClassAttr(subprogram, dwarf.AttrFrameBase)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", name, err)
+	} else if len(frameBase) != 1 || frameBase[0] != dwarfOpCallFrameCFA {
+		log.Printf("The frame base attribute of %s has the unexpected value. The parameter values may be wrong.", name)
+	}
+
+	return &Function{Name: name, Value: lowPC}, nil
 }
 
 func (r subprogramReader) parameters() ([]Parameter, error) {
@@ -217,7 +236,7 @@ func (r subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error)
 			return false
 		}
 
-		isOutput, err = flagClassAttr(entry, AttrVariableParameter)
+		isOutput, err = flagClassAttr(entry, attrVariableParameter)
 		return err == nil
 	})
 	if err != nil {
@@ -233,8 +252,28 @@ func (r subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error)
 	if err != nil {
 		return nil, errors.New("loc attr not found")
 	}
+	offset, err := parameterOffset(loc)
+	if err != nil {
+		log.Printf("failed to find the parameter offset of the %s: %v", name, err)
+	}
 
-	return &Parameter{name: name, typ: typ, location: loc, isOutput: isOutput}, nil
+	return &Parameter{Name: name, Typ: typ, Offset: offset, IsOutput: isOutput}, nil
+}
+
+// parameterOffset returns the memory offset of the parameter value.
+// It's not the canonical way to interpret the location attribute, because we need to parse
+// the CIE and FDE of the debug_frame section to find the current CFA.
+// Here, we simply assume the CFA is the rsp+8 because we will not get the parameter value
+// in the middle of the funciton.
+func parameterOffset(loc []byte) (int, error) {
+	switch loc[0] {
+	case dwarfOpCallFrameCFA:
+		return 0, nil
+	case dwarfOpFbreg:
+		return decodeSignedLEB128(loc[1:]), nil
+	default:
+		return 0, fmt.Errorf("unknown operation: %v", loc[0])
+	}
 }
 
 func addressClassAttr(entry *dwarf.Entry, attrName dwarf.Attr) (uint64, error) {
