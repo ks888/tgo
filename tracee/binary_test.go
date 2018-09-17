@@ -20,6 +20,7 @@ var (
 	addrNoParameter             uint64 = 0x0
 	addrOneParameter            uint64 = 0x0
 	addrOneParameterAndVariable uint64 = 0x0
+	addrTwoParameters           uint64 = 0x0
 	addrFuncWithAbstractOrigin  uint64 = 0x0 // any function which corresponding DIE has the DW_AT_abstract_origin attribute.
 )
 
@@ -80,6 +81,8 @@ func updateAddressIfMatched(name string, value uint64) {
 		addrOneParameterAndVariable = value
 	case "main.noParameter":
 		addrNoParameter = value
+	case "main.twoParameters":
+		addrTwoParameters = value
 	case "reflect.Value.Kind":
 		addrFuncWithAbstractOrigin = value
 	}
@@ -272,6 +275,22 @@ func TestSeek_HasVariableBeforeParameter(t *testing.T) {
 	}
 	if function.Parameters[0].Name != "i" {
 		t.Errorf("invalid parameter name: %s", function.Parameters[0].Name)
+	}
+}
+
+func TestSeek_HasTwoParameters(t *testing.T) {
+	binary, _ := NewBinary(testdataParameters)
+	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
+
+	function, err := reader.Seek(addrTwoParameters)
+	if err != nil {
+		t.Fatalf("failed to seek to parameter: %v", err)
+	}
+	if len(function.Parameters) == 0 {
+		t.Fatalf("parameter is nil")
+	}
+	if function.Parameters[0].Name != "j" {
+		t.Errorf("invalid parameter order: %s", function.Parameters[0].Name)
 	}
 }
 

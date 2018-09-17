@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -135,6 +136,8 @@ func (r subprogramReader) Seek(pc uint64) (*Function, error) {
 		}
 
 		function.Parameters, err = r.parameters()
+		// Without this, the parameters are sorted by the name.
+		sort.Slice(function.Parameters, func(i, j int) bool { return function.Parameters[i].Offset < function.Parameters[j].Offset })
 		return function, err
 	}
 }

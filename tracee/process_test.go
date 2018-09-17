@@ -1,9 +1,8 @@
 package tracee
 
 import (
+	"encoding/binary"
 	"testing"
-
-	"github.com/ks888/tgo/debugapi/lldb"
 )
 
 func TestLaunchProcess(t *testing.T) {
@@ -157,25 +156,63 @@ func TestHitBreakpoint_NoCondition(t *testing.T) {
 	}
 }
 
-func TestCurrentGoRoutineID(t *testing.T) {
-	client := lldb.NewClient()
-	tid, err := client.LaunchProcess(testdataParameters)
+func TestCurrentStackFrame(t *testing.T) {
+	proc, err := LaunchProcess(testdataParameters)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := client.WriteMemory(addrMain, []byte{0xcc}); err != nil {
+
+	if err := proc.SetBreakpoint(addrOneParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
-	if _, _, err = client.ContinueAndWait(); err != nil {
+
+	if _, err = proc.ContinueAndWait(); err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 
-	proc := &Process{debugapiClient: client, currentThreadID: tid}
-	id, err := proc.currentGoRoutineID()
+	stackFrame, err := proc.CurrentStackFrame()
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	if id != 1 {
-		t.Errorf("wrong id: %d", id)
+	if stackFrame.Function.Name != "main.oneParameter" {
+		t.Errorf("wrong function name: %s", stackFrame.Function.Name)
+	}
+	if stackFrame.ReturnAddress == 0x0 {
+		t.Errorf("empty return address")
+	}
+	if len(stackFrame.InputArguments) != 1 {
+		t.Errorf("wrong input args length: %d", len(stackFrame.InputArguments))
+	}
+	if stackFrame.InputArguments[0].Name != "a" {
+		t.Errorf("wrong input args: %s", stackFrame.InputArguments[0].Name)
+	}
+	if binary.LittleEndian.Uint64(stackFrame.InputArguments[0].Value) != 1 {
+		t.Errorf("wrong input args: %s", stackFrame.InputArguments[0].Value)
+	}
+	if len(stackFrame.OutputArguments) != 0 {
+		t.Errorf("wrong output args length: %d", len(stackFrame.OutputArguments))
+	}
+}
+
+func TestCurrentGoRoutineInfo(t *testing.T) {
+	proc, err := LaunchProcess(testdataParameters)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	if err := proc.SetBreakpoint(addrMain); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	if _, err = proc.ContinueAndWait(); err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+
+	goRoutineInfo, err := proc.CurrentGoRoutineInfo()
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if goRoutineInfo.ID != 1 {
+		t.Errorf("wrong id: %d", goRoutineInfo.ID)
 	}
 }
