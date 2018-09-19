@@ -1,6 +1,7 @@
 package lldb
 
 import (
+	"bytes"
 	"net"
 	"os"
 	"os/exec"
@@ -265,6 +266,26 @@ func TestContinueAndWait_Exited(t *testing.T) {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
 		if event == (debugapi.Event{Type: debugapi.EventTypeExited}) {
+			break
+		}
+	}
+}
+
+func TestContinueAndWait_ConsoleWrite(t *testing.T) {
+	client := NewClient()
+	buff := &bytes.Buffer{}
+	client.outputWriter = buff
+	_, err := client.LaunchProcess(helloworldProgram)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	for {
+		_, _, err := client.ContinueAndWait()
+		if err != nil {
+			t.Fatalf("failed to continue and wait: %v", err)
+		}
+		if buff.String() == "Hello, playground\r\n" {
 			break
 		}
 	}

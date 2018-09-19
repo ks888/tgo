@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -29,6 +31,8 @@ type Client struct {
 	noAckMode            bool
 	registerMetadataList []registerMetadata
 	buffer               []byte
+	// outputWriter is the writer to which the output of the debugee process will be written.
+	outputWriter io.Writer
 
 	readTLSFuncAddr uint64
 	currentOffset   uint32
@@ -36,7 +40,7 @@ type Client struct {
 
 // NewClient returns the new debug api client which depends on OS API.
 func NewClient() *Client {
-	return &Client{buffer: make([]byte, maxPacketSize)}
+	return &Client{buffer: make([]byte, maxPacketSize), outputWriter: os.Stdout}
 }
 
 // LaunchProcess lets the debugserver launch the new prcoess.
@@ -407,15 +411,11 @@ func (c *Client) ReadMemory(addr uint64, out []byte) error {
 		return fmt.Errorf("error response: %s", data)
 	}
 
-	for i := 0; i < len(data); i += 2 {
-		value, err := strconv.ParseUint(data[i:i+2], 16, 8)
-		if err != nil {
-			return err
-		}
-
-		out[i/2] = uint8(value)
+	byteArrary, err := hexToByteArray(data)
+	if err != nil {
+		return err
 	}
-
+	copy(out, byteArrary)
 	return nil
 }
 
@@ -526,8 +526,7 @@ func (c *Client) handleStopReply(data string) (int, debugapi.Event, error) {
 	case 'T':
 		return c.handleTPacket(data)
 	case 'O':
-		// console output
-		return c.wait()
+		return c.handleOPacket(data)
 	case 'W':
 		return c.handleWPacket(data)
 	case 'X':
@@ -563,6 +562,20 @@ func (c *Client) handleTPacket(data string) (int, debugapi.Event, error) {
 	default:
 		return c.continueAndWait(int(signalNumber))
 	}
+}
+
+func (c *Client) handleOPacket(data string) (int, debugapi.Event, error) {
+	out, err := hexToByteArray(data[1:len(data)])
+	if err != nil {
+		return 0, debugapi.Event{}, err
+	}
+
+	_, err = c.outputWriter.Write(out)
+	if err != nil {
+		return 0, debugapi.Event{}, err
+	}
+
+	return c.wait()
 }
 
 func (c *Client) handleWPacket(data string) (int, debugapi.Event, error) {
@@ -668,6 +681,19 @@ func hexToUint64(hex string, littleEndian bool) (uint64, error) {
 		hex = reversedHex.String()
 	}
 	return strconv.ParseUint(hex, 16, 64)
+}
+
+func hexToByteArray(hex string) ([]byte, error) {
+	out := make([]byte, len(hex)/2)
+	for i := 0; i < len(hex); i += 2 {
+		value, err := strconv.ParseUint(hex[i:i+2], 16, 8)
+		if err != nil {
+			return nil, err
+		}
+
+		out[i/2] = uint8(value)
+	}
+	return out, nil
 }
 
 func uint64ToHex(input uint64, littleEndian bool) string {
