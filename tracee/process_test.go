@@ -18,6 +18,35 @@ func TestLaunchProcess(t *testing.T) {
 	}
 }
 
+func TestContinueAndWait(t *testing.T) {
+	proc, err := LaunchProcess(testdataParameters)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	// 1. stop at NoParameter func
+	if err := proc.SetBreakpoint(addrNoParameter); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+	if _, err := proc.ContinueAndWait(); err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+	if err := proc.ClearBreakpoint(addrNoParameter); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+	if err := proc.SetPC(addrNoParameter); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	// 2. stop at OneParameter func
+	if err := proc.SetBreakpoint(addrOneParameter); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+	if _, err := proc.ContinueAndWait(); err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+}
+
 func TestSetBreakpoint(t *testing.T) {
 	proc, err := LaunchProcess(testdataParameters)
 	if err != nil {
@@ -153,6 +182,37 @@ func TestHitBreakpoint_NoCondition(t *testing.T) {
 
 	if !proc.HitBreakpoint(addrMain, 1) {
 		t.Errorf("invalid condition check")
+	}
+}
+
+func TestSetPC(t *testing.T) {
+	proc, err := LaunchProcess(testdataParameters)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	if err := proc.SetBreakpoint(addrMain); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	if _, err = proc.ContinueAndWait(); err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+
+	if err := proc.SetPC(addrMain); err != nil {
+		t.Fatalf("failed to set PC: %v", err)
+	}
+
+	if _, err = proc.ContinueAndWait(); err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+
+	regs, err := proc.debugapiClient.ReadRegisters(proc.currentThreadID)
+	if err != nil {
+		t.Fatalf("failed to read registers: %v", err)
+	}
+	if regs.Rip != addrMain+1 {
+		t.Errorf("wrong rip: %x", regs.Rip)
 	}
 }
 

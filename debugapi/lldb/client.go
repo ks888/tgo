@@ -481,24 +481,21 @@ func (c *Client) buildReadTLSFunction(offset uint32) []byte {
 	return append(readTLSFunction, offsetBytes...)
 }
 
-// ContinueAndWait resumes the list of processes and waits until an event happens.
-// The exited event is reported when the main process exits and not when its threads exit.
+// ContinueAndWait resumes processes and waits until an event happens.
+// The exited event is reported when the main process exits (and not when its threads exit).
 func (c *Client) ContinueAndWait() (int, debugapi.Event, error) {
 	return c.continueAndWait(0)
 }
 
+// StepAndWait executes the one instruction of the specified thread and waits until an event happens.
+// The event may not be the trapped event.
 func (c *Client) StepAndWait(threadID int) (int, debugapi.Event, error) {
 	command := fmt.Sprintf("vCont;s:%x", threadID)
 	if err := c.send(command); err != nil {
 		return 0, debugapi.Event{}, fmt.Errorf("send error: %v", err)
 	}
 
-	data, err := c.receive()
-	if err != nil {
-		return 0, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
-	}
-
-	return c.handleStopReply(data)
+	return c.wait()
 }
 
 func (c *Client) continueAndWait(signalNumber int) (int, debugapi.Event, error) {
@@ -512,6 +509,10 @@ func (c *Client) continueAndWait(signalNumber int) (int, debugapi.Event, error) 
 		return 0, debugapi.Event{}, fmt.Errorf("send error: %v", err)
 	}
 
+	return c.wait()
+}
+
+func (c *Client) wait() (int, debugapi.Event, error) {
 	data, err := c.receive()
 	if err != nil {
 		return 0, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
@@ -526,7 +527,7 @@ func (c *Client) handleStopReply(data string) (int, debugapi.Event, error) {
 		return c.handleTPacket(data)
 	case 'O':
 		// console output
-		return c.ContinueAndWait()
+		return c.wait()
 	case 'W':
 		return c.handleWPacket(data)
 	case 'X':

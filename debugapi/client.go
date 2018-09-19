@@ -1,8 +1,7 @@
 package debugapi
 
 // WIP interface.
-// TODO: should pid/tid be exposed? For our use case, it seems it's enough to hold the current thread id internally.
-//       Also ,the user will not use the thread id, unlike go routine id which is necessary to identify stack, .
+// The thread id is exposed, because it's strange if registers can be read or changed without specifying the thread id.
 type client interface {
 	// LaunchProcess launches the new prcoess.
 	// When returned, the process is stopped at the beginning of the program.

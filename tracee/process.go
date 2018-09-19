@@ -34,6 +34,7 @@ type StackFrame struct {
 	ReturnAddress   uint64
 }
 
+// Argument represents the value passed to the function.
 type Argument struct {
 	Name  string
 	Typ   dwarf.Type
@@ -42,8 +43,8 @@ type Argument struct {
 
 // GoRoutineInfo describes the various info of the go routine like stack frame.
 type GoRoutineInfo struct {
-	ID                int64
-	CurrentStackFrame uint64
+	ID             int64
+	StackFrameAddr uint64
 }
 
 // LaunchProcess launches new tracee process.
@@ -92,6 +93,7 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 // }
 
 // ContinueAndWait continues the execution and waits until an event happens.
+// Note that the id of the stopped thread may be different from the id of the continued thread.
 func (p *Process) ContinueAndWait() (event debugapi.Event, err error) {
 	p.currentThreadID, event, err = p.debugapiClient.ContinueAndWait()
 	return event, err
@@ -161,6 +163,17 @@ func (p *Process) HasBreakpoint(addr uint64) bool {
 	return ok
 }
 
+// SetPC set the pc of the current thread to the given address.
+func (p *Process) SetPC(addr uint64) error {
+	regs, err := p.debugapiClient.ReadRegisters(p.currentThreadID)
+	if err != nil {
+		return err
+	}
+
+	regs.Rip = addr
+	return p.debugapiClient.WriteRegisters(p.currentThreadID, regs)
+}
+
 // CurrentStackFrame returns the stack frame of the go routine associated with the stopped thread.
 func (p *Process) CurrentStackFrame() (*StackFrame, error) {
 	regs, err := p.debugapiClient.ReadRegisters(p.currentThreadID)
@@ -180,14 +193,26 @@ func (p *Process) CurrentStackFrame() (*StackFrame, error) {
 	}
 	retAddr := binary.LittleEndian.Uint64(buff)
 
-	var inputArgs, outputArgs []Argument
 	// assumes the rsp+8 points to the beginning of the args.
-	addrBeginningOfArgs := regs.Rsp + 8
-	for _, param := range function.Parameters {
+	inputArgs, outputArgs, err := p.currentArgs(function.Parameters, regs.Rsp+8)
+	if err != nil {
+		return nil, err
+	}
+
+	return &StackFrame{
+		Function:        function,
+		ReturnAddress:   retAddr,
+		InputArguments:  inputArgs,
+		OutputArguments: outputArgs,
+	}, nil
+}
+
+func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (inputArgs []Argument, outputArgs []Argument, err error) {
+	for _, param := range params {
 		size := param.Typ.Size()
 		buff := make([]byte, size)
-		if err := p.debugapiClient.ReadMemory(addrBeginningOfArgs+uint64(param.Offset), buff); err != nil {
-			return nil, err
+		if err = p.debugapiClient.ReadMemory(addrBeginningOfArgs+uint64(param.Offset), buff); err != nil {
+			return
 		}
 
 		arg := Argument{Name: param.Name, Typ: param.Typ, Value: buff}
@@ -197,13 +222,7 @@ func (p *Process) CurrentStackFrame() (*StackFrame, error) {
 			inputArgs = append(inputArgs, arg)
 		}
 	}
-
-	return &StackFrame{
-		Function:        function,
-		ReturnAddress:   retAddr,
-		InputArguments:  inputArgs,
-		OutputArguments: outputArgs,
-	}, nil
+	return
 }
 
 // CurrentGoRoutineInfo returns the go routine info associated with the go routine which hits the breakpoint.
@@ -222,5 +241,6 @@ func (p *Process) CurrentGoRoutineInfo() (GoRoutineInfo, error) {
 		return GoRoutineInfo{}, fmt.Errorf("failed to read memory: %v", err)
 	}
 
+	// TODO: add StackFrameAddr
 	return GoRoutineInfo{ID: int64(binary.LittleEndian.Uint64(buff))}, nil
 }
