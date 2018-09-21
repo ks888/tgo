@@ -214,8 +214,8 @@ func TestReadTLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read tls: %v", err)
 	}
-	if client.currentOffset != offset {
-		t.Errorf("wrong offset: %x", client.currentOffset)
+	if client.currentTLSOffset != offset {
+		t.Errorf("wrong offset: %x", client.currentTLSOffset)
 	}
 
 	// depends on os and cpu

@@ -34,8 +34,8 @@ type Client struct {
 	// outputWriter is the writer to which the output of the debugee process will be written.
 	outputWriter io.Writer
 
-	readTLSFuncAddr uint64
-	currentOffset   uint32
+	readTLSFuncAddr  uint64
+	currentTLSOffset uint32
 }
 
 // NewClient returns the new debug api client which depends on OS API.
@@ -460,7 +460,7 @@ func (c *Client) ReadTLS(tid int, offset uint32) (uint64, error) {
 }
 
 func (c *Client) updateReadTLSFunction(offset uint32) error {
-	if c.currentOffset == offset {
+	if c.currentTLSOffset == offset {
 		return nil
 	}
 
@@ -468,7 +468,7 @@ func (c *Client) updateReadTLSFunction(offset uint32) error {
 	if err := c.WriteMemory(c.readTLSFuncAddr, readTLSFunction); err != nil {
 		return err
 	}
-	c.currentOffset = offset
+	c.currentTLSOffset = offset
 	return nil
 }
 
