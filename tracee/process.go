@@ -43,8 +43,8 @@ type Argument struct {
 
 // GoRoutineInfo describes the various info of the go routine like stack frame.
 type GoRoutineInfo struct {
-	ID             int64
-	StackFrameAddr uint64
+	ID            int64
+	UsedStackSize uint64
 }
 
 // LaunchProcess launches new tracee process.
@@ -240,7 +240,19 @@ func (p *Process) CurrentGoRoutineInfo() (GoRoutineInfo, error) {
 	if err = p.debugapiClient.ReadMemory(gAddr+offsetToID, buff); err != nil {
 		return GoRoutineInfo{}, fmt.Errorf("failed to read memory: %v", err)
 	}
+	id := int64(binary.LittleEndian.Uint64(buff))
 
-	// TODO: add StackFrameAddr
-	return GoRoutineInfo{ID: int64(binary.LittleEndian.Uint64(buff))}, nil
+	var offsetToStackHi uint64 = 8
+	if err = p.debugapiClient.ReadMemory(gAddr+offsetToStackHi, buff); err != nil {
+		return GoRoutineInfo{}, fmt.Errorf("failed to read memory: %v", err)
+	}
+	stackHi := binary.LittleEndian.Uint64(buff)
+
+	regs, err := p.debugapiClient.ReadRegisters(p.currentThreadID)
+	if err != nil {
+		return GoRoutineInfo{}, err
+	}
+	usedStackSize := stackHi - regs.Rsp
+
+	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize}, nil
 }

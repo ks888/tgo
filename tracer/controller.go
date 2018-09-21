@@ -17,9 +17,11 @@ type Controller struct {
 }
 
 type goRoutineStatus struct {
-	statusType goRoutineStatusType
+	statusType    goRoutineStatusType
+	usedStackSize uint64
 	// clearedBreakpoints is the address the break point should be set, but temporarily cleared by the go routine for single stepping.
-	// Usually the function doesn't change after the single stepping, but it changes when the function 'CALL's at the beginning of the function.
+	// Usually the function doesn't change after the single stepping and so this address is not necessary,
+	// but the function changes when the function 'CALL's at the beginning of the function.
 	clearedBreakpoint uint64
 }
 
@@ -112,9 +114,13 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 
 	switch status.statusType {
 	case goRoutineRunning:
+		// TODO: enable the condition after supporting the return case.
+		// if goRoutineInfo.UsedStackSize != status.usedStackSize {
+		// If the size is same as before, it's likely we are still in the same stack frame (typical for the stack growth case).
 		if err := c.printFunction(goRoutineID, stackFrame); err != nil {
 			return debugapi.Event{}, err
 		}
+		// }
 
 		if err := c.process.SetPC(funcAddr); err != nil {
 			return debugapi.Event{}, err
@@ -124,7 +130,11 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 			return debugapi.Event{}, err
 		}
 
-		c.statusStore[goRoutineID] = goRoutineStatus{statusType: goRoutineSingleStepping, clearedBreakpoint: funcAddr}
+		c.statusStore[goRoutineID] = goRoutineStatus{
+			statusType:        goRoutineSingleStepping,
+			usedStackSize:     goRoutineInfo.UsedStackSize,
+			clearedBreakpoint: funcAddr,
+		}
 		return c.process.StepAndWait()
 
 	case goRoutineSingleStepping:
@@ -132,7 +142,9 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 			return debugapi.Event{}, err
 		}
 
-		c.statusStore[goRoutineID] = goRoutineStatus{statusType: goRoutineRunning}
+		status.statusType = goRoutineRunning
+		status.clearedBreakpoint = 0
+		c.statusStore[goRoutineID] = status
 		return c.process.ContinueAndWait()
 
 	default:

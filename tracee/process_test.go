@@ -275,4 +275,7 @@ func TestCurrentGoRoutineInfo(t *testing.T) {
 	if goRoutineInfo.ID != 1 {
 		t.Errorf("wrong id: %d", goRoutineInfo.ID)
 	}
+	if goRoutineInfo.UsedStackSize == 0 {
+		t.Errorf("wrong stack size: %d", goRoutineInfo.UsedStackSize)
+	}
 }
