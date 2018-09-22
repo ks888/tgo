@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/ks888/tgo/debugapi"
 	"golang.org/x/sys/unix"
@@ -70,15 +71,40 @@ func TestAttachProcess_WrongPID(t *testing.T) {
 	}
 }
 
-func TestDetachProcess(t *testing.T) {
+func TestDetachProcess_KillProc(t *testing.T) {
 	client := NewClient()
 	_, err := client.LaunchProcess(infloopProgram)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	err = client.DetachProcess()
+	debugeeProcID, _ := findProcessID(infloopFilename, client.pid)
+
+	if err := client.DetachProcess(); err != nil {
+		t.Fatalf("failed to detach from the process: %v", err)
+	}
+
+	// it often takes some times to finish the debug server and debugee.
+	for i := 0; i < 10; i++ {
+		if !existsPid(debugeeProcID) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if existsPid(debugeeProcID) {
+		t.Errorf("the debugee process is still alive")
+	}
+}
+
+func TestDetachProcess_NotKillProc(t *testing.T) {
+	client := NewClient()
+	_, err := client.LaunchProcess(infloopProgram)
 	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	client.killOnDetach = false
+
+	if err := client.DetachProcess(); err != nil {
 		t.Fatalf("failed to detach from the process: %v", err)
 	}
 }
@@ -387,6 +413,16 @@ func findProcessID(progName string, parentPID int) (int, error) {
 	}
 
 	return strconv.Atoi(string(out[0 : len(out)-1])) // remove newline
+}
+
+func existsPid(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+
+	// Signal 0 can be used to check the validity of pid.
+	return process.Signal(syscall.Signal(0)) == nil
 }
 
 func sendSignal(pid int, signal syscall.Signal) error {

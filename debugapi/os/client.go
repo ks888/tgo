@@ -71,6 +71,7 @@ func (c Client) AttachProcess(pid int) error {
 
 // DetachProcess detaches from the process.
 func (c Client) DetachProcess(pid int) error {
+	// TODO: kill the debugee process if it is launched by us.
 	return unix.PtraceDetach(pid)
 }
 

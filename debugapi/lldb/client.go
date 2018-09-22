@@ -28,6 +28,7 @@ const maxPacketSize = 4096
 type Client struct {
 	conn                 net.Conn
 	pid                  int
+	killOnDetach         bool
 	noAckMode            bool
 	registerMetadataList []registerMetadata
 	buffer               []byte
@@ -53,6 +54,7 @@ func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
 	debugServerArgs := []string{"-F", "-R", listener.Addr().String(), "--", name}
 	debugServerArgs = append(debugServerArgs, arg...)
 	cmd := exec.Command(debugServerPath, debugServerArgs...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, the signal sent to all the group members.
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
@@ -62,6 +64,7 @@ func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
 		return 0, err
 	}
 	c.pid = cmd.Process.Pid
+	c.killOnDetach = true
 
 	if err := c.initialize(); err != nil {
 		return 0, err
@@ -309,11 +312,30 @@ func (c *Client) AttachProcess(pid int) (int, error) {
 
 // DetachProcess detaches from the prcoess.
 func (c *Client) DetachProcess() error {
+	defer c.conn.Close()
+	if c.killOnDetach {
+		return c.killProcess()
+	}
+
 	if err := c.send("D"); err != nil {
 		return err
 	}
 
 	return c.receiveAndCheck()
+}
+
+func (c *Client) killProcess() error {
+	if err := c.send("k"); err != nil {
+		return err
+	}
+	data, err := c.receive()
+	if err != nil {
+		return err
+	} else if !strings.HasPrefix(data, "X09") {
+		return fmt.Errorf("unexpected reply: %s", data)
+	}
+	// debugserver automatically exits. So don't explicitly detach here.
+	return nil
 }
 
 // ReadRegisters reads the target tid's registers.
@@ -587,7 +609,7 @@ func (c *Client) handleWPacket(data string) (int, debugapi.Event, error) {
 func (c *Client) handleXPacket(data string) (int, debugapi.Event, error) {
 	signalNumber, err := hexToUint64(data[1:3], false)
 	// TODO: set pid.
-	// TODO: signalNumber here looks always 0. The number in the description looks correct, so use it.
+	// TODO: signalNumber here looks always 0. The number in the description looks correct, so maybe better to use it instead.
 	return 0, debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
 }
 
