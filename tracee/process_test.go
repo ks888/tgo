@@ -18,6 +18,25 @@ func TestLaunchProcess(t *testing.T) {
 	}
 }
 
+func TestDetach(t *testing.T) {
+	proc, err := LaunchProcess(testdataParameters)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	if err := proc.SetBreakpoint(addrNoParameter); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	if err := proc.Detach(); err != nil {
+		t.Fatalf("failed to detach process: %v", err)
+	}
+
+	if proc.HasBreakpoint(addrNoParameter) {
+		t.Errorf("breakpoint still exists")
+	}
+}
+
 func TestContinueAndWait(t *testing.T) {
 	proc, err := LaunchProcess(testdataParameters)
 	if err != nil {

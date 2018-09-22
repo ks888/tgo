@@ -54,3 +54,21 @@ func TestLaunchProcess(t *testing.T) {
 		t.Errorf("breakpoint is set at runtime.morestack")
 	}
 }
+
+func TestInterrupt(t *testing.T) {
+	controller := &Controller{}
+	err := controller.LaunchTracee(testdataHelloworld)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	done := make(chan error)
+	go func(ch chan error) {
+		ch <- controller.MainLoop()
+	}(done)
+
+	controller.Interrupt()
+	if err := <-done; err != ErrInterrupted {
+		t.Errorf("not interrupted: %v", err)
+	}
+}

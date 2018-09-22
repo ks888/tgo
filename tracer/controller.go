@@ -11,9 +11,12 @@ import (
 	"github.com/ks888/tgo/tracee"
 )
 
+var ErrInterrupted = errors.New("interrupted")
+
 type Controller struct {
 	process     *tracee.Process
 	statusStore map[int]goRoutineStatus
+	interrupted bool
 }
 
 type goRoutineStatus struct {
@@ -86,7 +89,9 @@ func (c *Controller) MainLoop() error {
 			return fmt.Errorf("the process exited due to signal %d", event.Data)
 		case debugapi.EventTypeTrapped:
 			event, err = c.handleTrapEvent()
-			if err != nil {
+			if err == ErrInterrupted {
+				return err
+			} else if err != nil {
 				return fmt.Errorf("failed to handle trap event: %v", err)
 			}
 		default:
@@ -130,6 +135,13 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 			return debugapi.Event{}, err
 		}
 
+		if c.interrupted {
+			if err := c.process.Detach(); err != nil {
+				return debugapi.Event{}, err
+			}
+			return debugapi.Event{}, ErrInterrupted
+		}
+
 		c.statusStore[goRoutineID] = goRoutineStatus{
 			statusType:        goRoutineSingleStepping,
 			usedStackSize:     goRoutineInfo.UsedStackSize,
@@ -167,4 +179,9 @@ func (c *Controller) printFunction(goRoutineID int, stackFrame *tracee.StackFram
 	fmt.Printf("#%02d %s(%s)\n", goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
+}
+
+// Interrupt has the main loop exit.
+func (c *Controller) Interrupt() {
+	c.interrupted = true
 }

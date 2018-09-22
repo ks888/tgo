@@ -3,13 +3,15 @@ package tracee
 import (
 	"debug/dwarf"
 	"debug/elf"
+	"io"
 )
 
-func findDWARF(pathToProgram string) (*dwarf.Data, error) {
+func findDWARF(pathToProgram string) (io.Closer, *dwarf.Data, error) {
 	elfFile, err := elf.Open(pathToProgram)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return elfFile.DWARF()
+	data, err := elfFile.DWARF()
+	return elfFile, data, err
 }

@@ -92,6 +92,22 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 // 	return proc, nil
 // }
 
+// Detach detaches from the tracee process. All breakpoints are cleared.
+func (p *Process) Detach() error {
+	for breakpointAddr := range p.breakpoints {
+		if err := p.ClearBreakpoint(breakpointAddr); err != nil {
+			return err
+		}
+	}
+
+	if err := p.debugapiClient.DetachProcess(); err != nil {
+		return err
+	}
+
+	p.Binary.Close()
+	return nil
+}
+
 // ContinueAndWait continues the execution and waits until an event happens.
 // Note that the id of the stopped thread may be different from the id of the continued thread.
 func (p *Process) ContinueAndWait() (event debugapi.Event, err error) {

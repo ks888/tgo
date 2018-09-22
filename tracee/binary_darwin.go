@@ -3,13 +3,15 @@ package tracee
 import (
 	"debug/dwarf"
 	"debug/macho"
+	"io"
 )
 
-func findDWARF(pathToProgram string) (*dwarf.Data, error) {
+func findDWARF(pathToProgram string) (io.Closer, *dwarf.Data, error) {
 	machoFile, err := macho.Open(pathToProgram)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return machoFile.DWARF()
+	data, err := machoFile.DWARF()
+	return machoFile, data, err
 }

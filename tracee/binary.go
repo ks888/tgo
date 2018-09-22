@@ -4,6 +4,7 @@ import (
 	"debug/dwarf"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"sort"
 	"strings"
@@ -19,7 +20,8 @@ const (
 
 // Binary represents the program the tracee process executes
 type Binary struct {
-	dwarf *dwarf.Data
+	dwarf  *dwarf.Data
+	closer io.Closer
 }
 
 // Function represents a function info in the debug info section.
@@ -40,12 +42,17 @@ type Parameter struct {
 
 // NewBinary returns the new binary object associated to the program.
 func NewBinary(pathToProgram string) (Binary, error) {
-	dwarfData, err := findDWARF(pathToProgram)
+	closer, dwarfData, err := findDWARF(pathToProgram)
 	if err != nil {
 		return Binary{}, err
 	}
 
-	return Binary{dwarf: dwarfData}, nil
+	return Binary{dwarf: dwarfData, closer: closer}, nil
+}
+
+// Close releases the resources associated with the binary.
+func (binary Binary) Close() error {
+	return nil
 }
 
 // FindFunction looks up the function info described in the debug info section.
