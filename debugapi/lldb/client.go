@@ -312,7 +312,7 @@ func (c *Client) AttachProcess(pid int) (int, error) {
 
 // DetachProcess detaches from the prcoess.
 func (c *Client) DetachProcess() error {
-	defer c.Close()
+	defer c.close()
 	if c.killOnDetach {
 		return c.killProcess()
 	}
@@ -324,8 +324,7 @@ func (c *Client) DetachProcess() error {
 	return c.receiveAndCheck()
 }
 
-// Close closes the connection to the debugserver.
-func (c *Client) Close() error {
+func (c *Client) close() error {
 	return c.conn.Close()
 }
 
@@ -549,19 +548,24 @@ func (c *Client) wait() (int, debugapi.Event, error) {
 	return c.handleStopReply(data)
 }
 
-func (c *Client) handleStopReply(data string) (int, debugapi.Event, error) {
+func (c *Client) handleStopReply(data string) (tid int, event debugapi.Event, err error) {
 	switch data[0] {
 	case 'T':
-		return c.handleTPacket(data)
+		tid, event, err = c.handleTPacket(data)
 	case 'O':
-		return c.handleOPacket(data)
+		tid, event, err = c.handleOPacket(data)
 	case 'W':
-		return c.handleWPacket(data)
+		tid, event, err = c.handleWPacket(data)
 	case 'X':
-		return c.handleXPacket(data)
+		tid, event, err = c.handleXPacket(data)
+	default:
+		err = fmt.Errorf("unknown packet type: %s", data)
 	}
 
-	return 0, debugapi.Event{}, fmt.Errorf("unknown packet type: %s", data)
+	if debugapi.IsExitEvent(event.Type) {
+		err = c.close()
+	}
+	return tid, event, err
 }
 
 func (c *Client) handleTPacket(data string) (int, debugapi.Event, error) {

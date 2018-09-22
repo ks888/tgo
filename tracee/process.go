@@ -104,20 +104,29 @@ func (p *Process) Detach() error {
 		return err
 	}
 
-	p.Binary.Close()
-	return nil
+	return p.close()
+}
+
+func (p *Process) close() error {
+	return p.Binary.Close()
 }
 
 // ContinueAndWait continues the execution and waits until an event happens.
 // Note that the id of the stopped thread may be different from the id of the continued thread.
 func (p *Process) ContinueAndWait() (event debugapi.Event, err error) {
 	p.currentThreadID, event, err = p.debugapiClient.ContinueAndWait()
+	if debugapi.IsExitEvent(event.Type) {
+		err = p.close()
+	}
 	return event, err
 }
 
 // StepAndWait does the single-step execution.
 func (p *Process) StepAndWait() (event debugapi.Event, err error) {
 	p.currentThreadID, event, err = p.debugapiClient.StepAndWait(p.currentThreadID)
+	if debugapi.IsExitEvent(event.Type) {
+		err = p.close()
+	}
 	return event, err
 }
 

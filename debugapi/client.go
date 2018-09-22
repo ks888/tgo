@@ -33,6 +33,11 @@ const (
 	EventTypeTerminated
 )
 
+// IsExitEvent returns true if the event indicates the process exits for some reason.
+func IsExitEvent(event EventType) bool {
+	return event == EventTypeCoreDump || event == EventTypeExited || event == EventTypeTerminated
+}
+
 // Event describes the event happens to the target process.
 type Event struct {
 	Type EventType

@@ -52,7 +52,7 @@ func NewBinary(pathToProgram string) (Binary, error) {
 
 // Close releases the resources associated with the binary.
 func (binary Binary) Close() error {
-	return nil
+	return binary.closer.Close()
 }
 
 // FindFunction looks up the function info described in the debug info section.
