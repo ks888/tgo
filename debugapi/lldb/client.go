@@ -312,7 +312,7 @@ func (c *Client) AttachProcess(pid int) (int, error) {
 
 // DetachProcess detaches from the prcoess.
 func (c *Client) DetachProcess() error {
-	defer c.conn.Close()
+	defer c.Close()
 	if c.killOnDetach {
 		return c.killProcess()
 	}
@@ -322,6 +322,11 @@ func (c *Client) DetachProcess() error {
 	}
 
 	return c.receiveAndCheck()
+}
+
+// Close closes the connection to the debugserver.
+func (c *Client) Close() error {
+	return c.conn.Close()
 }
 
 func (c *Client) killProcess() error {
@@ -386,12 +391,13 @@ func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
 }
 
 // WriteRegisters updates the registers' value.
-// The 'P' command is not used here due to the bug explained here: https://github.com/llvm-mirror/lldb/commit/d8d7a40ca5377aa777e3840f3e9b6a63c6b09445
 func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
 	data, err := c.readRegisters(tid)
 	if err != nil {
 		return err
 	}
+
+	// The 'P' command is not used due to the bug explained here: https://github.com/llvm-mirror/lldb/commit/d8d7a40ca5377aa777e3840f3e9b6a63c6b09445
 
 	for _, metadata := range c.registerMetadataList {
 		prefix := data[0 : metadata.offset*2]
@@ -602,13 +608,11 @@ func (c *Client) handleOPacket(data string) (int, debugapi.Event, error) {
 
 func (c *Client) handleWPacket(data string) (int, debugapi.Event, error) {
 	exitStatus, err := hexToUint64(data[1:3], false)
-	// TODO: set pid.
 	return 0, debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
 }
 
 func (c *Client) handleXPacket(data string) (int, debugapi.Event, error) {
 	signalNumber, err := hexToUint64(data[1:3], false)
-	// TODO: set pid.
 	// TODO: signalNumber here looks always 0. The number in the description looks correct, so maybe better to use it instead.
 	return 0, debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
 }

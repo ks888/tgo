@@ -20,11 +20,8 @@ var (
 	infloopFilename           = "infloop"
 	infloopProgram            = "testdata/" + infloopFilename
 	beginTextSection   uint64 = 0x1000000
-	mainAddr           uint64 = 0x1051430
+	mainAddr           uint64 = 0x104e6d0
 )
-
-// The debugserver exits when the connection is closed.
-// So do not need to kill the process here.
 
 func TestLaunchProcess(t *testing.T) {
 	client := NewClient()
@@ -35,6 +32,7 @@ func TestLaunchProcess(t *testing.T) {
 	if tid == 0 {
 		t.Errorf("invalid tid: %d", tid)
 	}
+	defer client.DetachProcess()
 }
 
 func TestLaunchProcess_ProgramNotExist(t *testing.T) {
@@ -57,6 +55,7 @@ func TestAttachProcess(t *testing.T) {
 	if tid == 0 {
 		t.Errorf("invalid tid: %d", tid)
 	}
+	cmd.Process.Kill()
 }
 
 func TestAttachProcess_WrongPID(t *testing.T) {
@@ -77,6 +76,7 @@ func TestDetachProcess_KillProc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	debugeeProcID, _ := findProcessID(infloopFilename, client.pid)
 
@@ -96,28 +96,20 @@ func TestDetachProcess_KillProc(t *testing.T) {
 	}
 }
 
-func TestDetachProcess_NotKillProc(t *testing.T) {
-	client := NewClient()
-	_, err := client.LaunchProcess(infloopProgram)
-	if err != nil {
-		t.Fatalf("failed to launch process: %v", err)
-	}
-	client.killOnDetach = false
-
-	if err := client.DetachProcess(); err != nil {
-		t.Fatalf("failed to detach from the process: %v", err)
-	}
-}
-
 func TestReadRegisters(t *testing.T) {
 	client := NewClient()
 	tid, err := client.LaunchProcess(infloopProgram)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
-	_ = client.WriteMemory(mainAddr, []byte{0xcc})
-	_, _, _ = client.ContinueAndWait()
+	if err := client.WriteMemory(mainAddr, []byte{0xcc}); err != nil {
+		t.Fatalf("failed to write memory: %v", err)
+	}
+	if _, _, err := client.ContinueAndWait(); err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
 
 	regs, err := client.ReadRegisters(tid)
 	if err != nil {
@@ -137,6 +129,7 @@ func TestWriteRegisters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	regs := debugapi.Registers{Rip: 0x1, Rsp: 0x2, Rcx: 0x3}
 	if err := client.WriteRegisters(tid, regs); err != nil {
@@ -161,6 +154,7 @@ func TestAllocateMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	addr, err := client.allocateMemory(1)
 	if err != nil {
@@ -178,6 +172,7 @@ func TestDeallocateMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	addr, _ := client.allocateMemory(1)
 	err = client.deallocateMemory(addr)
@@ -192,6 +187,7 @@ func TestReadMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	out := make([]byte, 2)
 	err = client.ReadMemory(beginTextSection, out)
@@ -210,6 +206,7 @@ func TestWriteMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	data := []byte{0x1, 0x2, 0x3, 0x4}
 	err = client.WriteMemory(beginTextSection, data)
@@ -231,6 +228,7 @@ func TestReadTLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	_ = client.WriteMemory(mainAddr, []byte{0xcc})
 	_, _, _ = client.ContinueAndWait()
@@ -243,15 +241,6 @@ func TestReadTLS(t *testing.T) {
 	if client.currentTLSOffset != offset {
 		t.Errorf("wrong offset: %x", client.currentTLSOffset)
 	}
-
-	// depends on os and cpu
-	// buff := make([]byte, 8)
-	// var offsetToID uint64 = 8*2 + 8 + 8 + 8 + 8 + 8 + 8*7 + 8 + 8 + 8 + 8 + 4 + 4
-	// _ = client.ReadMemory(gAddr+offsetToID, buff)
-	// goRoutineID := binary.LittleEndian.Uint64(buff)
-	// if goRoutineID != 1 {
-	// 	t.Errorf("unexpected go routine id: %d", goRoutineID)
-	// }
 }
 
 func TestContinueAndWait_Trapped(t *testing.T) {
@@ -260,6 +249,7 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	out := []byte{0xcc}
 	err = client.WriteMemory(mainAddr, out)
@@ -365,6 +355,7 @@ func TestStepAndWait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	newTid, event, err := client.StepAndWait(tid)
 	if err != nil {
@@ -384,6 +375,7 @@ func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	orgInsts := make([]byte, 1)
 	_ = client.ReadMemory(mainAddr, orgInsts)
