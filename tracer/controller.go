@@ -117,8 +117,15 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 
 	switch status.statusType {
 	case goRoutineRunning:
+		if !c.process.HitBreakpoint(goRoutineInfo.CurrentPC-1, goRoutineID) {
+			return c.handleTrapAtUnrelatedBreakpoint(status, goRoutineInfo)
+		}
+
 		if goRoutineInfo.UsedStackSize < status.usedStackSize {
 			return c.handleTrapAtFunctionReturn(status, goRoutineInfo)
+		} else if goRoutineInfo.UsedStackSize == status.usedStackSize {
+			// it's likely we are in the same stack frame as before (typical for the stack growth case).
+			return c.handleTrapAtUnrelatedBreakpoint(status, goRoutineInfo)
 		}
 		return c.handleTrapAtFunctionCall(status, goRoutineInfo)
 
@@ -137,6 +144,27 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 	}
 }
 
+func (c *Controller) handleTrapAtUnrelatedBreakpoint(status goRoutineStatus, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
+	goRoutineID := int(goRoutineInfo.ID)
+	trappedAddr := goRoutineInfo.CurrentPC - 1
+
+	if err := c.process.SetPC(trappedAddr); err != nil {
+		return debugapi.Event{}, err
+	}
+
+	if err := c.process.ClearBreakpoint(trappedAddr); err != nil {
+		return debugapi.Event{}, err
+	}
+
+	c.statusStore[goRoutineID] = goRoutineStatus{
+		statusType:          goRoutineSingleStepping,
+		usedStackSize:       goRoutineInfo.UsedStackSize,
+		callingFunctions:    status.callingFunctions,
+		breakpointToRestore: trappedAddr,
+	}
+	return c.process.StepAndWait()
+}
+
 func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
 	stackFrame, err := c.currentStackFrame(goRoutineInfo)
 	if err != nil {
@@ -145,17 +173,12 @@ func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, goRoutineI
 
 	goRoutineID := int(goRoutineInfo.ID)
 	funcAddr := stackFrame.Function.Value
-	if c.process.HitBreakpoint(funcAddr, goRoutineID) && goRoutineInfo.UsedStackSize != status.usedStackSize {
-		// If the size is same as before, it's likely we are still in the same stack frame (typical for the stack growth case).
-		if err := c.printFunctionInput(goRoutineID, stackFrame); err != nil {
-			return debugapi.Event{}, err
-		}
+	if err := c.printFunctionInput(goRoutineID, stackFrame); err != nil {
+		return debugapi.Event{}, err
+	}
 
-		if err := c.process.SetConditionalBreakpoint(stackFrame.ReturnAddress, goRoutineID); err != nil {
-			return debugapi.Event{}, err
-		}
-
-		status.callingFunctions = append(status.callingFunctions, stackFrame.Function)
+	if err := c.process.SetConditionalBreakpoint(stackFrame.ReturnAddress, goRoutineID); err != nil {
+		return debugapi.Event{}, err
 	}
 
 	if err := c.process.SetPC(funcAddr); err != nil {
@@ -176,7 +199,7 @@ func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, goRoutineI
 	c.statusStore[goRoutineID] = goRoutineStatus{
 		statusType:          goRoutineSingleStepping,
 		usedStackSize:       goRoutineInfo.UsedStackSize,
-		callingFunctions:    status.callingFunctions,
+		callingFunctions:    append(status.callingFunctions, stackFrame.Function),
 		breakpointToRestore: funcAddr,
 	}
 	return c.process.StepAndWait()
@@ -201,13 +224,6 @@ func (c *Controller) handleTrapAtFunctionReturn(status goRoutineStatus, goRoutin
 
 	if err := c.process.ClearBreakpoint(breakpointAddr); err != nil {
 		return debugapi.Event{}, err
-	}
-
-	if c.interrupted {
-		if err := c.process.Detach(); err != nil {
-			return debugapi.Event{}, err
-		}
-		return debugapi.Event{}, ErrInterrupted
 	}
 
 	c.statusStore[goRoutineID] = goRoutineStatus{
