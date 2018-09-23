@@ -173,7 +173,7 @@ func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, goRoutineI
 
 	goRoutineID := int(goRoutineInfo.ID)
 	funcAddr := stackFrame.Function.Value
-	if err := c.printFunctionInput(goRoutineID, stackFrame); err != nil {
+	if err := c.printFunctionInput(goRoutineID, stackFrame, len(status.callingFunctions)+1); err != nil {
 		return debugapi.Event{}, err
 	}
 
@@ -213,7 +213,7 @@ func (c *Controller) handleTrapAtFunctionReturn(status goRoutineStatus, goRoutin
 	if err != nil {
 		return debugapi.Event{}, err
 	}
-	if err := c.printFunctionOutput(goRoutineID, prevStackFrame); err != nil {
+	if err := c.printFunctionOutput(goRoutineID, prevStackFrame, len(status.callingFunctions)); err != nil {
 		return debugapi.Event{}, err
 	}
 
@@ -244,7 +244,7 @@ func (c *Controller) prevStackFrame(goRoutineInfo tracee.GoRoutineInfo, rip uint
 	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-16, rip)
 }
 
-func (c *Controller) printFunctionInput(goRoutineID int, stackFrame *tracee.StackFrame) error {
+func (c *Controller) printFunctionInput(goRoutineID int, stackFrame *tracee.StackFrame, depth int) error {
 	var args []string
 	for _, arg := range stackFrame.InputArguments {
 		var value string
@@ -256,12 +256,12 @@ func (c *Controller) printFunctionInput(goRoutineID int, stackFrame *tracee.Stac
 		}
 		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
 	}
-	fmt.Printf("#%02d %s(%s)\n", goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+	fmt.Printf("%s => (#%02d) %s(%s)\n", strings.Repeat(" ", depth), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
 }
 
-func (c *Controller) printFunctionOutput(goRoutineID int, stackFrame *tracee.StackFrame) error {
+func (c *Controller) printFunctionOutput(goRoutineID int, stackFrame *tracee.StackFrame, depth int) error {
 	var args []string
 	for _, arg := range stackFrame.OutputArguments {
 		var value string
@@ -273,7 +273,7 @@ func (c *Controller) printFunctionOutput(goRoutineID int, stackFrame *tracee.Sta
 		}
 		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
 	}
-	fmt.Printf("#%02d %s(...) (%s)\n", goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+	fmt.Printf("%s<= (#%02d) %s(...) (%s)\n", strings.Repeat(" ", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
 }
