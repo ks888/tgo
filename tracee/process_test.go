@@ -235,7 +235,7 @@ func TestSetPC(t *testing.T) {
 	}
 }
 
-func TestCurrentStackFrame(t *testing.T) {
+func TestStackFrameAt(t *testing.T) {
 	proc, err := LaunchProcess(testdataParameters)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -249,7 +249,12 @@ func TestCurrentStackFrame(t *testing.T) {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 
-	stackFrame, err := proc.CurrentStackFrame()
+	regs, err := proc.debugapiClient.ReadRegisters(proc.currentThreadID)
+	if err != nil {
+		t.Fatalf("failed to read registers: %v", err)
+	}
+
+	stackFrame, err := proc.StackFrameAt(regs.Rsp-8, regs.Rip)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}

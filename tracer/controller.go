@@ -104,11 +104,6 @@ func (c *Controller) MainLoop() error {
 }
 
 func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
-	stackFrame, err := c.process.CurrentStackFrame()
-	if err != nil {
-		return debugapi.Event{}, err
-	}
-
 	goRoutineInfo, err := c.process.CurrentGoRoutineInfo()
 	if err != nil {
 		return debugapi.Event{}, err
@@ -123,9 +118,9 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 	switch status.statusType {
 	case goRoutineRunning:
 		if goRoutineInfo.UsedStackSize < status.usedStackSize {
-			return c.handleTrapAtFunctionReturn(status, stackFrame, goRoutineInfo)
+			return c.handleTrapAtFunctionReturn(status, goRoutineInfo)
 		}
-		return c.handleTrapAtFunctionCall(status, stackFrame, goRoutineInfo)
+		return c.handleTrapAtFunctionCall(status, goRoutineInfo)
 
 	case goRoutineSingleStepping:
 		if err := c.process.SetBreakpoint(status.breakpointToRestore); err != nil {
@@ -142,7 +137,12 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 	}
 }
 
-func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, stackFrame *tracee.StackFrame, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
+func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
+	stackFrame, err := c.currentStackFrame(goRoutineInfo)
+	if err != nil {
+		return debugapi.Event{}, err
+	}
+
 	goRoutineID := int(goRoutineInfo.ID)
 	funcAddr := stackFrame.Function.Value
 	if c.process.HitBreakpoint(funcAddr, goRoutineID) && goRoutineInfo.UsedStackSize != status.usedStackSize {
@@ -182,11 +182,11 @@ func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, stackFrame
 	return c.process.StepAndWait()
 }
 
-func (c *Controller) handleTrapAtFunctionReturn(status goRoutineStatus, stackFrame *tracee.StackFrame, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
+func (c *Controller) handleTrapAtFunctionReturn(status goRoutineStatus, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
 	goRoutineID := int(goRoutineInfo.ID)
 
 	function := status.callingFunctions[len(status.callingFunctions)-1]
-	prevStackFrame, err := c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-16, function.Value)
+	prevStackFrame, err := c.prevStackFrame(goRoutineInfo, function.Value)
 	if err != nil {
 		return debugapi.Event{}, err
 	}
@@ -216,6 +216,16 @@ func (c *Controller) handleTrapAtFunctionReturn(status goRoutineStatus, stackFra
 		usedStackSize:    goRoutineInfo.UsedStackSize,
 	}
 	return c.process.ContinueAndWait()
+}
+
+// It must be called at the beginning of the function, because it assumes rbp = rsp-8
+func (c *Controller) currentStackFrame(goRoutineInfo tracee.GoRoutineInfo) (*tracee.StackFrame, error) {
+	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-8, goRoutineInfo.CurrentPC)
+}
+
+// It must be called at return address, because it assumes rbp = rsp-16
+func (c *Controller) prevStackFrame(goRoutineInfo tracee.GoRoutineInfo, rip uint64) (*tracee.StackFrame, error) {
+	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-16, rip)
 }
 
 func (c *Controller) printFunctionInput(goRoutineID int, stackFrame *tracee.StackFrame) error {

@@ -201,19 +201,6 @@ func (p *Process) SetPC(addr uint64) error {
 	return p.debugapiClient.WriteRegisters(p.currentThreadID, regs)
 }
 
-// CurrentStackFrame returns the stack frame of the go routine associated with the stopped thread.
-// It must be called at the beginning of the function.
-// TODO: move to controller. It depends on the caller's timing.
-func (p *Process) CurrentStackFrame() (*StackFrame, error) {
-	regs, err := p.debugapiClient.ReadRegisters(p.currentThreadID)
-	if err != nil {
-		return nil, err
-	}
-
-	// assumes the rsp-8 specifies to the base pointer of the current function.
-	return p.StackFrameAt(regs.Rsp-8, regs.Rip)
-}
-
 // StackFrameAt returns the stack frame to which the given rbp specified.
 // To get the correct stack frame, it assumes:
 // * rbp+8 points to the return address.
