@@ -22,10 +22,13 @@ type Controller struct {
 type goRoutineStatus struct {
 	statusType    goRoutineStatusType
 	usedStackSize uint64
-	// clearedBreakpoints is the address the break point should be set, but temporarily cleared by the go routine for single stepping.
+	// callingFunctions is the list of functions in the call stack.
+	// This list include only the functions which hit the breakpoint before and so is not complete.
+	callingFunctions []*tracee.Function
+	// breakpointToRestore is the address the break point should be set, but temporarily cleared by the go routine for single stepping.
 	// Usually the function doesn't change after the single stepping and so this address is not necessary,
 	// but the function changes when the function 'CALL's at the beginning of the function.
-	clearedBreakpoint uint64
+	breakpointToRestore uint64
 }
 
 type goRoutineStatusType int
@@ -105,13 +108,13 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 	if err != nil {
 		return debugapi.Event{}, err
 	}
-	funcAddr := stackFrame.Function.Value
 
 	goRoutineInfo, err := c.process.CurrentGoRoutineInfo()
 	if err != nil {
 		return debugapi.Event{}, err
 	}
 	goRoutineID := int(goRoutineInfo.ID)
+
 	status, ok := c.statusStore[goRoutineID]
 	if !ok {
 		status = goRoutineStatus{statusType: goRoutineRunning}
@@ -119,43 +122,18 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 
 	switch status.statusType {
 	case goRoutineRunning:
-		// TODO: enable the condition after supporting the return case.
-		// if goRoutineInfo.UsedStackSize != status.usedStackSize {
-		// If the size is same as before, it's likely we are still in the same stack frame (typical for the stack growth case).
-		if err := c.printFunction(goRoutineID, stackFrame); err != nil {
-			return debugapi.Event{}, err
+		if goRoutineInfo.UsedStackSize < status.usedStackSize {
+			return c.handleTrapAtFunctionReturn(status, stackFrame, goRoutineInfo)
 		}
-		// }
-
-		if err := c.process.SetPC(funcAddr); err != nil {
-			return debugapi.Event{}, err
-		}
-
-		if err := c.process.ClearBreakpoint(funcAddr); err != nil {
-			return debugapi.Event{}, err
-		}
-
-		if c.interrupted {
-			if err := c.process.Detach(); err != nil {
-				return debugapi.Event{}, err
-			}
-			return debugapi.Event{}, ErrInterrupted
-		}
-
-		c.statusStore[goRoutineID] = goRoutineStatus{
-			statusType:        goRoutineSingleStepping,
-			usedStackSize:     goRoutineInfo.UsedStackSize,
-			clearedBreakpoint: funcAddr,
-		}
-		return c.process.StepAndWait()
+		return c.handleTrapAtFunctionCall(status, stackFrame, goRoutineInfo)
 
 	case goRoutineSingleStepping:
-		if err := c.process.SetBreakpoint(status.clearedBreakpoint); err != nil {
+		if err := c.process.SetBreakpoint(status.breakpointToRestore); err != nil {
 			return debugapi.Event{}, err
 		}
 
 		status.statusType = goRoutineRunning
-		status.clearedBreakpoint = 0
+		status.breakpointToRestore = 0
 		c.statusStore[goRoutineID] = status
 		return c.process.ContinueAndWait()
 
@@ -164,7 +142,83 @@ func (c *Controller) handleTrapEvent() (debugapi.Event, error) {
 	}
 }
 
-func (c *Controller) printFunction(goRoutineID int, stackFrame *tracee.StackFrame) error {
+func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, stackFrame *tracee.StackFrame, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
+	goRoutineID := int(goRoutineInfo.ID)
+	funcAddr := stackFrame.Function.Value
+	if c.process.HitBreakpoint(funcAddr, goRoutineID) && goRoutineInfo.UsedStackSize != status.usedStackSize {
+		// If the size is same as before, it's likely we are still in the same stack frame (typical for the stack growth case).
+		if err := c.printFunctionInput(goRoutineID, stackFrame); err != nil {
+			return debugapi.Event{}, err
+		}
+
+		if err := c.process.SetConditionalBreakpoint(stackFrame.ReturnAddress, goRoutineID); err != nil {
+			return debugapi.Event{}, err
+		}
+
+		status.callingFunctions = append(status.callingFunctions, stackFrame.Function)
+	}
+
+	if err := c.process.SetPC(funcAddr); err != nil {
+		return debugapi.Event{}, err
+	}
+
+	if err := c.process.ClearBreakpoint(funcAddr); err != nil {
+		return debugapi.Event{}, err
+	}
+
+	if c.interrupted {
+		if err := c.process.Detach(); err != nil {
+			return debugapi.Event{}, err
+		}
+		return debugapi.Event{}, ErrInterrupted
+	}
+
+	c.statusStore[goRoutineID] = goRoutineStatus{
+		statusType:          goRoutineSingleStepping,
+		usedStackSize:       goRoutineInfo.UsedStackSize,
+		callingFunctions:    status.callingFunctions,
+		breakpointToRestore: funcAddr,
+	}
+	return c.process.StepAndWait()
+}
+
+func (c *Controller) handleTrapAtFunctionReturn(status goRoutineStatus, stackFrame *tracee.StackFrame, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
+	goRoutineID := int(goRoutineInfo.ID)
+
+	function := status.callingFunctions[len(status.callingFunctions)-1]
+	prevStackFrame, err := c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-16, function.Value)
+	if err != nil {
+		return debugapi.Event{}, err
+	}
+	if err := c.printFunctionOutput(goRoutineID, prevStackFrame); err != nil {
+		return debugapi.Event{}, err
+	}
+
+	breakpointAddr := goRoutineInfo.CurrentPC - 1
+	if err := c.process.SetPC(breakpointAddr); err != nil {
+		return debugapi.Event{}, err
+	}
+
+	if err := c.process.ClearBreakpoint(breakpointAddr); err != nil {
+		return debugapi.Event{}, err
+	}
+
+	if c.interrupted {
+		if err := c.process.Detach(); err != nil {
+			return debugapi.Event{}, err
+		}
+		return debugapi.Event{}, ErrInterrupted
+	}
+
+	c.statusStore[goRoutineID] = goRoutineStatus{
+		statusType:       goRoutineRunning,
+		callingFunctions: status.callingFunctions[0 : len(status.callingFunctions)-1],
+		usedStackSize:    goRoutineInfo.UsedStackSize,
+	}
+	return c.process.ContinueAndWait()
+}
+
+func (c *Controller) printFunctionInput(goRoutineID int, stackFrame *tracee.StackFrame) error {
 	var args []string
 	for _, arg := range stackFrame.InputArguments {
 		var value string
@@ -177,6 +231,23 @@ func (c *Controller) printFunction(goRoutineID int, stackFrame *tracee.StackFram
 		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
 	}
 	fmt.Printf("#%02d %s(%s)\n", goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+
+	return nil
+}
+
+func (c *Controller) printFunctionOutput(goRoutineID int, stackFrame *tracee.StackFrame) error {
+	var args []string
+	for _, arg := range stackFrame.OutputArguments {
+		var value string
+		switch arg.Typ.String() {
+		case "int", "int64":
+			value = strconv.Itoa(int(binary.LittleEndian.Uint64(arg.Value)))
+		default:
+			value = fmt.Sprintf("%v", arg.Value)
+		}
+		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
+	}
+	fmt.Printf("#%02d %s(...) (%s)\n", goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
 }

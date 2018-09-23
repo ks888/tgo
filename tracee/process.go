@@ -43,8 +43,10 @@ type Argument struct {
 
 // GoRoutineInfo describes the various info of the go routine like stack frame.
 type GoRoutineInfo struct {
-	ID            int64
-	UsedStackSize uint64
+	ID               int64
+	UsedStackSize    uint64
+	CurrentPC        uint64
+	CurrentStackAddr uint64
 }
 
 // LaunchProcess launches new tracee process.
@@ -200,26 +202,35 @@ func (p *Process) SetPC(addr uint64) error {
 }
 
 // CurrentStackFrame returns the stack frame of the go routine associated with the stopped thread.
+// It must be called at the beginning of the function.
+// TODO: move to controller. It depends on the caller's timing.
 func (p *Process) CurrentStackFrame() (*StackFrame, error) {
 	regs, err := p.debugapiClient.ReadRegisters(p.currentThreadID)
 	if err != nil {
 		return nil, err
 	}
 
-	function, err := p.Binary.FindFunction(regs.Rip)
+	// assumes the rsp-8 specifies to the base pointer of the current function.
+	return p.StackFrameAt(regs.Rsp-8, regs.Rip)
+}
+
+// StackFrameAt returns the stack frame to which the given rbp specified.
+// To get the correct stack frame, it assumes:
+// * rbp+8 points to the return address.
+// * rbp+16 points to the beginning of the args list.
+func (p *Process) StackFrameAt(rbp, rip uint64) (*StackFrame, error) {
+	function, err := p.Binary.FindFunction(rip)
 	if err != nil {
 		return nil, err
 	}
 
 	buff := make([]byte, 8)
-	// assumes the rsp points to the return address in the beginning of the function.
-	if err := p.debugapiClient.ReadMemory(regs.Rsp, buff); err != nil {
+	if err := p.debugapiClient.ReadMemory(rbp+8, buff); err != nil {
 		return nil, err
 	}
 	retAddr := binary.LittleEndian.Uint64(buff)
 
-	// assumes the rsp+8 points to the beginning of the args.
-	inputArgs, outputArgs, err := p.currentArgs(function.Parameters, regs.Rsp+8)
+	inputArgs, outputArgs, err := p.currentArgs(function.Parameters, rbp+16)
 	if err != nil {
 		return nil, err
 	}
@@ -279,5 +290,5 @@ func (p *Process) CurrentGoRoutineInfo() (GoRoutineInfo, error) {
 	}
 	usedStackSize := stackHi - regs.Rsp
 
-	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize}, nil
+	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp}, nil
 }

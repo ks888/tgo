@@ -297,4 +297,10 @@ func TestCurrentGoRoutineInfo(t *testing.T) {
 	if goRoutineInfo.UsedStackSize == 0 {
 		t.Errorf("wrong stack size: %d", goRoutineInfo.UsedStackSize)
 	}
+	if goRoutineInfo.CurrentPC != addrMain+1 {
+		t.Errorf("empty return address: %d", goRoutineInfo.CurrentPC)
+	}
+	if goRoutineInfo.CurrentStackAddr == 0 {
+		t.Errorf("empty stack address: %d", goRoutineInfo.CurrentStackAddr)
+	}
 }
