@@ -14,7 +14,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	controller := tracer.Controller{}
+	controller := tracer.NewController()
 	if err := controller.LaunchTracee(os.Args[1], os.Args[2:]...); err != nil {
 		fmt.Printf("failed to launch tracee: %v", err)
 		os.Exit(1)

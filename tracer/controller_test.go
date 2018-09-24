@@ -1,9 +1,12 @@
 package tracer
 
 import (
+	"bytes"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -29,7 +32,7 @@ func buildTestProgram() error {
 }
 
 func TestLaunchProcess(t *testing.T) {
-	controller := &Controller{}
+	controller := NewController()
 	err := controller.LaunchTracee(testdataHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -55,8 +58,27 @@ func TestLaunchProcess(t *testing.T) {
 	}
 }
 
+func TestMainLoop(t *testing.T) {
+	controller := NewController()
+	buff := &bytes.Buffer{}
+	controller.outputWriter = buff
+	if err := controller.LaunchTracee(testdataHelloworld); err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	if err := controller.MainLoop(); err != nil {
+		t.Errorf("failed to run main loop: %v", err)
+	}
+
+	output, _ := ioutil.ReadAll(buff)
+	if strings.Count(string(output), "main.main") != 2 {
+		t.Errorf("unexpected output: %s", string(output))
+	}
+}
+
 func TestInterrupt(t *testing.T) {
-	controller := &Controller{}
+	controller := NewController()
+	controller.outputWriter = ioutil.Discard
 	err := controller.LaunchTracee(testdataHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)

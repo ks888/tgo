@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -13,10 +15,13 @@ import (
 
 var ErrInterrupted = errors.New("interrupted")
 
+// Controller controls the associated tracee process.
 type Controller struct {
 	process     *tracee.Process
 	statusStore map[int]goRoutineStatus
 	interrupted bool
+	// The traced data is written to this writer.
+	outputWriter io.Writer
 }
 
 type goRoutineStatus struct {
@@ -38,6 +43,12 @@ const (
 	goRoutineSingleStepping
 )
 
+// NewController returns the new controller.
+func NewController() *Controller {
+	return &Controller{outputWriter: os.Stdout}
+}
+
+// LaunchTracee launches the new tracee process to be controlled.
 func (c *Controller) LaunchTracee(name string, arg ...string) error {
 	var err error
 	c.process, err = tracee.LaunchProcess(name, arg...)
@@ -76,6 +87,7 @@ func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
 	return true
 }
 
+// MainLoop repeatedly lets the tracee continue and then wait an event.
 func (c *Controller) MainLoop() error {
 	event, err := c.process.ContinueAndWait()
 	if err != nil {
@@ -256,7 +268,8 @@ func (c *Controller) printFunctionInput(goRoutineID int, stackFrame *tracee.Stac
 		}
 		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
 	}
-	fmt.Printf("%s => (#%02d) %s(%s)\n", strings.Repeat(" ", depth), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+
+	fmt.Fprintf(c.outputWriter, "%s=> (#%02d) %s(%s)\n", strings.Repeat(" ", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
 }
@@ -273,12 +286,12 @@ func (c *Controller) printFunctionOutput(goRoutineID int, stackFrame *tracee.Sta
 		}
 		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
 	}
-	fmt.Printf("%s<= (#%02d) %s(...) (%s)\n", strings.Repeat(" ", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+	fmt.Fprintf(c.outputWriter, "%s<= (#%02d) %s(...) (%s)\n", strings.Repeat(" ", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
 }
 
-// Interrupt has the main loop exit.
+// Interrupt interrupts the main loop.
 func (c *Controller) Interrupt() {
 	c.interrupted = true
 }
