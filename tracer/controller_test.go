@@ -2,38 +2,16 @@ package tracer
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/ks888/tgo/testutils"
 )
-
-var (
-	testdataHelloworld   = "testdata/helloworld"
-	testdataHelloworldGo = testdataHelloworld + ".go"
-)
-
-func TestMain(m *testing.M) {
-	if err := buildTestProgram(); err != nil {
-		fmt.Printf("ERROR: %v\n", err)
-		os.Exit(1)
-	}
-
-	os.Exit(m.Run())
-}
-
-func buildTestProgram() error {
-	if out, err := exec.Command("go", "build", "-o", testdataHelloworld, testdataHelloworldGo).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to build %s: %v\n%v", testdataHelloworldGo, err, string(out))
-	}
-	return nil
-}
 
 func TestLaunchProcess(t *testing.T) {
 	controller := NewController()
-	err := controller.LaunchTracee(testdataHelloworld)
+	err := controller.LaunchTracee(testutils.ProgramParameters)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -62,7 +40,7 @@ func TestMainLoop(t *testing.T) {
 	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
-	if err := controller.LaunchTracee(testdataHelloworld); err != nil {
+	if err := controller.LaunchTracee(testutils.ProgramParameters); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
@@ -70,16 +48,16 @@ func TestMainLoop(t *testing.T) {
 		t.Errorf("failed to run main loop: %v", err)
 	}
 
-	output, _ := ioutil.ReadAll(buff)
-	if strings.Count(string(output), "main.main") != 2 {
-		t.Errorf("unexpected output: %s", string(output))
+	output := buff.String()
+	if strings.Count(output, "main.main") != 2 {
+		t.Errorf("unexpected output: %s", output)
 	}
 }
 
 func TestInterrupt(t *testing.T) {
 	controller := NewController()
 	controller.outputWriter = ioutil.Discard
-	err := controller.LaunchTracee(testdataHelloworld)
+	err := controller.LaunchTracee(testutils.ProgramParameters)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}

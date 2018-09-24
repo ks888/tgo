@@ -9,16 +9,8 @@ import (
 	"testing"
 
 	"github.com/ks888/tgo/debugapi"
+	"github.com/ks888/tgo/testutils"
 	"golang.org/x/sys/unix"
-)
-
-var (
-	infloopProgram                 = "testdata/infloop"
-	entryPoint             uintptr = 0x448f80
-	addrTextSection        uintptr = 0x401000
-	firstInstInTextSection         = []byte{0x48, 0x8b, 0x44, 0x24, 0x10}
-
-	helloworldProgram = "testdata/helloworld"
 )
 
 func TestMain(m *testing.M) {
@@ -46,14 +38,14 @@ func terminateProcess(pid int) {
 
 func TestLaunchProcess(t *testing.T) {
 	client := NewClient()
-	pid, err := client.LaunchProcess(infloopProgram)
+	pid, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer terminateProcess(pid)
 
 	// Do some ptrace action for testing
-	_, err = syscall.PtracePeekData(pid, addrTextSection, []byte{0x0})
+	_, err = syscall.PtracePeekData(pid, uintptr(testutils.InfloopAddrMain), []byte{0x0})
 	if err != nil {
 		t.Errorf("can't peek process' data: %v", err)
 	}
@@ -69,7 +61,7 @@ func TestLaunchProcess_NonExistProgram(t *testing.T) {
 }
 
 func TestAttachProcess(t *testing.T) {
-	cmd := exec.Command(infloopProgram)
+	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
 	pid := cmd.Process.Pid
 	defer terminateProcess(pid)
@@ -81,14 +73,14 @@ func TestAttachProcess(t *testing.T) {
 	}
 
 	// Do some ptrace action for testing
-	_, err = syscall.PtracePeekData(pid, addrTextSection, []byte{0x0})
+	_, err = syscall.PtracePeekData(pid, uintptr(testutils.InfloopAddrMain), []byte{0x0})
 	if err != nil {
 		t.Errorf("can't peek process' data: %v", err)
 	}
 }
 
 func TestAttachProcess_SignaledBeforeAttach(t *testing.T) {
-	cmd := exec.Command(infloopProgram)
+	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
 	pid := cmd.Process.Pid
 	defer terminateProcess(pid)
@@ -104,7 +96,7 @@ func TestAttachProcess_SignaledBeforeAttach(t *testing.T) {
 }
 
 func TestAttachProcess_NonExistPid(t *testing.T) {
-	cmd := exec.Command(infloopProgram)
+	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
 	pid := cmd.Process.Pid
 	terminateProcess(pid) // make sure the pid doesn't exist
@@ -118,7 +110,7 @@ func TestAttachProcess_NonExistPid(t *testing.T) {
 
 func TestDetachProcess(t *testing.T) {
 	client := NewClient()
-	pid, err := client.LaunchProcess(infloopProgram)
+	pid, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -130,7 +122,7 @@ func TestDetachProcess(t *testing.T) {
 	}
 
 	// Do some ptrace action for testing
-	_, err = syscall.PtracePeekData(pid, addrTextSection, []byte{0x0})
+	_, err = syscall.PtracePeekData(pid, uintptr(testutils.InfloopAddrMain), []byte{0x0})
 	if err == nil {
 		t.Errorf("error is not returned")
 	}
@@ -138,27 +130,28 @@ func TestDetachProcess(t *testing.T) {
 
 func TestReadMemory(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(infloopProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
 	defer terminateProcess(pid)
 
-	buff := make([]byte, len(firstInstInTextSection))
-	err := client.ReadMemory(pid, addrTextSection, buff)
+	expected := []byte{0x64, 0x48, 0x8b}
+	buff := make([]byte, len(expected))
+	err := client.ReadMemory(pid, uintptr(testutils.InfloopAddrMain), buff)
 	if err != nil {
 		t.Fatalf("failed to read memory (pid: %d): %v", pid, err)
 	}
 
-	if !reflect.DeepEqual(buff, firstInstInTextSection) {
+	if !reflect.DeepEqual(buff, expected) {
 		t.Errorf("Unexpected content: %v", buff)
 	}
 }
 
 func TestWriteMemory(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(infloopProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
 	defer terminateProcess(pid)
 
 	softwareBreakpoint := []byte{0xcc}
-	err := client.WriteMemory(pid, addrTextSection, softwareBreakpoint)
+	err := client.WriteMemory(pid, uintptr(testutils.InfloopAddrMain), softwareBreakpoint)
 	if err != nil {
 		t.Fatalf("failed to write memory (pid: %d): %v", pid, err)
 	}
@@ -166,7 +159,7 @@ func TestWriteMemory(t *testing.T) {
 
 func TestReadRegisters(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(infloopProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
 	defer terminateProcess(pid)
 
 	regs, err := client.ReadRegisters(pid)
@@ -174,18 +167,18 @@ func TestReadRegisters(t *testing.T) {
 		t.Fatalf("failed to read registers (pid: %d): %v", pid, err)
 	}
 
-	if regs.Rip != uint64(entryPoint) {
+	if regs.Rip != uint64(testutils.InfloopEntrypoint) {
 		t.Errorf("read registers have unexpected content: %d", regs.Rip)
 	}
 }
 
 func TestWriteRegisters(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(infloopProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
 	defer terminateProcess(pid)
 
 	regs, _ := client.ReadRegisters(pid)
-	regs.Rip = uint64(addrTextSection)
+	regs.Rip = uint64(testutils.InfloopAddrMain)
 	err := client.WriteRegisters(pid, &regs)
 	if err != nil {
 		t.Fatalf("failed to write registers (pid: %d): %v", pid, err)
@@ -194,10 +187,10 @@ func TestWriteRegisters(t *testing.T) {
 
 func TestContinueAndWait_Trapped(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(infloopProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
 	defer terminateProcess(pid)
 
-	_ = client.WriteMemory(pid, entryPoint, []byte{0xcc})
+	_ = client.WriteMemory(pid, uintptr(testutils.InfloopEntrypoint), []byte{0xcc})
 	stoppedPID, event, err := client.ContinueAndWait(pid)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
@@ -213,7 +206,7 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 
 func TestContinueAndWait_Exited(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(helloworldProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
 	defer terminateProcess(pid)
 
 	wpid := pid
@@ -231,7 +224,7 @@ func TestContinueAndWait_Exited(t *testing.T) {
 
 func TestContinueAndWait_Signaled(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(helloworldProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -252,7 +245,7 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 
 func TestContinueAndWait_Stopped(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(helloworldProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -267,7 +260,7 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 
 func TestContinueAndWait_CoreDump(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(helloworldProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -288,7 +281,7 @@ func TestContinueAndWait_CoreDump(t *testing.T) {
 
 func TestContinueAndWait_Continued(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(helloworldProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -302,7 +295,7 @@ func TestContinueAndWait_Continued(t *testing.T) {
 
 func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(helloworldProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
 	defer terminateProcess(pid)
 
 	pids := []int{pid}
@@ -327,7 +320,7 @@ func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
 
 func TestStepAndWait(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(infloopProgram)
+	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
 	defer terminateProcess(pid)
 
 	stoppedPID, event, err := client.StepAndWait(pid)

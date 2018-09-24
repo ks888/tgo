@@ -563,7 +563,8 @@ func (c *Client) handleStopReply(data string) (tid int, event debugapi.Event, er
 	}
 
 	if debugapi.IsExitEvent(event.Type) {
-		err = c.close()
+		// the connection may be closed already.
+		_ = c.close()
 	}
 	return tid, event, err
 }

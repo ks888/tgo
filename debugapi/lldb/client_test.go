@@ -5,27 +5,21 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/ks888/tgo/debugapi"
+	"github.com/ks888/tgo/testutils"
 	"golang.org/x/sys/unix"
-)
-
-var (
-	helloworldFilename        = "helloworld"
-	helloworldProgram         = "testdata/" + helloworldFilename
-	infloopFilename           = "infloop"
-	infloopProgram            = "testdata/" + infloopFilename
-	beginTextSection   uint64 = 0x1000000
-	mainAddr           uint64 = 0x104e6d0
 )
 
 func TestLaunchProcess(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(infloopProgram)
+	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -44,7 +38,7 @@ func TestLaunchProcess_ProgramNotExist(t *testing.T) {
 }
 
 func TestAttachProcess(t *testing.T) {
-	cmd := exec.Command(infloopProgram)
+	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
 
 	client := NewClient()
@@ -60,7 +54,7 @@ func TestAttachProcess(t *testing.T) {
 
 func TestAttachProcess_WrongPID(t *testing.T) {
 	client := NewClient()
-	cmd := exec.Command(helloworldProgram)
+	cmd := exec.Command(testutils.ProgramParameters)
 	_ = cmd.Run()
 
 	// the program already exits, so the pid is wrong
@@ -72,13 +66,13 @@ func TestAttachProcess_WrongPID(t *testing.T) {
 
 func TestDetachProcess_KillProc(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
-	debugeeProcID, _ := findProcessID(infloopFilename, client.pid)
+	debugeeProcID, _ := findProcessID(path.Base(testutils.ProgramInfloop), client.pid)
 
 	if err := client.DetachProcess(); err != nil {
 		t.Fatalf("failed to detach from the process: %v", err)
@@ -98,13 +92,13 @@ func TestDetachProcess_KillProc(t *testing.T) {
 
 func TestReadRegisters(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(infloopProgram)
+	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
-	if err := client.WriteMemory(mainAddr, []byte{0xcc}); err != nil {
+	if err := client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc}); err != nil {
 		t.Fatalf("failed to write memory: %v", err)
 	}
 	if _, _, err := client.ContinueAndWait(); err != nil {
@@ -115,7 +109,7 @@ func TestReadRegisters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read registers: %v", err)
 	}
-	if regs.Rip != uint64(mainAddr+1) {
+	if regs.Rip != uint64(testutils.InfloopAddrMain+1) {
 		t.Fatalf("wrong rip: %x", regs.Rip)
 	}
 	if regs.Rsp == 0 {
@@ -125,7 +119,7 @@ func TestReadRegisters(t *testing.T) {
 
 func TestWriteRegisters(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(infloopProgram)
+	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -150,7 +144,7 @@ func TestWriteRegisters(t *testing.T) {
 
 func TestAllocateMemory(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -168,7 +162,7 @@ func TestAllocateMemory(t *testing.T) {
 
 func TestDeallocateMemory(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -183,39 +177,39 @@ func TestDeallocateMemory(t *testing.T) {
 
 func TestReadMemory(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
 	out := make([]byte, 2)
-	err = client.ReadMemory(beginTextSection, out)
+	err = client.ReadMemory(testutils.InfloopAddrMain, out)
 	if err != nil {
 		t.Fatalf("failed to read memory: %v", err)
 	}
 
-	if out[0] != 0xcf || out[1] != 0xfa {
+	if out[0] != 0x65 || out[1] != 0x48 {
 		t.Errorf("wrong memory: %v", out)
 	}
 }
 
 func TestWriteMemory(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
 	data := []byte{0x1, 0x2, 0x3, 0x4}
-	err = client.WriteMemory(beginTextSection, data)
+	err = client.WriteMemory(testutils.InfloopAddrMain, data)
 	if err != nil {
 		t.Fatalf("failed to write memory: %v", err)
 	}
 
 	actual := make([]byte, 4)
-	_ = client.ReadMemory(beginTextSection, actual)
+	_ = client.ReadMemory(testutils.InfloopAddrMain, actual)
 	if actual[0] != 0x1 || actual[1] != 0x2 || actual[2] != 0x3 || actual[3] != 0x4 {
 		t.Errorf("wrong memory: %v", actual)
 	}
@@ -224,13 +218,13 @@ func TestWriteMemory(t *testing.T) {
 
 func TestReadTLS(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(infloopProgram)
+	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
-	_ = client.WriteMemory(mainAddr, []byte{0xcc})
+	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
 	_, _, _ = client.ContinueAndWait()
 
 	var offset uint32 = 0xf
@@ -245,14 +239,14 @@ func TestReadTLS(t *testing.T) {
 
 func TestContinueAndWait_Trapped(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
 	out := []byte{0xcc}
-	err = client.WriteMemory(mainAddr, out)
+	err = client.WriteMemory(testutils.InfloopAddrMain, out)
 	if err != nil {
 		t.Fatalf("failed to write memory: %v", err)
 	}
@@ -271,7 +265,7 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 
 func TestContinueAndWait_Exited(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(helloworldProgram)
+	_, err := client.LaunchProcess(testutils.ProgramParameters)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -291,7 +285,7 @@ func TestContinueAndWait_ConsoleWrite(t *testing.T) {
 	client := NewClient()
 	buff := &bytes.Buffer{}
 	client.outputWriter = buff
-	_, err := client.LaunchProcess(helloworldProgram)
+	_, err := client.LaunchProcess(testutils.ProgramParameters)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -301,7 +295,7 @@ func TestContinueAndWait_ConsoleWrite(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
-		if buff.String() == "Hello, playground\r\n" {
+		if strings.Contains(buff.String(), "Hello world") {
 			break
 		}
 	}
@@ -309,12 +303,12 @@ func TestContinueAndWait_ConsoleWrite(t *testing.T) {
 
 func TestContinueAndWait_Signaled(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	pid, _ := findProcessID(infloopFilename, client.pid)
+	pid, _ := findProcessID(path.Base(testutils.ProgramInfloop), client.pid)
 	// Note that the debugserver does not pass the signals like SIGTERM and SIGINT to the debugee.
 	_ = sendSignal(pid, unix.SIGKILL)
 
@@ -329,12 +323,15 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 
 func TestContinueAndWait_Stopped(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(helloworldProgram)
+	_, err := client.LaunchProcess(testutils.ProgramParameters)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	pid, _ := findProcessID(helloworldFilename, client.pid)
+	pid, err := findProcessID(path.Base(testutils.ProgramParameters), client.pid)
+	if err != nil {
+		t.Fatalf("failed to find process id: %v", err)
+	}
 	_ = sendSignal(pid, unix.SIGUSR1)
 
 	// non-SIGTRAP signal is handled internally.
@@ -351,7 +348,7 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 
 func TestStepAndWait(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(infloopProgram)
+	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -371,21 +368,21 @@ func TestStepAndWait(t *testing.T) {
 
 func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(infloopProgram)
+	_, err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
 	orgInsts := make([]byte, 1)
-	_ = client.ReadMemory(mainAddr, orgInsts)
-	_ = client.WriteMemory(mainAddr, []byte{0xcc})
+	_ = client.ReadMemory(testutils.InfloopAddrMain, orgInsts)
+	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
 	tid, _, _ := client.ContinueAndWait()
 
 	regs, _ := client.ReadRegisters(tid)
 	regs.Rip--
 	_ = client.WriteRegisters(tid, regs)
-	_ = client.WriteMemory(mainAddr, orgInsts)
+	_ = client.WriteMemory(testutils.InfloopAddrMain, orgInsts)
 
 	_, _, err = client.StepAndWait(tid)
 	if err != nil {
@@ -393,7 +390,7 @@ func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	}
 
 	regs, _ = client.ReadRegisters(tid)
-	if regs.Rip != uint64(mainAddr)+9 {
+	if regs.Rip != uint64(testutils.InfloopAddrMain)+9 {
 		t.Errorf("wrong pc: %x", regs.Rip)
 	}
 }
