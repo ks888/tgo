@@ -10,14 +10,14 @@ import (
 )
 
 var (
-	ProgramParameters                     string
-	ProgramParametersNoDwarf              string
-	ParametersAddrMain                    uint64
-	ParametersAddrNoParameter             uint64
-	ParametersAddrOneParameter            uint64
-	ParametersAddrOneParameterAndVariable uint64
-	ParametersAddrTwoParameters           uint64
-	ParametersAddrFuncWithAbstractOrigin  uint64 // any function which corresponding DIE has the DW_AT_abstract_origin attribute.
+	ProgramHelloworld                     string
+	ProgramHelloworldNoDwarf              string
+	HelloworldAddrMain                    uint64
+	HelloworldAddrNoParameter             uint64
+	HelloworldAddrOneParameter            uint64
+	HelloworldAddrOneParameterAndVariable uint64
+	HelloworldAddrTwoParameters           uint64
+	HelloworldAddrFuncWithAbstractOrigin  uint64 // any function which corresponding DIE has the DW_AT_abstract_origin attribute.
 
 	ProgramInfloop    string
 	InfloopAddrMain   uint64
@@ -29,7 +29,7 @@ func init() {
 	srcDirname := path.Dir(srcFilename)
 	ProgramInfloop = srcDirname + "/testdata/infloop"
 
-	if err := buildProgramParameters(srcDirname); err != nil {
+	if err := buildProgramHelloworld(srcDirname); err != nil {
 		panic(err)
 	}
 	if err := buildProgramInfloop(srcDirname); err != nil {
@@ -37,39 +37,39 @@ func init() {
 	}
 }
 
-func buildProgramParameters(srcDirname string) error {
-	ProgramParameters = srcDirname + "/testdata/parameters"
-	ProgramParametersNoDwarf = ProgramParameters + ".nodwarf"
+func buildProgramHelloworld(srcDirname string) error {
+	ProgramHelloworld = srcDirname + "/testdata/helloworld"
+	ProgramHelloworldNoDwarf = ProgramHelloworld + ".nodwarf"
 
-	src := ProgramParameters + ".go"
-	if out, err := exec.Command("go", "build", "-o", ProgramParameters, src).CombinedOutput(); err != nil {
+	src := ProgramHelloworld + ".go"
+	if out, err := exec.Command("go", "build", "-o", ProgramHelloworld, src).CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
 	}
 
-	if out, err := exec.Command("go", "build", "-ldflags", "-w", "-o", ProgramParametersNoDwarf, src).CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-ldflags", "-w", "-o", ProgramHelloworldNoDwarf, src).CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
 	}
 
 	updateAddressIfMatched := func(name string, value uint64) {
 		switch name {
 		case "main.main":
-			ParametersAddrMain = value
+			HelloworldAddrMain = value
 		case "main.oneParameter":
-			ParametersAddrOneParameter = value
+			HelloworldAddrOneParameter = value
 		case "main.oneParameterAndOneVariable":
-			ParametersAddrOneParameterAndVariable = value
+			HelloworldAddrOneParameterAndVariable = value
 		case "main.noParameter":
-			ParametersAddrNoParameter = value
+			HelloworldAddrNoParameter = value
 		case "main.twoParameters":
-			ParametersAddrTwoParameters = value
+			HelloworldAddrTwoParameters = value
 		case "reflect.Value.Kind":
-			ParametersAddrFuncWithAbstractOrigin = value
+			HelloworldAddrFuncWithAbstractOrigin = value
 		}
 	}
 
 	switch runtime.GOOS {
 	case "darwin":
-		machoFile, err := macho.Open(ProgramParameters)
+		machoFile, err := macho.Open(ProgramHelloworld)
 		if err != nil {
 			return fmt.Errorf("failed to open binary: %v", err)
 		}
@@ -78,7 +78,7 @@ func buildProgramParameters(srcDirname string) error {
 		}
 
 	case "linux":
-		elfFile, err := elf.Open(ProgramParameters)
+		elfFile, err := elf.Open(ProgramHelloworld)
 		if err != nil {
 			return fmt.Errorf("failed to open binary: %v", err)
 		}

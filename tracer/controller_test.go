@@ -11,7 +11,7 @@ import (
 
 func TestLaunchProcess(t *testing.T) {
 	controller := NewController()
-	err := controller.LaunchTracee(testutils.ProgramParameters)
+	err := controller.LaunchTracee(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestMainLoop(t *testing.T) {
 	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
-	if err := controller.LaunchTracee(testutils.ProgramParameters); err != nil {
+	if err := controller.LaunchTracee(testutils.ProgramHelloworld); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestMainLoop(t *testing.T) {
 func TestInterrupt(t *testing.T) {
 	controller := NewController()
 	controller.outputWriter = ioutil.Discard
-	err := controller.LaunchTracee(testutils.ProgramParameters)
+	err := controller.LaunchTracee(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}

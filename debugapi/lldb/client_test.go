@@ -54,7 +54,7 @@ func TestAttachProcess(t *testing.T) {
 
 func TestAttachProcess_WrongPID(t *testing.T) {
 	client := NewClient()
-	cmd := exec.Command(testutils.ProgramParameters)
+	cmd := exec.Command(testutils.ProgramHelloworld)
 	_ = cmd.Run()
 
 	// the program already exits, so the pid is wrong
@@ -265,7 +265,7 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 
 func TestContinueAndWait_Exited(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramParameters)
+	_, err := client.LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestContinueAndWait_ConsoleWrite(t *testing.T) {
 	client := NewClient()
 	buff := &bytes.Buffer{}
 	client.outputWriter = buff
-	_, err := client.LaunchProcess(testutils.ProgramParameters)
+	_, err := client.LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -323,12 +323,12 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 
 func TestContinueAndWait_Stopped(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramParameters)
+	_, err := client.LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	pid, err := findProcessID(path.Base(testutils.ProgramParameters), client.pid)
+	pid, err := findProcessID(path.Base(testutils.ProgramHelloworld), client.pid)
 	if err != nil {
 		t.Fatalf("failed to find process id: %v", err)
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 func TestNewBinary(t *testing.T) {
-	binary, err := NewBinary(testutils.ProgramParameters)
+	binary, err := NewBinary(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to create new binary: %v", err)
 	}
@@ -30,15 +30,15 @@ func TestNewBinary_ProgramNotFound(t *testing.T) {
 }
 
 func TestNewBinary_NoDwarfProgram(t *testing.T) {
-	_, err := NewBinary(testutils.ProgramParametersNoDwarf)
+	_, err := NewBinary(testutils.ProgramHelloworldNoDwarf)
 	if err == nil {
 		t.Fatal("error not returned when the binary has no DWARF sections")
 	}
 }
 
 func TestFindFunction(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
-	function, err := binary.FindFunction(testutils.ParametersAddrOneParameter)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
+	function, err := binary.FindFunction(testutils.HelloworldAddrOneParameter)
 	if err != nil {
 		t.Fatalf("failed to find function: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestFindFunction(t *testing.T) {
 }
 
 func TestListFunctions(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	functions, err := binary.ListFunctions()
 	if err != nil {
 		t.Fatalf("failed to list functions: %v", err)
@@ -94,7 +94,7 @@ func TestIsExported(t *testing.T) {
 }
 
 func TestNext(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
 
 	function, err := reader.Next(true)
@@ -110,10 +110,10 @@ func TestNext(t *testing.T) {
 }
 
 func TestSeek(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader()}
 
-	function, err := reader.Seek(testutils.ParametersAddrMain)
+	function, err := reader.Seek(testutils.HelloworldAddrMain)
 	if err != nil {
 		t.Fatalf("failed to seek to subprogram: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestSeek(t *testing.T) {
 }
 
 func TestSeek_InvalidPC(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader()}
 
 	_, err := reader.Seek(0x0)
@@ -139,10 +139,10 @@ func TestSeek_InvalidPC(t *testing.T) {
 }
 
 func TestSeek_DIEHasAbstractOrigin(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
 
-	function, _ := reader.Seek(testutils.ParametersAddrFuncWithAbstractOrigin)
+	function, _ := reader.Seek(testutils.HelloworldAddrFuncWithAbstractOrigin)
 	if function.Name != "reflect.Value.Kind" {
 		t.Fatalf("invalid function name: %s", function.Name)
 	}
@@ -161,10 +161,10 @@ func TestSeek_DIEHasAbstractOrigin(t *testing.T) {
 }
 
 func TestSeek_OneParameter(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
 
-	function, err := reader.Seek(testutils.ParametersAddrOneParameter)
+	function, err := reader.Seek(testutils.HelloworldAddrOneParameter)
 	if err != nil {
 		t.Fatalf("failed to seek to parameter: %v", err)
 	}
@@ -186,10 +186,10 @@ func TestSeek_OneParameter(t *testing.T) {
 }
 
 func TestSeek_HasVariableBeforeParameter(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
 
-	function, err := reader.Seek(testutils.ParametersAddrOneParameterAndVariable)
+	function, err := reader.Seek(testutils.HelloworldAddrOneParameterAndVariable)
 	if err != nil {
 		t.Fatalf("failed to seek to parameter: %v", err)
 	}
@@ -202,10 +202,10 @@ func TestSeek_HasVariableBeforeParameter(t *testing.T) {
 }
 
 func TestSeek_HasTwoParameters(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
 
-	function, err := reader.Seek(testutils.ParametersAddrTwoParameters)
+	function, err := reader.Seek(testutils.HelloworldAddrTwoParameters)
 	if err != nil {
 		t.Fatalf("failed to seek to parameter: %v", err)
 	}
@@ -218,24 +218,24 @@ func TestSeek_HasTwoParameters(t *testing.T) {
 }
 
 func TestAddressClassAttr(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader()}
-	_, _ = reader.raw.SeekPC(testutils.ParametersAddrNoParameter)
+	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 	subprogram, _ := reader.raw.Next()
 
 	addr, err := addressClassAttr(subprogram, dwarf.AttrLowpc)
 	if err != nil {
 		t.Fatalf("failed to get address class: %v", err)
 	}
-	if addr != testutils.ParametersAddrNoParameter {
+	if addr != testutils.HelloworldAddrNoParameter {
 		t.Errorf("invalid address: %x", addr)
 	}
 }
 
 func TestAddressClassAttr_InvalidAttr(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader()}
-	_, _ = reader.raw.SeekPC(testutils.ParametersAddrNoParameter)
+	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 	subprogram, _ := reader.raw.Next()
 
 	_, err := addressClassAttr(subprogram, 0x0)
@@ -245,9 +245,9 @@ func TestAddressClassAttr_InvalidAttr(t *testing.T) {
 }
 
 func TestAddressClassAttr_InvalidClass(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader()}
-	_, _ = reader.raw.SeekPC(testutils.ParametersAddrNoParameter)
+	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 	subprogram, _ := reader.raw.Next()
 
 	_, err := addressClassAttr(subprogram, dwarf.AttrName)
@@ -257,9 +257,9 @@ func TestAddressClassAttr_InvalidClass(t *testing.T) {
 }
 
 func TestStringClassAttr(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader()}
-	_, _ = reader.raw.SeekPC(testutils.ParametersAddrNoParameter)
+	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 	subprogram, _ := reader.raw.Next()
 
 	name, err := stringClassAttr(subprogram, dwarf.AttrName)
@@ -272,7 +272,7 @@ func TestStringClassAttr(t *testing.T) {
 }
 
 func TestReferenceClassAttr(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader()}
 	_, _ = reader.Next(false)
 	param, _ := reader.raw.Next()
@@ -287,7 +287,7 @@ func TestReferenceClassAttr(t *testing.T) {
 }
 
 func TestLocClassAttr(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader()}
 	_, _ = reader.Next(false)
 	param, _ := reader.raw.Next()
@@ -302,7 +302,7 @@ func TestLocClassAttr(t *testing.T) {
 }
 
 func TestFlagClassAttr(t *testing.T) {
-	binary, _ := NewBinary(testutils.ProgramParameters)
+	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader()}
 	_, _ = reader.Next(false)
 	param, _ := reader.raw.Next()
@@ -355,7 +355,7 @@ func TestDebugFrameSection(t *testing.T) {
 
 	switch runtime.GOOS {
 	case "linux":
-		elfFile, err := elf.Open(testutils.ProgramParameters)
+		elfFile, err := elf.Open(testutils.ProgramHelloworld)
 		if err != nil {
 			t.Fatalf("failed to open elf file: %v", err)
 		}
@@ -365,7 +365,7 @@ func TestDebugFrameSection(t *testing.T) {
 			t.Fatalf("failed to read CIE: %v", err)
 		}
 	case "darwin":
-		machoFile, err := macho.Open(testutils.ProgramParameters)
+		machoFile, err := macho.Open(testutils.ProgramHelloworld)
 		if err != nil {
 			t.Fatalf("failed to open macho file: %v", err)
 		}

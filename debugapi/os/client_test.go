@@ -206,7 +206,7 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 
 func TestContinueAndWait_Exited(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
+	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
 	defer terminateProcess(pid)
 
 	wpid := pid
@@ -224,7 +224,7 @@ func TestContinueAndWait_Exited(t *testing.T) {
 
 func TestContinueAndWait_Signaled(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
+	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -245,7 +245,7 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 
 func TestContinueAndWait_Stopped(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
+	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -260,7 +260,7 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 
 func TestContinueAndWait_CoreDump(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
+	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -281,7 +281,7 @@ func TestContinueAndWait_CoreDump(t *testing.T) {
 
 func TestContinueAndWait_Continued(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
+	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -295,7 +295,7 @@ func TestContinueAndWait_Continued(t *testing.T) {
 
 func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramParameters)
+	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
 	defer terminateProcess(pid)
 
 	pids := []int{pid}

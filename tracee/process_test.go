@@ -8,7 +8,7 @@ import (
 )
 
 func TestLaunchProcess(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -21,12 +21,12 @@ func TestLaunchProcess(t *testing.T) {
 }
 
 func TestDetach(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := proc.SetBreakpoint(testutils.ParametersAddrNoParameter); err != nil {
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
@@ -34,33 +34,33 @@ func TestDetach(t *testing.T) {
 		t.Fatalf("failed to detach process: %v", err)
 	}
 
-	if proc.HasBreakpoint(testutils.ParametersAddrNoParameter) {
+	if proc.HasBreakpoint(testutils.HelloworldAddrNoParameter) {
 		t.Errorf("breakpoint still exists")
 	}
 }
 
 func TestContinueAndWait(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
 	// 1. stop at NoParameter func
-	if err := proc.SetBreakpoint(testutils.ParametersAddrNoParameter); err != nil {
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 	if _, err := proc.ContinueAndWait(); err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	if err := proc.ClearBreakpoint(testutils.ParametersAddrNoParameter); err != nil {
+	if err := proc.ClearBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
-	if err := proc.SetPC(testutils.ParametersAddrNoParameter); err != nil {
+	if err := proc.SetPC(testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
 	// 2. stop at OneParameter func
-	if err := proc.SetBreakpoint(testutils.ParametersAddrOneParameter); err != nil {
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrOneParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 	if _, err := proc.ContinueAndWait(); err != nil {
@@ -69,150 +69,150 @@ func TestContinueAndWait(t *testing.T) {
 }
 
 func TestSetBreakpoint(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	err = proc.SetBreakpoint(testutils.ParametersAddrMain)
+	err = proc.SetBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
 	buff := make([]byte, 1)
-	_ = proc.debugapiClient.ReadMemory(testutils.ParametersAddrMain, buff)
+	_ = proc.debugapiClient.ReadMemory(testutils.HelloworldAddrMain, buff)
 	if buff[0] != 0xcc {
 		t.Errorf("breakpoint is not set: %x", buff[0])
 	}
 }
 
 func TestSetBreakpoint_AlreadySet(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
 	expected := make([]byte, 1)
-	_ = proc.debugapiClient.ReadMemory(testutils.ParametersAddrMain, expected)
+	_ = proc.debugapiClient.ReadMemory(testutils.HelloworldAddrMain, expected)
 
-	err = proc.SetBreakpoint(testutils.ParametersAddrMain)
+	err = proc.SetBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
-	err = proc.SetBreakpoint(testutils.ParametersAddrMain)
+	err = proc.SetBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
-	err = proc.ClearBreakpoint(testutils.ParametersAddrMain)
+	err = proc.ClearBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
 		t.Fatalf("failed to clear breakpoint: %v", err)
 	}
 
 	actual := make([]byte, 1)
-	_ = proc.debugapiClient.ReadMemory(testutils.ParametersAddrMain, actual)
+	_ = proc.debugapiClient.ReadMemory(testutils.HelloworldAddrMain, actual)
 	if expected[0] != actual[0] {
 		t.Errorf("the instruction is not restored: %x", actual)
 	}
 }
 
 func TestSetConditionalBreakpoint(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	err = proc.SetConditionalBreakpoint(testutils.ParametersAddrMain, 1)
+	err = proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1)
 	if err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
 	buff := make([]byte, 1)
-	_ = proc.debugapiClient.ReadMemory(testutils.ParametersAddrMain, buff)
+	_ = proc.debugapiClient.ReadMemory(testutils.HelloworldAddrMain, buff)
 	if buff[0] != 0xcc {
 		t.Errorf("breakpoint is not set: %x", buff[0])
 	}
 }
 
 func TestClearBreakpoint(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
 	expected := make([]byte, 1)
-	_ = proc.debugapiClient.ReadMemory(testutils.ParametersAddrMain, expected)
+	_ = proc.debugapiClient.ReadMemory(testutils.HelloworldAddrMain, expected)
 
-	err = proc.SetBreakpoint(testutils.ParametersAddrMain)
+	err = proc.SetBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
-	err = proc.ClearBreakpoint(testutils.ParametersAddrMain)
+	err = proc.ClearBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
 		t.Fatalf("failed to clear breakpoint: %v", err)
 	}
 
 	actual := make([]byte, 1)
-	_ = proc.debugapiClient.ReadMemory(testutils.ParametersAddrMain, actual)
+	_ = proc.debugapiClient.ReadMemory(testutils.HelloworldAddrMain, actual)
 	if expected[0] != actual[0] {
 		t.Errorf("the instruction is not restored: %x", actual)
 	}
 }
 
 func TestClearBreakpoint_BPNotSet(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	err = proc.ClearBreakpoint(testutils.ParametersAddrMain)
+	err = proc.ClearBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
 		t.Errorf("failed to clear breakpoint: %v", err)
 	}
 }
 
 func TestHitBreakpoint(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	err = proc.SetConditionalBreakpoint(testutils.ParametersAddrMain, 1)
+	err = proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1)
 	if err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
-	if !proc.HitBreakpoint(testutils.ParametersAddrMain, 1) {
+	if !proc.HitBreakpoint(testutils.HelloworldAddrMain, 1) {
 		t.Errorf("invalid condition check")
 	}
 
-	if proc.HitBreakpoint(testutils.ParametersAddrMain, 2) {
+	if proc.HitBreakpoint(testutils.HelloworldAddrMain, 2) {
 		t.Errorf("invalid condition check")
 	}
 }
 
 func TestHitBreakpoint_NoCondition(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	err = proc.SetBreakpoint(testutils.ParametersAddrMain)
+	err = proc.SetBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
-	if !proc.HitBreakpoint(testutils.ParametersAddrMain, 1) {
+	if !proc.HitBreakpoint(testutils.HelloworldAddrMain, 1) {
 		t.Errorf("invalid condition check")
 	}
 }
 
 func TestSetPC(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := proc.SetBreakpoint(testutils.ParametersAddrMain); err != nil {
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrMain); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
@@ -220,7 +220,7 @@ func TestSetPC(t *testing.T) {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 
-	if err := proc.SetPC(testutils.ParametersAddrMain); err != nil {
+	if err := proc.SetPC(testutils.HelloworldAddrMain); err != nil {
 		t.Fatalf("failed to set PC: %v", err)
 	}
 
@@ -232,18 +232,18 @@ func TestSetPC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read registers: %v", err)
 	}
-	if regs.Rip != testutils.ParametersAddrMain+1 {
+	if regs.Rip != testutils.HelloworldAddrMain+1 {
 		t.Errorf("wrong rip: %x", regs.Rip)
 	}
 }
 
 func TestStackFrameAt(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := proc.SetBreakpoint(testutils.ParametersAddrOneParameter); err != nil {
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrOneParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
@@ -281,12 +281,12 @@ func TestStackFrameAt(t *testing.T) {
 }
 
 func TestCurrentGoRoutineInfo(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramParameters)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := proc.SetBreakpoint(testutils.ParametersAddrMain); err != nil {
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrMain); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
@@ -304,7 +304,7 @@ func TestCurrentGoRoutineInfo(t *testing.T) {
 	if goRoutineInfo.UsedStackSize == 0 {
 		t.Errorf("wrong stack size: %d", goRoutineInfo.UsedStackSize)
 	}
-	if goRoutineInfo.CurrentPC != testutils.ParametersAddrMain+1 {
+	if goRoutineInfo.CurrentPC != testutils.HelloworldAddrMain+1 {
 		t.Errorf("empty return address: %d", goRoutineInfo.CurrentPC)
 	}
 	if goRoutineInfo.CurrentStackAddr == 0 {
