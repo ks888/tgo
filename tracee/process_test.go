@@ -2,6 +2,7 @@ package tracee
 
 import (
 	"encoding/binary"
+	"os/exec"
 	"testing"
 
 	"github.com/ks888/tgo/testutils"
@@ -9,6 +10,23 @@ import (
 
 func TestLaunchProcess(t *testing.T) {
 	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	if proc.debugapiClient == nil {
+		t.Errorf("debugapiClient is nil")
+	}
+	if proc.currentThreadID == 0 {
+		t.Errorf("currentThreadID is 0")
+	}
+}
+
+func TestAttachProcess(t *testing.T) {
+	cmd := exec.Command(testutils.ProgramInfloop)
+	_ = cmd.Start()
+	defer cmd.Process.Kill()
+
+	proc, err := AttachProcess(cmd.Process.Pid)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}

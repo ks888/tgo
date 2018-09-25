@@ -57,6 +57,22 @@ func (c *Controller) LaunchTracee(name string, arg ...string) error {
 	}
 	c.statusStore = make(map[int]goRoutineStatus)
 
+	return c.setBreakpoints()
+}
+
+// AttachTracee attaches to the existing process.
+func (c *Controller) AttachTracee(pid int) error {
+	var err error
+	c.process, err = tracee.AttachProcess(pid)
+	if err != nil {
+		return err
+	}
+	c.statusStore = make(map[int]goRoutineStatus)
+
+	return c.setBreakpoints()
+}
+
+func (c *Controller) setBreakpoints() error {
 	functions, err := c.process.Binary.ListFunctions()
 	if err != nil {
 		return err
@@ -69,12 +85,11 @@ func (c *Controller) LaunchTracee(name string, arg ...string) error {
 			return err
 		}
 	}
-
 	return nil
 }
 
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
-	// may be too conservative, but need to understand runtime more to correctly set breakpoints to non-exported functions.
+	// TODO: may be too conservative
 	if strings.HasPrefix(function.Name, "runtime") && !function.IsExported() {
 		return false
 	}

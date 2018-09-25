@@ -71,28 +71,32 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 	return proc, nil
 }
 
-// TODO: support it. Need to get the program name from the pid
 // AttachProcess attaches to the existing tracee process.
-// func AttachProcess(pid int) (*Process, error) {
-// 	debugapiClient := lldb.NewClient()
-// 	threadID, err := debugapiClient.AttachProcess(pid)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func AttachProcess(pid int) (*Process, error) {
+	debugapiClient := lldb.NewClient()
+	threadID, err := debugapiClient.AttachProcess(pid)
+	if err != nil {
+		return nil, err
+	}
 
-// 	binary, err := NewBinary(name)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	programPath, err := findProgramPath(pid)
+	if err != nil {
+		return nil, err
+	}
 
-// 	proc := &Process{
-// 		debugapiClient:  debugapiClient,
-// 		currentThreadID: threadID,
-// 		breakpoints:     make(map[uint64]breakpoint),
-// 		Binary:          binary,
-// 	}
-// 	return proc, nil
-// }
+	binary, err := NewBinary(programPath)
+	if err != nil {
+		return nil, err
+	}
+
+	proc := &Process{
+		debugapiClient:  debugapiClient,
+		currentThreadID: threadID,
+		breakpoints:     make(map[uint64]breakpoint),
+		Binary:          binary,
+	}
+	return proc, nil
+}
 
 // Detach detaches from the tracee process. All breakpoints are cleared.
 func (p *Process) Detach() error {

@@ -3,6 +3,7 @@ package tracer
 import (
 	"bytes"
 	"io/ioutil"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -33,6 +34,30 @@ func TestLaunchProcess(t *testing.T) {
 
 	if controller.process.HasBreakpoint(addrMorestack) {
 		t.Errorf("breakpoint is set at runtime.morestack")
+	}
+}
+
+func TestAttachProcess(t *testing.T) {
+	cmd := exec.Command(testutils.ProgramInfloop)
+	_ = cmd.Start()
+	defer cmd.Process.Kill()
+
+	controller := NewController()
+	err := controller.AttachTracee(cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("failed to attch to the process: %v", err)
+	}
+
+	var addrMain uint64 = 0x0
+	functions, _ := controller.process.Binary.ListFunctions()
+	for _, function := range functions {
+		if function.Name == "main.main" {
+			addrMain = function.Value
+		}
+	}
+
+	if !controller.process.HasBreakpoint(addrMain) {
+		t.Errorf("breakpoint is not set at main.main")
 	}
 }
 

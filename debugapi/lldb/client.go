@@ -293,6 +293,7 @@ func (c *Client) AttachProcess(pid int) (int, error) {
 
 	debugServerArgs := []string{"-F", "-R", listener.Addr().String(), fmt.Sprintf("--attach=%d", pid)}
 	cmd := exec.Command(debugServerPath, debugServerArgs...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, the signal sent to all the group members.
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
