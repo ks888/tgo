@@ -173,6 +173,9 @@ func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, goRoutineInfo
 }
 
 func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
+	goRoutineID := int(goRoutineInfo.ID)
+	status, _ := c.statusStore[goRoutineID]
+
 	if c.tracingPoint.Hit(goRoutineInfo.CurrentPC - 1) {
 		if !c.hitOnce {
 			if err := c.setBreakpointsExceptTracingPoint(); err != nil {
@@ -181,7 +184,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 			c.hitOnce = true
 		}
 
-		c.tracingPoint.Enter(goRoutineInfo.ID, goRoutineInfo.UsedStackSize)
+		c.tracingPoint.Enter(goRoutineInfo.ID, len(status.callingFunctions)+1)
 	}
 
 	stackFrame, err := c.currentStackFrame(goRoutineInfo)
@@ -189,8 +192,6 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		return err
 	}
 
-	goRoutineID := int(goRoutineInfo.ID)
-	status, _ := c.statusStore[goRoutineID]
 	if c.tracingPoint.Inside(goRoutineInfo.ID) {
 		if err := c.printFunctionInput(goRoutineID, stackFrame, len(status.callingFunctions)+1); err != nil {
 			return err
@@ -268,8 +269,7 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 		}
 
 		if c.tracingPoint.Hit(function.Value) {
-			// assumes 'call' inst consumed 8-bytes to save the return address to stack.
-			c.tracingPoint.Exit(goRoutineInfo.ID, goRoutineInfo.UsedStackSize+8)
+			c.tracingPoint.Exit(goRoutineInfo.ID, len(status.callingFunctions))
 		}
 	}
 
@@ -341,8 +341,8 @@ func (c *Controller) Interrupt() {
 
 type goRoutineInside struct {
 	id int64
-	// stackSize is the used stack size of the go routine when the tracing starts.
-	stackSize uint64
+	// stackDepth is the depth of the stack when the tracing starts.
+	stackDepth int
 }
 
 type tracingPoint struct {
@@ -357,22 +357,22 @@ func (p *tracingPoint) Hit(pc uint64) bool {
 
 // Enter updates the list of the go routines which are inside the tracing point.
 // It does nothing if the go routine has already entered.
-func (p *tracingPoint) Enter(goRoutineID int64, stackSize uint64) {
+func (p *tracingPoint) Enter(goRoutineID int64, stackDepth int) {
 	for _, goRoutine := range p.goRoutinesInside {
 		if goRoutine.id == goRoutineID {
 			return
 		}
 	}
 
-	p.goRoutinesInside = append(p.goRoutinesInside, goRoutineInside{id: goRoutineID, stackSize: stackSize})
+	p.goRoutinesInside = append(p.goRoutinesInside, goRoutineInside{id: goRoutineID, stackDepth: stackDepth})
 	return
 }
 
 // Exit removes the go routine from the inside-go routines list.
-// Note that the go routine is not removed if the stack size is different (to support recursive call's case).
-func (p *tracingPoint) Exit(goRoutineID int64, stackSize uint64) bool {
+// Note that the go routine is not removed if the depth is different (to support recursive call's case).
+func (p *tracingPoint) Exit(goRoutineID int64, stackDepth int) bool {
 	for i, goRoutine := range p.goRoutinesInside {
-		if goRoutine.id == goRoutineID && goRoutine.stackSize == stackSize {
+		if goRoutine.id == goRoutineID && goRoutine.stackDepth == stackDepth {
 			p.goRoutinesInside = append(p.goRoutinesInside[0:i], p.goRoutinesInside[i+1:len(p.goRoutinesInside)]...)
 			return true
 		}
@@ -389,4 +389,16 @@ func (p *tracingPoint) Inside(goRoutineID int64) bool {
 		}
 	}
 	return false
+}
+
+// Depth returns the diff between the current stack depth and the depth when the tracing starts.
+// It returns -1 if the go routine is not traced.
+func (p *tracingPoint) Depth(goRoutineID int64, currDepth int) int {
+	for _, goRoutine := range p.goRoutinesInside {
+		if goRoutine.id == goRoutineID {
+			return currDepth - goRoutine.stackDepth
+		}
+	}
+
+	return -1
 }
