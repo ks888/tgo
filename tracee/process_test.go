@@ -16,9 +16,6 @@ func TestLaunchProcess(t *testing.T) {
 	if proc.debugapiClient == nil {
 		t.Errorf("debugapiClient is nil")
 	}
-	if proc.currentThreadID == 0 {
-		t.Errorf("currentThreadID is 0")
-	}
 }
 
 func TestAttachProcess(t *testing.T) {
@@ -32,9 +29,6 @@ func TestAttachProcess(t *testing.T) {
 	}
 	if proc.debugapiClient == nil {
 		t.Errorf("debugapiClient is nil")
-	}
-	if proc.currentThreadID == 0 {
-		t.Errorf("currentThreadID is 0")
 	}
 }
 
@@ -67,13 +61,14 @@ func TestContinueAndWait(t *testing.T) {
 	if err := proc.SetBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
-	if _, err := proc.ContinueAndWait(); err != nil {
+	tids, _, err := proc.ContinueAndWait()
+	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 	if err := proc.ClearBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
-	if err := proc.SetPC(testutils.HelloworldAddrNoParameter); err != nil {
+	if err := proc.SetPC(tids[0], testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
@@ -81,7 +76,7 @@ func TestContinueAndWait(t *testing.T) {
 	if err := proc.SetBreakpoint(testutils.HelloworldAddrOneParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
-	if _, err := proc.ContinueAndWait(); err != nil {
+	if _, _, err := proc.ContinueAndWait(); err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 }
@@ -234,19 +229,21 @@ func TestSetPC(t *testing.T) {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
-	if _, err = proc.ContinueAndWait(); err != nil {
+	tids, _, err := proc.ContinueAndWait()
+	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 
-	if err := proc.SetPC(testutils.HelloworldAddrMain); err != nil {
+	if err := proc.SetPC(tids[0], testutils.HelloworldAddrMain); err != nil {
 		t.Fatalf("failed to set PC: %v", err)
 	}
 
-	if _, err = proc.ContinueAndWait(); err != nil {
+	tids, _, err = proc.ContinueAndWait()
+	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 
-	regs, err := proc.debugapiClient.ReadRegisters(proc.currentThreadID)
+	regs, err := proc.debugapiClient.ReadRegisters(tids[0])
 	if err != nil {
 		t.Fatalf("failed to read registers: %v", err)
 	}
@@ -265,11 +262,12 @@ func TestStackFrameAt(t *testing.T) {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
-	if _, err = proc.ContinueAndWait(); err != nil {
+	tids, _, err := proc.ContinueAndWait()
+	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 
-	regs, err := proc.debugapiClient.ReadRegisters(proc.currentThreadID)
+	regs, err := proc.debugapiClient.ReadRegisters(tids[0])
 	if err != nil {
 		t.Fatalf("failed to read registers: %v", err)
 	}
@@ -308,11 +306,12 @@ func TestCurrentGoRoutineInfo(t *testing.T) {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
-	if _, err = proc.ContinueAndWait(); err != nil {
+	tids, _, err := proc.ContinueAndWait()
+	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 
-	goRoutineInfo, err := proc.CurrentGoRoutineInfo()
+	goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}

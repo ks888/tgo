@@ -13,10 +13,9 @@ var breakpointInsts = []byte{0xcc}
 
 // Process represents the tracee process launched by or attached to this tracer.
 type Process struct {
-	debugapiClient  *lldb.Client
-	currentThreadID int
-	breakpoints     map[uint64]breakpoint
-	Binary          Binary
+	debugapiClient *lldb.Client
+	breakpoints    map[uint64]breakpoint
+	Binary         Binary
 }
 
 type breakpoint struct {
@@ -52,8 +51,7 @@ type GoRoutineInfo struct {
 // LaunchProcess launches new tracee process.
 func LaunchProcess(name string, arg ...string) (*Process, error) {
 	debugapiClient := lldb.NewClient()
-	threadID, err := debugapiClient.LaunchProcess(name, arg...)
-	if err != nil {
+	if err := debugapiClient.LaunchProcess(name, arg...); err != nil {
 		return nil, err
 	}
 
@@ -63,10 +61,9 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 	}
 
 	proc := &Process{
-		debugapiClient:  debugapiClient,
-		currentThreadID: threadID,
-		breakpoints:     make(map[uint64]breakpoint),
-		Binary:          binary,
+		debugapiClient: debugapiClient,
+		breakpoints:    make(map[uint64]breakpoint),
+		Binary:         binary,
 	}
 	return proc, nil
 }
@@ -74,7 +71,7 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 // AttachProcess attaches to the existing tracee process.
 func AttachProcess(pid int) (*Process, error) {
 	debugapiClient := lldb.NewClient()
-	threadID, err := debugapiClient.AttachProcess(pid)
+	err := debugapiClient.AttachProcess(pid)
 	if err != nil {
 		return nil, err
 	}
@@ -90,10 +87,9 @@ func AttachProcess(pid int) (*Process, error) {
 	}
 
 	proc := &Process{
-		debugapiClient:  debugapiClient,
-		currentThreadID: threadID,
-		breakpoints:     make(map[uint64]breakpoint),
-		Binary:          binary,
+		debugapiClient: debugapiClient,
+		breakpoints:    make(map[uint64]breakpoint),
+		Binary:         binary,
 	}
 	return proc, nil
 }
@@ -119,21 +115,21 @@ func (p *Process) close() error {
 
 // ContinueAndWait continues the execution and waits until an event happens.
 // Note that the id of the stopped thread may be different from the id of the continued thread.
-func (p *Process) ContinueAndWait() (event debugapi.Event, err error) {
-	p.currentThreadID, event, err = p.debugapiClient.ContinueAndWait()
+func (p *Process) ContinueAndWait() (trappedThreadIDs []int, event debugapi.Event, err error) {
+	trappedThreadIDs, event, err = p.debugapiClient.ContinueAndWait()
 	if debugapi.IsExitEvent(event.Type) {
 		err = p.close()
 	}
-	return event, err
+	return trappedThreadIDs, event, err
 }
 
 // StepAndWait does the single-step execution.
-func (p *Process) StepAndWait() (event debugapi.Event, err error) {
-	p.currentThreadID, event, err = p.debugapiClient.StepAndWait(p.currentThreadID)
+func (p *Process) StepAndWait(threadID int) (trappedThreadIDs []int, event debugapi.Event, err error) {
+	trappedThreadIDs, event, err = p.debugapiClient.StepAndWait(threadID)
 	if debugapi.IsExitEvent(event.Type) {
 		err = p.close()
 	}
-	return event, err
+	return trappedThreadIDs, event, err
 }
 
 // SetBreakpoint sets the breakpoint at the specified address.
@@ -195,14 +191,14 @@ func (p *Process) HasBreakpoint(addr uint64) bool {
 }
 
 // SetPC set the pc of the current thread to the given address.
-func (p *Process) SetPC(addr uint64) error {
-	regs, err := p.debugapiClient.ReadRegisters(p.currentThreadID)
+func (p *Process) SetPC(threadID int, addr uint64) error {
+	regs, err := p.debugapiClient.ReadRegisters(threadID)
 	if err != nil {
 		return err
 	}
 
 	regs.Rip = addr
-	return p.debugapiClient.WriteRegisters(p.currentThreadID, regs)
+	return p.debugapiClient.WriteRegisters(threadID, regs)
 }
 
 // StackFrameAt returns the stack frame to which the given rbp specified.
@@ -253,10 +249,10 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 }
 
 // CurrentGoRoutineInfo returns the go routine info associated with the go routine which hits the breakpoint.
-func (p *Process) CurrentGoRoutineInfo() (GoRoutineInfo, error) {
+func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 	// TODO: depend on go version and os
 	var offset uint32 = 0x8a0
-	gAddr, err := p.debugapiClient.ReadTLS(p.currentThreadID, offset)
+	gAddr, err := p.debugapiClient.ReadTLS(threadID, offset)
 	if err != nil {
 		return GoRoutineInfo{}, fmt.Errorf("failed to read tls: %v", err)
 	}
@@ -275,7 +271,7 @@ func (p *Process) CurrentGoRoutineInfo() (GoRoutineInfo, error) {
 	}
 	stackHi := binary.LittleEndian.Uint64(buff)
 
-	regs, err := p.debugapiClient.ReadRegisters(p.currentThreadID)
+	regs, err := p.debugapiClient.ReadRegisters(threadID)
 	if err != nil {
 		return GoRoutineInfo{}, err
 	}

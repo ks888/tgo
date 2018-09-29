@@ -382,7 +382,8 @@ func (p *tracingPoint) Hit(pc uint64) bool {
 	return pc == p.function.Value
 }
 
-// Enter updates the list of the go routines which are inside the tracing point. It does nothing if the go routine has already entered.
+// Enter updates the list of the go routines which are inside the tracing point.
+// It does nothing if the go routine has already entered.
 func (p *tracingPoint) Enter(goRoutineID int64, stackSize uint64) {
 	for _, goRoutine := range p.goRoutinesInside {
 		if goRoutine.id == goRoutineID {
