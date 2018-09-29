@@ -13,12 +13,17 @@ import (
 	"github.com/ks888/tgo/tracee"
 )
 
+// ErrInterrupted indicates the tracer is interrupted due to the Interrupt() call.
 var ErrInterrupted = errors.New("interrupted")
 
 // Controller controls the associated tracee process.
 type Controller struct {
 	process     *tracee.Process
 	statusStore map[int]goRoutineStatus
+
+	tracingPoint *tracingPoint
+	hitOnce      bool
+
 	interrupted bool
 	// The traced data is written to this writer.
 	outputWriter io.Writer
@@ -51,45 +56,59 @@ func NewController() *Controller {
 // LaunchTracee launches the new tracee process to be controlled.
 func (c *Controller) LaunchTracee(name string, arg ...string) error {
 	var err error
-	c.process, err = tracee.LaunchProcess(name, arg...)
-	if err != nil {
-		return err
-	}
 	c.statusStore = make(map[int]goRoutineStatus)
-
-	return c.setBreakpoints()
+	c.process, err = tracee.LaunchProcess(name, arg...)
+	return err
 }
 
 // AttachTracee attaches to the existing process.
 func (c *Controller) AttachTracee(pid int) error {
 	var err error
-	c.process, err = tracee.AttachProcess(pid)
-	if err != nil {
-		return err
-	}
 	c.statusStore = make(map[int]goRoutineStatus)
-
-	return c.setBreakpoints()
+	c.process, err = tracee.AttachProcess(pid)
+	return err
 }
 
-func (c *Controller) setBreakpoints() error {
-	functions, err := c.process.Binary.ListFunctions()
+// SetTracingPoint sets the starting point of the tracing. The tracing is enabled when this function is called and disabled when returned.
+// The tracing point can be set only once.
+func (c *Controller) SetTracingPoint(functionName string) error {
+	if c.tracingPoint != nil {
+		return errors.New("tracing point is set already")
+	}
+
+	function, err := c.findFunction(functionName)
 	if err != nil {
 		return err
 	}
-	for _, function := range functions {
-		if !c.canSetBreakpoint(function) {
-			continue
-		}
-		if err := c.process.SetBreakpoint(function.Value); err != nil {
-			return err
-		}
+
+	if !c.canSetBreakpoint(function) {
+		return fmt.Errorf("can't set the tracing point for %s", functionName)
 	}
+
+	if err := c.process.SetBreakpoint(function.Value); err != nil {
+		return err
+	}
+
+	c.tracingPoint = &tracingPoint{function: function}
 	return nil
 }
 
+func (c *Controller) findFunction(functionName string) (*tracee.Function, error) {
+	functions, err := c.process.Binary.ListFunctions()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, function := range functions {
+		if function.Name == functionName {
+			return function, nil
+		}
+	}
+	return nil, errors.New("failed to find function")
+}
+
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
-	// TODO: may be too conservative
+	// TODO: too conservative. At least funcs to operate map, chan, slice should be allowed.
 	if strings.HasPrefix(function.Name, "runtime") && !function.IsExported() {
 		return false
 	}
@@ -193,21 +212,34 @@ func (c *Controller) handleTrapAtUnrelatedBreakpoint(status goRoutineStatus, goR
 }
 
 func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
+	if c.tracingPoint.Hit(goRoutineInfo.CurrentPC - 1) {
+		if !c.hitOnce {
+			if err := c.setBreakpointsExceptTracingPoint(); err != nil {
+				return debugapi.Event{}, err
+			}
+			c.hitOnce = true
+		}
+
+		c.tracingPoint.Enter(goRoutineInfo.ID, goRoutineInfo.UsedStackSize)
+	}
+
 	stackFrame, err := c.currentStackFrame(goRoutineInfo)
 	if err != nil {
 		return debugapi.Event{}, err
 	}
 
 	goRoutineID := int(goRoutineInfo.ID)
-	funcAddr := stackFrame.Function.Value
-	if err := c.printFunctionInput(goRoutineID, stackFrame, len(status.callingFunctions)+1); err != nil {
-		return debugapi.Event{}, err
+	if c.tracingPoint.Inside(goRoutineInfo.ID) {
+		if err := c.printFunctionInput(goRoutineID, stackFrame, len(status.callingFunctions)+1); err != nil {
+			return debugapi.Event{}, err
+		}
 	}
 
 	if err := c.process.SetConditionalBreakpoint(stackFrame.ReturnAddress, goRoutineID); err != nil {
 		return debugapi.Event{}, err
 	}
 
+	funcAddr := stackFrame.Function.Value
 	if err := c.process.SetPC(funcAddr); err != nil {
 		return debugapi.Event{}, err
 	}
@@ -232,16 +264,39 @@ func (c *Controller) handleTrapAtFunctionCall(status goRoutineStatus, goRoutineI
 	return c.process.StepAndWait()
 }
 
+func (c *Controller) setBreakpointsExceptTracingPoint() error {
+	functions, err := c.process.Binary.ListFunctions()
+	if err != nil {
+		return err
+	}
+	for _, function := range functions {
+		if !c.canSetBreakpoint(function) || function.Name == c.tracingPoint.function.Name {
+			continue
+		}
+		if err := c.process.SetBreakpoint(function.Value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *Controller) handleTrapAtFunctionReturn(status goRoutineStatus, goRoutineInfo tracee.GoRoutineInfo) (debugapi.Event, error) {
 	goRoutineID := int(goRoutineInfo.ID)
 
-	function := status.callingFunctions[len(status.callingFunctions)-1]
-	prevStackFrame, err := c.prevStackFrame(goRoutineInfo, function.Value)
-	if err != nil {
-		return debugapi.Event{}, err
-	}
-	if err := c.printFunctionOutput(goRoutineID, prevStackFrame, len(status.callingFunctions)); err != nil {
-		return debugapi.Event{}, err
+	if c.tracingPoint.Inside(goRoutineInfo.ID) {
+		function := status.callingFunctions[len(status.callingFunctions)-1]
+		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, function.Value)
+		if err != nil {
+			return debugapi.Event{}, err
+		}
+		if err := c.printFunctionOutput(goRoutineID, prevStackFrame, len(status.callingFunctions)); err != nil {
+			return debugapi.Event{}, err
+		}
+
+		if c.tracingPoint.Hit(function.Value) {
+			// assumes 'call' inst consumed 8-bytes to save the return address to stack.
+			c.tracingPoint.Exit(goRoutineInfo.ID, goRoutineInfo.UsedStackSize+8)
+		}
 	}
 
 	breakpointAddr := goRoutineInfo.CurrentPC - 1
@@ -309,4 +364,55 @@ func (c *Controller) printFunctionOutput(goRoutineID int, stackFrame *tracee.Sta
 // Interrupt interrupts the main loop.
 func (c *Controller) Interrupt() {
 	c.interrupted = true
+}
+
+type goRoutineInside struct {
+	id int64
+	// stackSize is the used stack size of the go routine when the tracing starts.
+	stackSize uint64
+}
+
+type tracingPoint struct {
+	function         *tracee.Function
+	goRoutinesInside []goRoutineInside
+}
+
+// Hit returns true if pc is same as tracing point.
+func (p *tracingPoint) Hit(pc uint64) bool {
+	return pc == p.function.Value
+}
+
+// Enter updates the list of the go routines which are inside the tracing point. It does nothing if the go routine has already entered.
+func (p *tracingPoint) Enter(goRoutineID int64, stackSize uint64) {
+	for _, goRoutine := range p.goRoutinesInside {
+		if goRoutine.id == goRoutineID {
+			return
+		}
+	}
+
+	p.goRoutinesInside = append(p.goRoutinesInside, goRoutineInside{id: goRoutineID, stackSize: stackSize})
+	return
+}
+
+// Exit removes the go routine from the inside-go routines list.
+// Note that the go routine is not removed if the stack size is different (to support recursive call's case).
+func (p *tracingPoint) Exit(goRoutineID int64, stackSize uint64) bool {
+	for i, goRoutine := range p.goRoutinesInside {
+		if goRoutine.id == goRoutineID && goRoutine.stackSize == stackSize {
+			p.goRoutinesInside = append(p.goRoutinesInside[0:i], p.goRoutinesInside[i+1:len(p.goRoutinesInside)]...)
+			return true
+		}
+	}
+
+	return false
+}
+
+// Inside returns true if the go routine is inside the tracing point.
+func (p *tracingPoint) Inside(goRoutineID int64) bool {
+	for _, goRoutine := range p.goRoutinesInside {
+		if goRoutine.id == goRoutineID {
+			return true
+		}
+	}
+	return false
 }

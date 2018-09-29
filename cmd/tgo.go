@@ -9,18 +9,14 @@ import (
 	"github.com/ks888/tgo/tracer"
 )
 
-func run() error {
-	// TODO: use 3rd party flag management package
-	pid := flag.Int("attach", 0, "pid to attach")
-	flag.Parse()
-
+func run(pid int, function string, args []string) error {
 	controller := tracer.NewController()
-	if *pid == 0 {
-		if err := controller.LaunchTracee(os.Args[1], os.Args[2:]...); err != nil {
+	if pid == 0 {
+		if err := controller.LaunchTracee(args[0], args[1:]...); err != nil {
 			return fmt.Errorf("failed to launch tracee: %v", err)
 		}
 	} else {
-		if err := controller.AttachTracee(*pid); err != nil {
+		if err := controller.AttachTracee(pid); err != nil {
 			return fmt.Errorf("failed to attach tracee: %v", err)
 		}
 	}
@@ -32,18 +28,28 @@ func run() error {
 		controller.Interrupt()
 	}()
 
+	controller.SetTracingPoint(function)
+
 	return controller.MainLoop()
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Printf(`Usage: %s [tracee] [tracee args...]
-       %s -attach [pid]
-`, os.Args[0], os.Args[0])
-		os.Exit(1)
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] [program] [args...]\n", os.Args[0])
+		flag.PrintDefaults()
 	}
 
-	if err := run(); err != nil {
+	// TODO: offer subcommand for the attach case
+	pid := flag.Int("attach", 0, "the `pid` to attach")
+	function := flag.String("func", "main.main", "the tracing is enabled when this `function` is called and then disabled when returned")
+	flag.Parse()
+	if *pid == 0 && flag.NArg() == 0 {
+		flag.Usage()
+		os.Exit(1)
+	}
+	args := flag.Args()
+
+	if err := run(*pid, *function, args); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
