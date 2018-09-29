@@ -19,19 +19,16 @@ import (
 
 func TestLaunchProcess(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
-	}
-	if tid == 0 {
-		t.Errorf("invalid tid: %d", tid)
 	}
 	defer client.DetachProcess()
 }
 
 func TestLaunchProcess_ProgramNotExist(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess("notexist")
+	err := client.LaunchProcess("notexist")
 	if err == nil {
 		t.Fatalf("error not returned")
 	}
@@ -42,12 +39,9 @@ func TestAttachProcess(t *testing.T) {
 	_ = cmd.Start()
 
 	client := NewClient()
-	tid, err := client.AttachProcess(cmd.Process.Pid)
+	err := client.AttachProcess(cmd.Process.Pid)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
-	}
-	if tid == 0 {
-		t.Errorf("invalid tid: %d", tid)
 	}
 	cmd.Process.Kill()
 }
@@ -58,7 +52,7 @@ func TestAttachProcess_WrongPID(t *testing.T) {
 	_ = cmd.Run()
 
 	// the program already exits, so the pid is wrong
-	_, err := client.AttachProcess(cmd.Process.Pid)
+	err := client.AttachProcess(cmd.Process.Pid)
 	if err == nil {
 		t.Fatalf("error should be returned")
 	}
@@ -66,7 +60,7 @@ func TestAttachProcess_WrongPID(t *testing.T) {
 
 func TestDetachProcess_KillProc(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -92,7 +86,7 @@ func TestDetachProcess_KillProc(t *testing.T) {
 
 func TestReadRegisters(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -101,11 +95,12 @@ func TestReadRegisters(t *testing.T) {
 	if err := client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc}); err != nil {
 		t.Fatalf("failed to write memory: %v", err)
 	}
-	if _, _, err := client.ContinueAndWait(); err != nil {
+	tids, _, err := client.ContinueAndWait()
+	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 
-	regs, err := client.ReadRegisters(tid)
+	regs, err := client.ReadRegisters(tids[0])
 	if err != nil {
 		t.Fatalf("failed to read registers: %v", err)
 	}
@@ -119,18 +114,23 @@ func TestReadRegisters(t *testing.T) {
 
 func TestWriteRegisters(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
+	tids, err := client.ThreadIDs()
+	if err != nil {
+		t.Fatalf("failed to get thread ids: %v", err)
+	}
+
 	regs := debugapi.Registers{Rip: 0x1, Rsp: 0x2, Rcx: 0x3}
-	if err := client.WriteRegisters(tid, regs); err != nil {
+	if err := client.WriteRegisters(tids[0], regs); err != nil {
 		t.Fatalf("failed to write registers: %v", err)
 	}
 
-	actualRegs, _ := client.ReadRegisters(tid)
+	actualRegs, _ := client.ReadRegisters(tids[0])
 	if actualRegs.Rip != 0x1 {
 		t.Errorf("wrong rip: %x", actualRegs.Rip)
 	}
@@ -144,7 +144,7 @@ func TestWriteRegisters(t *testing.T) {
 
 func TestAllocateMemory(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestAllocateMemory(t *testing.T) {
 
 func TestDeallocateMemory(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestDeallocateMemory(t *testing.T) {
 
 func TestReadMemory(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestReadMemory(t *testing.T) {
 
 func TestWriteMemory(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -218,17 +218,17 @@ func TestWriteMemory(t *testing.T) {
 
 func TestReadTLS(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
 	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
-	_, _, _ = client.ContinueAndWait()
+	tids, _, _ := client.ContinueAndWait()
 
 	var offset uint32 = 0xf
-	_, err = client.ReadTLS(tid, offset)
+	_, err = client.ReadTLS(tids[0], offset)
 	if err != nil {
 		t.Fatalf("failed to read tls: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestReadTLS(t *testing.T) {
 
 func TestContinueAndWait_Trapped(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -251,12 +251,12 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 		t.Fatalf("failed to write memory: %v", err)
 	}
 
-	tid, event, err := client.ContinueAndWait()
+	tids, event, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	if tid == 0 {
-		t.Errorf("empty tid")
+	if len(tids) == 0 {
+		t.Errorf("empty tids")
 	}
 	if event != (debugapi.Event{Type: debugapi.EventTypeTrapped}) {
 		t.Errorf("wrong event: %v", event)
@@ -265,7 +265,7 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 
 func TestContinueAndWait_Exited(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramHelloworld)
+	err := client.LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestContinueAndWait_ConsoleWrite(t *testing.T) {
 	client := NewClient()
 	buff := &bytes.Buffer{}
 	client.outputWriter = buff
-	_, err := client.LaunchProcess(testutils.ProgramHelloworld)
+	err := client.LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestContinueAndWait_ConsoleWrite(t *testing.T) {
 
 func TestContinueAndWait_Signaled(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 
 func TestContinueAndWait_Stopped(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramHelloworld)
+	err := client.LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -348,27 +348,32 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 
 func TestStepAndWait(t *testing.T) {
 	client := NewClient()
-	tid, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	defer client.DetachProcess()
 
-	newTid, event, err := client.StepAndWait(tid)
+	tids, err := client.ThreadIDs()
+	if err != nil {
+		t.Fatalf("failed to get thread ids: %v", err)
+	}
+
+	newTids, event, err := client.StepAndWait(tids[0])
 	if err != nil {
 		t.Fatalf("failed to step and wait: %v", err)
 	}
 	if event != (debugapi.Event{Type: debugapi.EventTypeTrapped}) {
 		t.Fatalf("wrong event: %v", event)
 	}
-	if tid != newTid {
-		t.Fatalf("wrong tid: %d != %d", tid, newTid)
+	if tids[0] != newTids[0] {
+		t.Fatalf("wrong tid: %d != %d", tids[0], newTids[0])
 	}
 }
 
 func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	client := NewClient()
-	_, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -377,19 +382,19 @@ func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	orgInsts := make([]byte, 1)
 	_ = client.ReadMemory(testutils.InfloopAddrMain, orgInsts)
 	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
-	tid, _, _ := client.ContinueAndWait()
+	tids, _, _ := client.ContinueAndWait()
 
-	regs, _ := client.ReadRegisters(tid)
+	regs, _ := client.ReadRegisters(tids[0])
 	regs.Rip--
-	_ = client.WriteRegisters(tid, regs)
+	_ = client.WriteRegisters(tids[0], regs)
 	_ = client.WriteMemory(testutils.InfloopAddrMain, orgInsts)
 
-	_, _, err = client.StepAndWait(tid)
+	_, _, err = client.StepAndWait(tids[0])
 	if err != nil {
 		t.Fatalf("failed to step and wait: %v", err)
 	}
 
-	regs, _ = client.ReadRegisters(tid)
+	regs, _ = client.ReadRegisters(tids[0])
 	if regs.Rip != uint64(testutils.InfloopAddrMain)+9 {
 		t.Errorf("wrong pc: %x", regs.Rip)
 	}

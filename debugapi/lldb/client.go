@@ -22,6 +22,8 @@ const debugServerPath = "/Library/Developer/CommandLineTools/Library/PrivateFram
 // Assumes the packet size is not larger than this.
 const maxPacketSize = 4096
 
+const excBadAccess = syscall.Signal(0x91) // EXC_BAD_ACCESS
+
 // Client is the debug api client which depends on lldb's debugserver.
 // See the gdb's doc for the reference: https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html
 // Some commands use the lldb extension: https://github.com/llvm-mirror/lldb/blob/master/docs/lldb-gdb-remote.txt
@@ -45,10 +47,10 @@ func NewClient() *Client {
 }
 
 // LaunchProcess lets the debugserver launch the new prcoess.
-func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
+func (c *Client) LaunchProcess(name string, arg ...string) error {
 	listener, err := net.Listen("tcp", "localhost:")
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	debugServerArgs := []string{"-F", "-R", listener.Addr().String(), "--", name}
@@ -56,21 +58,17 @@ func (c *Client) LaunchProcess(name string, arg ...string) (int, error) {
 	cmd := exec.Command(debugServerPath, debugServerArgs...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, the signal sent to all the group members.
 	if err := cmd.Start(); err != nil {
-		return 0, err
+		return err
 	}
 
 	c.conn, err = c.waitConnectOrExit(listener, cmd)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	c.pid = cmd.Process.Pid
 	c.killOnDetach = true
 
-	if err := c.initialize(); err != nil {
-		return 0, err
-	}
-
-	return c.firstTid()
+	return c.initialize()
 }
 
 func (c *Client) waitConnectOrExit(listener net.Listener, cmd *exec.Cmd) (net.Conn, error) {
@@ -259,13 +257,23 @@ func (c *Client) deallocateMemory(addr uint64) error {
 	return c.receiveAndCheck()
 }
 
-func (c *Client) firstTid() (int, error) {
-	tids, err := c.qfThreadInfo()
+// ThreadIDs returns all the thread ids.
+func (c *Client) ThreadIDs() ([]int, error) {
+	rawThreadIDs, err := c.qfThreadInfo()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	tid, err := hexToUint64(strings.Split(tids, ",")[0], false)
-	return int(tid), err
+	// TODO: call qsThreadInfo
+
+	var threadIDs []int
+	for _, rawThreadID := range strings.Split(rawThreadIDs, ",") {
+		tid, err := hexToUint64(rawThreadID, false)
+		if err != nil {
+			return nil, err
+		}
+		threadIDs = append(threadIDs, int(tid))
+	}
+	return threadIDs, nil
 }
 
 func (c *Client) qfThreadInfo() (string, error) {
@@ -285,30 +293,26 @@ func (c *Client) qfThreadInfo() (string, error) {
 }
 
 // AttachProcess lets the debugserver attach the new prcoess.
-func (c *Client) AttachProcess(pid int) (int, error) {
+func (c *Client) AttachProcess(pid int) error {
 	listener, err := net.Listen("tcp", "localhost:")
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	debugServerArgs := []string{"-F", "-R", listener.Addr().String(), fmt.Sprintf("--attach=%d", pid)}
 	cmd := exec.Command(debugServerPath, debugServerArgs...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, the signal sent to all the group members.
 	if err := cmd.Start(); err != nil {
-		return 0, err
+		return err
 	}
 
 	c.conn, err = c.waitConnectOrExit(listener, cmd)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	c.pid = cmd.Process.Pid
 
-	if err := c.initialize(); err != nil {
-		return 0, err
-	}
-
-	return c.firstTid()
+	return c.initialize()
 }
 
 // DetachProcess detaches from the prcoess.
@@ -511,22 +515,22 @@ func (c *Client) buildReadTLSFunction(offset uint32) []byte {
 
 // ContinueAndWait resumes processes and waits until an event happens.
 // The exited event is reported when the main process exits (and not when its threads exit).
-func (c *Client) ContinueAndWait() (int, debugapi.Event, error) {
+func (c *Client) ContinueAndWait() ([]int, debugapi.Event, error) {
 	return c.continueAndWait(0)
 }
 
 // StepAndWait executes the one instruction of the specified thread and waits until an event happens.
 // The event may not be the trapped event.
-func (c *Client) StepAndWait(threadID int) (int, debugapi.Event, error) {
+func (c *Client) StepAndWait(threadID int) ([]int, debugapi.Event, error) {
 	command := fmt.Sprintf("vCont;s:%x", threadID)
 	if err := c.send(command); err != nil {
-		return 0, debugapi.Event{}, fmt.Errorf("send error: %v", err)
+		return nil, debugapi.Event{}, fmt.Errorf("send error: %v", err)
 	}
 
 	return c.wait()
 }
 
-func (c *Client) continueAndWait(signalNumber int) (int, debugapi.Event, error) {
+func (c *Client) continueAndWait(signalNumber int) ([]int, debugapi.Event, error) {
 	var command string
 	if signalNumber == 0 {
 		command = "vCont;c"
@@ -534,31 +538,31 @@ func (c *Client) continueAndWait(signalNumber int) (int, debugapi.Event, error) 
 		command = fmt.Sprintf("vCont;C%02x", signalNumber)
 	}
 	if err := c.send(command); err != nil {
-		return 0, debugapi.Event{}, fmt.Errorf("send error: %v", err)
+		return nil, debugapi.Event{}, fmt.Errorf("send error: %v", err)
 	}
 
 	return c.wait()
 }
 
-func (c *Client) wait() (int, debugapi.Event, error) {
+func (c *Client) wait() ([]int, debugapi.Event, error) {
 	data, err := c.receive()
 	if err != nil {
-		return 0, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
+		return nil, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
 	}
 
 	return c.handleStopReply(data)
 }
 
-func (c *Client) handleStopReply(data string) (tid int, event debugapi.Event, err error) {
+func (c *Client) handleStopReply(data string) (tids []int, event debugapi.Event, err error) {
 	switch data[0] {
 	case 'T':
-		tid, event, err = c.handleTPacket(data)
+		tids, event, err = c.handleTPacket(data)
 	case 'O':
-		tid, event, err = c.handleOPacket(data)
+		tids, event, err = c.handleOPacket(data)
 	case 'W':
-		tid, event, err = c.handleWPacket(data)
+		tids, event, err = c.handleWPacket(data)
 	case 'X':
-		tid, event, err = c.handleXPacket(data)
+		tids, event, err = c.handleXPacket(data)
 	default:
 		err = fmt.Errorf("unknown packet type: %s", data)
 	}
@@ -567,60 +571,101 @@ func (c *Client) handleStopReply(data string) (tid int, event debugapi.Event, er
 		// the connection may be closed already.
 		_ = c.close()
 	}
-	return tid, event, err
+	return tids, event, err
 }
 
-func (c *Client) handleTPacket(data string) (int, debugapi.Event, error) {
+func (c *Client) handleTPacket(data string) ([]int, debugapi.Event, error) {
 	signalNumber, err := hexToUint64(data[1:3], false)
 	if err != nil {
-		return 0, debugapi.Event{}, err
+		return nil, debugapi.Event{}, err
 	}
 
-	var threadID int
+	var threadIDs []int
 	for _, kvInStr := range strings.Split(data[3:len(data)-1], ";") {
 		kvArr := strings.Split(kvInStr, ":")
 		key, value := kvArr[0], kvArr[1]
-		if key == "thread" {
-			valueInNum, err := hexToUint64(value, false)
-			if err != nil {
-				return 0, debugapi.Event{}, err
+		if key == "threads" {
+			for _, tid := range strings.Split(value, ",") {
+				tidInNum, err := hexToUint64(tid, false)
+				if err != nil {
+					return nil, debugapi.Event{}, err
+				}
+				threadIDs = append(threadIDs, int(tidInNum))
 			}
-			threadID = int(valueInNum)
-			break
 		}
 	}
 
-	switch syscall.Signal(signalNumber) {
-	case unix.SIGTRAP:
-		return threadID, debugapi.Event{Type: debugapi.EventTypeTrapped}, nil
-	default:
+	trappedThreadIDs, err := c.selectTrappedThreads(threadIDs)
+	if err != nil {
+		return nil, debugapi.Event{}, err
+	}
+	if len(trappedThreadIDs) == 0 {
 		return c.continueAndWait(int(signalNumber))
 	}
+	return trappedThreadIDs, debugapi.Event{Type: debugapi.EventTypeTrapped}, nil
 }
 
-func (c *Client) handleOPacket(data string) (int, debugapi.Event, error) {
+func (c *Client) selectTrappedThreads(tids []int) ([]int, error) {
+	var trappedThreads []int
+	for _, tid := range tids {
+		data, err := c.qThreadStopInfo(tid)
+		if err != nil {
+			return nil, err
+		}
+
+		signalNumber, err := hexToUint64(data[1:3], false)
+		if err != nil {
+			return nil, err
+		}
+
+		switch syscall.Signal(signalNumber) {
+		case unix.SIGTRAP:
+			trappedThreads = append(trappedThreads, tid)
+		case excBadAccess:
+			return nil, errors.New("bad access")
+		}
+	}
+	return trappedThreads, nil
+}
+
+func (c *Client) qThreadStopInfo(tid int) (string, error) {
+	command := fmt.Sprintf("qThreadStopInfo%02x", tid)
+	if err := c.send(command); err != nil {
+		return "", err
+	}
+
+	data, err := c.receive()
+	if err != nil {
+		return "", err
+	} else if strings.HasPrefix(data, "E") {
+		return data, fmt.Errorf("error response: %s", data)
+	}
+	return data, nil
+}
+
+func (c *Client) handleOPacket(data string) ([]int, debugapi.Event, error) {
 	out, err := hexToByteArray(data[1:len(data)])
 	if err != nil {
-		return 0, debugapi.Event{}, err
+		return nil, debugapi.Event{}, err
 	}
 
 	_, err = c.outputWriter.Write(out)
 	if err != nil {
-		return 0, debugapi.Event{}, err
+		return nil, debugapi.Event{}, err
 	}
 
 	return c.wait()
 }
 
-func (c *Client) handleWPacket(data string) (int, debugapi.Event, error) {
+func (c *Client) handleWPacket(data string) ([]int, debugapi.Event, error) {
 	exitStatus, err := hexToUint64(data[1:3], false)
-	return 0, debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
+	return nil, debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
 }
 
-func (c *Client) handleXPacket(data string) (int, debugapi.Event, error) {
+func (c *Client) handleXPacket(data string) ([]int, debugapi.Event, error) {
 	signalNumber, err := hexToUint64(data[1:3], false)
 	// TODO: signalNumber here looks always 0. The number in the description looks correct, so maybe better to use it instead.
-	return 0, debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
+	return nil, debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
 }
 
 func (c *Client) send(command string) error {
