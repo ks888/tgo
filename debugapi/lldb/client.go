@@ -106,6 +106,10 @@ func (c *Client) initialize() error {
 		return err
 	}
 
+	if err := c.qThreadSuffixSupported(); err != nil {
+		return err
+	}
+
 	var err error
 	c.registerMetadataList, err = c.collectRegisterMetadata()
 	if err != nil {
@@ -145,6 +149,14 @@ func (c *Client) qSupported() error {
 	// TODO: adjust the buffer size so that it doesn't exceed the PacketSize in the response.
 	_, err := c.receive()
 	return err
+}
+
+func (c *Client) qThreadSuffixSupported() error {
+	const command = "QThreadSuffixSupported"
+	if err := c.send(command); err != nil {
+		return err
+	}
+	return c.receiveAndCheck()
 }
 
 var errEndOfList = errors.New("the end of list")
@@ -598,10 +610,11 @@ func (c *Client) handleTPacket(data string) ([]int, debugapi.Event, error) {
 	trappedThreadIDs, err := c.selectTrappedThreads(threadIDs)
 	if err != nil {
 		return nil, debugapi.Event{}, err
-	}
-	if len(trappedThreadIDs) == 0 {
+	} else if len(trappedThreadIDs) == 0 {
+		// this logic may swallow signals if there are two or more signaled threads
 		return c.continueAndWait(int(signalNumber))
 	}
+
 	return trappedThreadIDs, debugapi.Event{Type: debugapi.EventTypeTrapped}, nil
 }
 
