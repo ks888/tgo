@@ -19,9 +19,11 @@ var (
 	HelloworldAddrTwoParameters           uint64
 	HelloworldAddrFuncWithAbstractOrigin  uint64 // any function which corresponding DIE has the DW_AT_abstract_origin attribute.
 
-	ProgramInfloop    string
-	InfloopAddrMain   uint64
-	InfloopEntrypoint uint64
+	ProgramInfloop  string
+	InfloopAddrMain uint64
+
+	ProgramGoRoutines  string
+	GoRoutinesAddrMain uint64
 )
 
 func init() {
@@ -33,6 +35,9 @@ func init() {
 		panic(err)
 	}
 	if err := buildProgramInfloop(srcDirname); err != nil {
+		panic(err)
+	}
+	if err := buildProgramGoRoutines(srcDirname); err != nil {
 		panic(err)
 	}
 }
@@ -50,7 +55,7 @@ func buildProgramHelloworld(srcDirname string) error {
 		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
 	}
 
-	updateAddressIfMatched := func(name string, value uint64) {
+	updateAddressIfMatched := func(name string, value uint64) error {
 		switch name {
 		case "main.main":
 			HelloworldAddrMain = value
@@ -65,35 +70,10 @@ func buildProgramHelloworld(srcDirname string) error {
 		case "reflect.Value.Kind":
 			HelloworldAddrFuncWithAbstractOrigin = value
 		}
+		return nil
 	}
 
-	switch runtime.GOOS {
-	case "darwin":
-		machoFile, err := macho.Open(ProgramHelloworld)
-		if err != nil {
-			return fmt.Errorf("failed to open binary: %v", err)
-		}
-		for _, sym := range machoFile.Symtab.Syms {
-			updateAddressIfMatched(sym.Name, sym.Value)
-		}
-
-	case "linux":
-		elfFile, err := elf.Open(ProgramHelloworld)
-		if err != nil {
-			return fmt.Errorf("failed to open binary: %v", err)
-		}
-		syms, err := elfFile.Symbols()
-		if err != nil {
-			return fmt.Errorf("failed to find symbols: %v", err)
-		}
-		for _, sym := range syms {
-			updateAddressIfMatched(sym.Name, sym.Value)
-		}
-	default:
-		return fmt.Errorf("unsupported os: %s", runtime.GOOS)
-	}
-
-	return nil
+	return walkSymbols(ProgramHelloworld, updateAddressIfMatched)
 }
 
 func buildProgramInfloop(srcDirname string) error {
@@ -104,37 +84,63 @@ func buildProgramInfloop(srcDirname string) error {
 		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
 	}
 
-	updateAddressIfMatched := func(name string, value uint64) {
+	updateAddressIfMatched := func(name string, value uint64) error {
 		switch name {
 		case "main.main":
 			InfloopAddrMain = value
 		}
+		return nil
 	}
 
+	return walkSymbols(ProgramInfloop, updateAddressIfMatched)
+}
+
+func buildProgramGoRoutines(srcDirname string) error {
+	ProgramGoRoutines = srcDirname + "/testdata/goroutines"
+
+	src := ProgramGoRoutines + ".go"
+	if out, err := exec.Command("go", "build", "-o", ProgramGoRoutines, src).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	}
+
+	updateAddressIfMatched := func(name string, value uint64) error {
+		switch name {
+		case "main.main":
+			GoRoutinesAddrMain = value
+		}
+		return nil
+	}
+
+	return walkSymbols(ProgramGoRoutines, updateAddressIfMatched)
+}
+
+func walkSymbols(programName string, walkFunc func(name string, value uint64) error) error {
 	switch runtime.GOOS {
 	case "darwin":
-		machoFile, err := macho.Open(ProgramInfloop)
+		machoFile, err := macho.Open(programName)
 		if err != nil {
 			return fmt.Errorf("failed to open binary: %v", err)
 		}
 		for _, sym := range machoFile.Symtab.Syms {
-			updateAddressIfMatched(sym.Name, sym.Value)
+			if err := walkFunc(sym.Name, sym.Value); err != nil {
+				return err
+			}
 		}
 
 	case "linux":
-		elfFile, err := elf.Open(ProgramInfloop)
+		elfFile, err := elf.Open(programName)
 		if err != nil {
 			return fmt.Errorf("failed to open binary: %v", err)
 		}
-
-		InfloopEntrypoint = elfFile.Entry
 
 		syms, err := elfFile.Symbols()
 		if err != nil {
 			return fmt.Errorf("failed to find symbols: %v", err)
 		}
 		for _, sym := range syms {
-			updateAddressIfMatched(sym.Name, sym.Value)
+			if err := walkFunc(sym.Name, sym.Value); err != nil {
+				return err
+			}
 		}
 	default:
 		return fmt.Errorf("unsupported os: %s", runtime.GOOS)

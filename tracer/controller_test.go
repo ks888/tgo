@@ -57,16 +57,8 @@ func TestSetTracingPoint_SetTwice(t *testing.T) {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
 
-	if err := controller.SetTracingPoint("main.main"); err != nil {
-		t.Errorf("failed to set tracing point: %v", err)
-	}
-
-	if hasBreakpointAt(controller, "main.init") {
-		t.Errorf("breakpoint is set at main.init")
-	}
-
-	if !hasBreakpointAt(controller, "main.main") {
-		t.Errorf("breakpoint is not set at main.main")
+	if err := controller.SetTracingPoint("main.main"); err == nil {
+		t.Errorf("error not returned")
 	}
 }
 
@@ -124,6 +116,27 @@ func TestMainLoop_MainNoParameter(t *testing.T) {
 	}
 	if strings.Count(output, "main.oneParameter") != 0 {
 		t.Errorf("contain 'main.oneParameter':\n%s", output)
+	}
+}
+
+func TestMainLoop_GoRoutines(t *testing.T) {
+	controller := NewController()
+	buff := &bytes.Buffer{}
+	controller.outputWriter = buff
+	if err := controller.LaunchTracee(testutils.ProgramGoRoutines); err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	if err := controller.SetTracingPoint("main.main"); err != nil {
+		t.Fatalf("failed to set tracing point: %v", err)
+	}
+
+	if err := controller.MainLoop(); err != nil {
+		t.Errorf("failed to run main loop: %v", err)
+	}
+
+	output := buff.String()
+	if strings.Count(output, "main.main") != 2 {
+		t.Errorf("unexpected output: %s", output)
 	}
 }
 

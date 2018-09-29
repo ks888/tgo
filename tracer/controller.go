@@ -159,33 +159,20 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 
 	status, _ := c.statusStore[goRoutineID]
 	if goRoutineInfo.UsedStackSize < status.usedStackSize {
-		return c.handleTrapAtFunctionReturn(threadID, status, goRoutineInfo)
+		return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
 	} else if goRoutineInfo.UsedStackSize == status.usedStackSize {
 		// it's likely we are in the same stack frame as before (typical for the stack growth case).
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, goRoutineInfo)
 	}
-	return c.handleTrapAtFunctionCall(threadID, status, goRoutineInfo)
+	return c.handleTrapAtFunctionCall(threadID, goRoutineInfo)
 }
 
 func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
 	trappedAddr := goRoutineInfo.CurrentPC - 1
-
-	if err := c.process.SetPC(threadID, trappedAddr); err != nil {
-		return err
-	}
-
-	if err := c.process.ClearBreakpoint(trappedAddr); err != nil {
-		return err
-	}
-
-	if _, _, err := c.process.StepAndWait(threadID); err != nil {
-		return err
-	}
-
-	return c.process.SetBreakpoint(trappedAddr)
+	return c.singleStep(threadID, trappedAddr)
 }
 
-func (c *Controller) handleTrapAtFunctionCall(threadID int, status goRoutineStatus, goRoutineInfo tracee.GoRoutineInfo) error {
+func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
 	if c.tracingPoint.Hit(goRoutineInfo.CurrentPC - 1) {
 		if !c.hitOnce {
 			if err := c.setBreakpointsExceptTracingPoint(); err != nil {
@@ -203,6 +190,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, status goRoutineStat
 	}
 
 	goRoutineID := int(goRoutineInfo.ID)
+	status, _ := c.statusStore[goRoutineID]
 	if c.tracingPoint.Inside(goRoutineInfo.ID) {
 		if err := c.printFunctionInput(goRoutineID, stackFrame, len(status.callingFunctions)+1); err != nil {
 			return err
@@ -214,11 +202,24 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, status goRoutineStat
 	}
 
 	funcAddr := stackFrame.Function.Value
-	if err := c.process.SetPC(threadID, funcAddr); err != nil {
+	if err := c.singleStep(threadID, funcAddr); err != nil {
 		return err
 	}
 
-	if err := c.process.ClearBreakpoint(funcAddr); err != nil {
+	c.statusStore[goRoutineID] = goRoutineStatus{
+		usedStackSize:    goRoutineInfo.UsedStackSize,
+		callingFunctions: append(status.callingFunctions, stackFrame.Function),
+	}
+	return nil
+}
+
+// singleStep executes one instruction while clearing and setting breakpoints.
+func (c *Controller) singleStep(threadID int, trappedAddr uint64) error {
+	if err := c.process.SetPC(threadID, trappedAddr); err != nil {
+		return err
+	}
+
+	if err := c.process.ClearBreakpoint(trappedAddr); err != nil {
 		return err
 	}
 
@@ -233,15 +234,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, status goRoutineStat
 		return err
 	}
 
-	if err := c.process.SetBreakpoint(funcAddr); err != nil {
-		return err
-	}
-
-	c.statusStore[goRoutineID] = goRoutineStatus{
-		usedStackSize:    goRoutineInfo.UsedStackSize,
-		callingFunctions: append(status.callingFunctions, stackFrame.Function),
-	}
-	return nil
+	return c.process.SetBreakpoint(trappedAddr)
 }
 
 func (c *Controller) setBreakpointsExceptTracingPoint() error {
@@ -260,8 +253,9 @@ func (c *Controller) setBreakpointsExceptTracingPoint() error {
 	return nil
 }
 
-func (c *Controller) handleTrapAtFunctionReturn(threadID int, status goRoutineStatus, goRoutineInfo tracee.GoRoutineInfo) error {
+func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
 	goRoutineID := int(goRoutineInfo.ID)
+	status, _ := c.statusStore[goRoutineID]
 
 	if c.tracingPoint.Inside(goRoutineInfo.ID) {
 		function := status.callingFunctions[len(status.callingFunctions)-1]

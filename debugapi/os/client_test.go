@@ -167,8 +167,8 @@ func TestReadRegisters(t *testing.T) {
 		t.Fatalf("failed to read registers (pid: %d): %v", pid, err)
 	}
 
-	if regs.Rip != uint64(testutils.InfloopEntrypoint) {
-		t.Errorf("read registers have unexpected content: %d", regs.Rip)
+	if regs.Rip == 0 {
+		t.Errorf("emptyr rip")
 	}
 }
 
@@ -190,7 +190,7 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
 	defer terminateProcess(pid)
 
-	_ = client.WriteMemory(pid, uintptr(testutils.InfloopEntrypoint), []byte{0xcc})
+	_ = client.WriteMemory(pid, uintptr(testutils.InfloopAddrMain), []byte{0xcc})
 	stoppedPID, event, err := client.ContinueAndWait(pid)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
