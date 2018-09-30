@@ -143,6 +143,14 @@ func (c *Controller) handleTrapEvent(trappedThreadIDs []int) ([]int, debugapi.Ev
 			return nil, debugapi.Event{}, err
 		}
 	}
+
+	if c.interrupted {
+		if err := c.process.Detach(); err != nil {
+			return nil, debugapi.Event{}, err
+		}
+		return nil, debugapi.Event{}, ErrInterrupted
+	}
+
 	return c.process.ContinueAndWait()
 }
 
@@ -169,7 +177,7 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 
 func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
 	trappedAddr := goRoutineInfo.CurrentPC - 1
-	return c.singleStep(threadID, trappedAddr)
+	return c.process.SingleStep(threadID, trappedAddr)
 }
 
 func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
@@ -198,12 +206,12 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		}
 	}
 
-	if err := c.process.SetConditionalBreakpoint(stackFrame.ReturnAddress, goRoutineID); err != nil {
+	if err := c.process.SetConditionalBreakpoint(stackFrame.ReturnAddress, goRoutineID, true); err != nil {
 		return err
 	}
 
 	funcAddr := stackFrame.Function.Value
-	if err := c.singleStep(threadID, funcAddr); err != nil {
+	if err := c.process.SingleStep(threadID, funcAddr); err != nil {
 		return err
 	}
 
@@ -212,30 +220,6 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		callingFunctions: append(status.callingFunctions, stackFrame.Function),
 	}
 	return nil
-}
-
-// singleStep executes one instruction while clearing and setting breakpoints.
-func (c *Controller) singleStep(threadID int, trappedAddr uint64) error {
-	if err := c.process.SetPC(threadID, trappedAddr); err != nil {
-		return err
-	}
-
-	if err := c.process.ClearBreakpoint(trappedAddr); err != nil {
-		return err
-	}
-
-	if c.interrupted {
-		if err := c.process.Detach(); err != nil {
-			return err
-		}
-		return ErrInterrupted
-	}
-
-	if _, _, err := c.process.StepAndWait(threadID); err != nil {
-		return err
-	}
-
-	return c.process.SetBreakpoint(trappedAddr)
 }
 
 func (c *Controller) setBreakpointsExceptTracingPoint() error {
@@ -274,7 +258,8 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 	}
 
 	breakpointAddr := goRoutineInfo.CurrentPC - 1
-	if err := c.process.SetPC(threadID, breakpointAddr); err != nil {
+
+	if err := c.process.SingleStep(threadID, breakpointAddr); err != nil {
 		return err
 	}
 

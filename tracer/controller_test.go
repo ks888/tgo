@@ -140,6 +140,27 @@ func TestMainLoop_GoRoutines(t *testing.T) {
 	}
 }
 
+func TestMainLoop_Recursive(t *testing.T) {
+	controller := NewController()
+	buff := &bytes.Buffer{}
+	controller.outputWriter = buff
+	if err := controller.LaunchTracee(testutils.ProgramRecursive); err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	if err := controller.SetTracingPoint("main.main"); err != nil {
+		t.Fatalf("failed to set tracing point: %v", err)
+	}
+
+	if err := controller.MainLoop(); err != nil {
+		t.Errorf("failed to run main loop: %v", err)
+	}
+
+	output := buff.String()
+	if strings.Count(output, "main.dec") != 202 {
+		t.Errorf("wrong number of main.dec: %d", strings.Count(output, "main.dec"))
+	}
+}
+
 func TestInterrupt(t *testing.T) {
 	controller := NewController()
 	controller.outputWriter = ioutil.Discard

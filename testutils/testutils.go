@@ -24,6 +24,9 @@ var (
 
 	ProgramGoRoutines  string
 	GoRoutinesAddrMain uint64
+
+	ProgramRecursive  string
+	RecursiveAddrMain uint64
 )
 
 func init() {
@@ -38,6 +41,9 @@ func init() {
 		panic(err)
 	}
 	if err := buildProgramGoRoutines(srcDirname); err != nil {
+		panic(err)
+	}
+	if err := buildProgramRecursive(srcDirname); err != nil {
 		panic(err)
 	}
 }
@@ -112,6 +118,25 @@ func buildProgramGoRoutines(srcDirname string) error {
 	}
 
 	return walkSymbols(ProgramGoRoutines, updateAddressIfMatched)
+}
+
+func buildProgramRecursive(srcDirname string) error {
+	ProgramRecursive = srcDirname + "/testdata/recursive"
+
+	src := ProgramRecursive + ".go"
+	if out, err := exec.Command("go", "build", "-o", ProgramRecursive, src).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	}
+
+	updateAddressIfMatched := func(name string, value uint64) error {
+		switch name {
+		case "main.main":
+			RecursiveAddrMain = value
+		}
+		return nil
+	}
+
+	return walkSymbols(ProgramRecursive, updateAddressIfMatched)
 }
 
 func walkSymbols(programName string, walkFunc func(name string, value uint64) error) error {

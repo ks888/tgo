@@ -18,11 +18,15 @@ type Process struct {
 	Binary         Binary
 }
 
+const countDisabled = -1
+
 type breakpoint struct {
 	addr     uint64
 	orgInsts []byte
 	// targetGoRoutineID is go routine id interested in this breakpoint.
 	targetGoRoutineID int
+	// counter is the number of times this breakpoint is set and cleared.
+	counter int
 }
 
 // StackFrame describes the data in the stack frame and its associated function.
@@ -123,8 +127,30 @@ func (p *Process) ContinueAndWait() (trappedThreadIDs []int, event debugapi.Even
 	return trappedThreadIDs, event, err
 }
 
-// StepAndWait does the single-step execution.
-func (p *Process) StepAndWait(threadID int) (trappedThreadIDs []int, event debugapi.Event, err error) {
+// SingleStep executes one instruction while clearing and setting breakpoints.
+// It assumes there is the breakpoint at 'trappedAddr'.
+func (p *Process) SingleStep(threadID int, trappedAddr uint64) error {
+	bp, ok := p.breakpoints[trappedAddr]
+	if !ok {
+		return fmt.Errorf("breakpoint is not set at %x", trappedAddr)
+	}
+
+	if err := p.SetPC(threadID, trappedAddr); err != nil {
+		return err
+	}
+
+	if err := p.debugapiClient.WriteMemory(trappedAddr, bp.orgInsts); err != nil {
+		return err
+	}
+
+	if _, _, err := p.stepAndWait(threadID); err != nil {
+		return err
+	}
+
+	return p.debugapiClient.WriteMemory(trappedAddr, breakpointInsts)
+}
+
+func (p *Process) stepAndWait(threadID int) (trappedThreadIDs []int, event debugapi.Event, err error) {
 	trappedThreadIDs, event, err = p.debugapiClient.StepAndWait(threadID)
 	if debugapi.IsExitEvent(event.Type) {
 		err = p.close()
@@ -134,15 +160,21 @@ func (p *Process) StepAndWait(threadID int) (trappedThreadIDs []int, event debug
 
 // SetBreakpoint sets the breakpoint at the specified address.
 func (p *Process) SetBreakpoint(addr uint64) error {
-	return p.SetConditionalBreakpoint(addr, 0)
+	return p.SetConditionalBreakpoint(addr, 0, false)
 }
 
-// SetConditionalBreakpoint sets the conditional breakpoint.
-// So far the only condition available is the go routine id.
-func (p *Process) SetConditionalBreakpoint(addr uint64, goRoutineID int) error {
+// SetConditionalBreakpoint sets the breakpoint which only the specified go routine hits.
+// If the 'count' is true, it counts how many times the breakpoint is set and cleared and the breakpoint is not
+// cleared until the counter becomes 0.
+// 'goRoutineID' and 'count' are considered only when the breakpoint at the 'addr' is set for the first time.
+func (p *Process) SetConditionalBreakpoint(addr uint64, goRoutineID int, count bool) error {
 	bp, ok := p.breakpoints[addr]
 	if ok {
-		p.breakpoints[addr] = breakpoint{addr: bp.addr, orgInsts: bp.orgInsts, targetGoRoutineID: goRoutineID}
+		if bp.counter == countDisabled {
+			return nil
+		}
+		bp.counter++
+		p.breakpoints[addr] = bp
 		return nil
 	}
 
@@ -155,14 +187,24 @@ func (p *Process) SetConditionalBreakpoint(addr uint64, goRoutineID int) error {
 		return err
 	}
 
-	p.breakpoints[addr] = breakpoint{addr: addr, orgInsts: originalInsts, targetGoRoutineID: goRoutineID}
+	bp = breakpoint{addr: addr, orgInsts: originalInsts, targetGoRoutineID: goRoutineID, counter: countDisabled}
+	if count {
+		bp.counter = 1
+	}
+	p.breakpoints[addr] = bp
 	return nil
 }
 
 // ClearBreakpoint clears the breakpoint at the specified address.
+// Note that the breakpoint may not be cleared if the counter option is enabled.
+// Use SingleStep() to temporary disable the breakpoint.
 func (p *Process) ClearBreakpoint(addr uint64) error {
 	bp, ok := p.breakpoints[addr]
 	if !ok {
+		return nil
+	} else if bp.counter != countDisabled && bp.counter > 1 {
+		bp.counter--
+		p.breakpoints[addr] = bp
 		return nil
 	}
 

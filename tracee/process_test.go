@@ -81,6 +81,28 @@ func TestContinueAndWait(t *testing.T) {
 	}
 }
 
+func TestSingleStep(t *testing.T) {
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+	tids, _, err := proc.ContinueAndWait()
+	if err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+
+	if err := proc.SingleStep(tids[0], testutils.HelloworldAddrNoParameter); err != nil {
+		t.Fatalf("single-step failed: %v", err)
+	}
+	if !proc.HasBreakpoint(testutils.HelloworldAddrNoParameter) {
+		t.Errorf("breakpoint is cleared")
+	}
+}
+
 func TestSetBreakpoint(t *testing.T) {
 	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
@@ -134,7 +156,7 @@ func TestSetConditionalBreakpoint(t *testing.T) {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	err = proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1)
+	err = proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1, false)
 	if err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
@@ -143,6 +165,35 @@ func TestSetConditionalBreakpoint(t *testing.T) {
 	_ = proc.debugapiClient.ReadMemory(testutils.HelloworldAddrMain, buff)
 	if buff[0] != 0xcc {
 		t.Errorf("breakpoint is not set: %x", buff[0])
+	}
+}
+
+func TestSetConditionalBreakpoint_UseCounter(t *testing.T) {
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	if err := proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1, true); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	if err := proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1, true); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	if err = proc.ClearBreakpoint(testutils.HelloworldAddrMain); err != nil {
+		t.Fatalf("failed to clear breakpoint: %v", err)
+	}
+	if !proc.HasBreakpoint(testutils.HelloworldAddrMain) {
+		t.Errorf("breakpoint is not set")
+	}
+
+	if err = proc.ClearBreakpoint(testutils.HelloworldAddrMain); err != nil {
+		t.Fatalf("failed to clear breakpoint: %v", err)
+	}
+	if proc.HasBreakpoint(testutils.HelloworldAddrMain) {
+		t.Errorf("breakpoint is set")
 	}
 }
 
@@ -189,7 +240,7 @@ func TestHitBreakpoint(t *testing.T) {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	err = proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1)
+	err = proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1, false)
 	if err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
