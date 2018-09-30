@@ -150,13 +150,14 @@ func TestMainLoop_Recursive(t *testing.T) {
 	if err := controller.SetTracingPoint("main.main"); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
+	controller.SetDepth(3)
 
 	if err := controller.MainLoop(); err != nil {
 		t.Errorf("failed to run main loop: %v", err)
 	}
 
 	output := buff.String()
-	if strings.Count(output, "main.dec") != 202 {
+	if strings.Count(output, "main.dec") != 6 {
 		t.Errorf("wrong number of main.dec: %d", strings.Count(output, "main.dec"))
 	}
 }

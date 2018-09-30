@@ -22,6 +22,7 @@ type Controller struct {
 	statusStore map[int]goRoutineStatus
 
 	tracingPoint *tracingPoint
+	depth        int
 	hitOnce      bool
 
 	interrupted bool
@@ -57,7 +58,7 @@ func (c *Controller) AttachTracee(pid int) error {
 	return err
 }
 
-// SetTracingPoint sets the starting point of the tracing. The tracing is enabled when this function is called and disabled when returned.
+// SetTracingPoint sets the starting point of the tracing. The tracing is enabled when this function is called and disabled when it is returned.
 // The tracing point can be set only once.
 func (c *Controller) SetTracingPoint(functionName string) error {
 	if c.tracingPoint != nil {
@@ -107,6 +108,14 @@ func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
 		}
 	}
 	return true
+}
+
+// SetDepth sets the depth, which decides whether to print the traced info.
+// It is the stack's relative depth from the point the tracing starts.
+// For example, when the stack depth is 'x' at the start point, the called function info is printed
+// if the stack depth is within 'x+depth'.
+func (c *Controller) SetDepth(depth int) {
+	c.depth = depth
 }
 
 // MainLoop repeatedly lets the tracee continue and then wait an event.
@@ -183,6 +192,7 @@ func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, goRoutineInfo
 func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
 	goRoutineID := int(goRoutineInfo.ID)
 	status, _ := c.statusStore[goRoutineID]
+	currStackDepth := len(status.callingFunctions) + 1
 
 	if c.tracingPoint.Hit(goRoutineInfo.CurrentPC - 1) {
 		if !c.hitOnce {
@@ -192,7 +202,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 			c.hitOnce = true
 		}
 
-		c.tracingPoint.Enter(goRoutineInfo.ID, len(status.callingFunctions)+1)
+		c.tracingPoint.Enter(goRoutineInfo.ID, currStackDepth)
 	}
 
 	stackFrame, err := c.currentStackFrame(goRoutineInfo)
@@ -200,8 +210,8 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		return err
 	}
 
-	if c.tracingPoint.Inside(goRoutineInfo.ID) {
-		if err := c.printFunctionInput(goRoutineID, stackFrame, len(status.callingFunctions)+1); err != nil {
+	if c.shouldPrint(goRoutineInfo.ID, currStackDepth) {
+		if err := c.printFunctionInput(goRoutineID, stackFrame, currStackDepth); err != nil {
 			return err
 		}
 	}
@@ -238,22 +248,28 @@ func (c *Controller) setBreakpointsExceptTracingPoint() error {
 	return nil
 }
 
+func (c *Controller) shouldPrint(goRoutineID int64, currStackDepth int) bool {
+	currRelativeDepth := c.tracingPoint.Depth(goRoutineID, currStackDepth)
+	return c.tracingPoint.Inside(goRoutineID) && currRelativeDepth <= c.depth
+}
+
 func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
 	goRoutineID := int(goRoutineInfo.ID)
 	status, _ := c.statusStore[goRoutineID]
+	currStackDepth := len(status.callingFunctions)
 
-	if c.tracingPoint.Inside(goRoutineInfo.ID) {
+	if c.shouldPrint(goRoutineInfo.ID, currStackDepth) {
 		function := status.callingFunctions[len(status.callingFunctions)-1]
 		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, function.Value)
 		if err != nil {
 			return err
 		}
-		if err := c.printFunctionOutput(goRoutineID, prevStackFrame, len(status.callingFunctions)); err != nil {
+		if err := c.printFunctionOutput(goRoutineID, prevStackFrame, currStackDepth); err != nil {
 			return err
 		}
 
 		if c.tracingPoint.Hit(function.Value) {
-			c.tracingPoint.Exit(goRoutineInfo.ID, len(status.callingFunctions))
+			c.tracingPoint.Exit(goRoutineInfo.ID, currStackDepth)
 		}
 	}
 

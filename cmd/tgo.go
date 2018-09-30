@@ -9,7 +9,7 @@ import (
 	"github.com/ks888/tgo/tracer"
 )
 
-func run(pid int, function string, args []string) error {
+func run(pid int, function string, depth int, args []string) error {
 	controller := tracer.NewController()
 	if pid == 0 {
 		if err := controller.LaunchTracee(args[0], args[1:]...); err != nil {
@@ -29,6 +29,7 @@ func run(pid int, function string, args []string) error {
 	}()
 
 	controller.SetTracingPoint(function)
+	controller.SetDepth(depth)
 
 	return controller.MainLoop()
 }
@@ -40,8 +41,9 @@ func main() {
 	}
 
 	// TODO: offer subcommand for the attach case
-	pid := flag.Int("attach", 0, "the `pid` to attach")
-	function := flag.String("func", "main.main", "the tracing is enabled when this `function` is called and then disabled when returned")
+	pid := flag.Int("attach", 0, "The `pid` to attach")
+	function := flag.String("func", "main.main", "The tracing is enabled when this `function` is called and then disabled when returned")
+	depth := flag.Int("depth", 1, "The traced info is printed if the stack depth is within this `depth`")
 	flag.Parse()
 	if *pid == 0 && flag.NArg() == 0 {
 		flag.Usage()
@@ -49,7 +51,7 @@ func main() {
 	}
 	args := flag.Args()
 
-	if err := run(*pid, *function, args); err != nil {
+	if err := run(*pid, *function, *depth, args); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
