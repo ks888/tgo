@@ -126,7 +126,7 @@ func TestMainLoop_GoRoutines(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramGoRoutines); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracingPoint("main.main"); err != nil {
+	if err := controller.SetTracingPoint("main.inc"); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestMainLoop_GoRoutines(t *testing.T) {
 	}
 
 	output := buff.String()
-	if strings.Count(output, "main.main") != 2 {
+	if strings.Count(output, "main.inc") != 200 {
 		t.Errorf("unexpected output: %s", output)
 	}
 }

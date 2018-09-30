@@ -168,12 +168,12 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	if err != nil {
 		return err
 	}
-	goRoutineID := int(goRoutineInfo.ID)
 
-	if !c.process.HitBreakpoint(goRoutineInfo.CurrentPC-1, goRoutineID) {
+	if !c.process.HitBreakpoint(goRoutineInfo.CurrentPC-1, goRoutineInfo.ID) {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, goRoutineInfo)
 	}
 
+	goRoutineID := int(goRoutineInfo.ID)
 	status, _ := c.statusStore[goRoutineID]
 	if goRoutineInfo.UsedStackSize < status.usedStackSize {
 		return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
@@ -216,7 +216,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		}
 	}
 
-	if err := c.process.SetConditionalBreakpoint(stackFrame.ReturnAddress, goRoutineID, true); err != nil {
+	if err := c.process.SetConditionalBreakpoint(stackFrame.ReturnAddress, goRoutineInfo.ID); err != nil {
 		return err
 	}
 
@@ -279,7 +279,7 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 		return err
 	}
 
-	if err := c.process.ClearBreakpoint(breakpointAddr); err != nil {
+	if err := c.process.ClearConditionalBreakpoint(breakpointAddr, goRoutineInfo.ID); err != nil {
 		return err
 	}
 
