@@ -31,10 +31,23 @@ type Controller struct {
 }
 
 type goRoutineStatus struct {
-	usedStackSize uint64
-	// callingFunctions is the list of functions in the call stack.
 	// This list include only the functions which hit the breakpoint before and so is not complete.
-	callingFunctions []*tracee.Function
+	callingFunctions []callingFunction
+	panicking        bool
+}
+
+func (status goRoutineStatus) usedStackSize() uint64 {
+	if len(status.callingFunctions) > 0 {
+		return status.callingFunctions[len(status.callingFunctions)-1].usedStackSize
+	}
+
+	return 0
+}
+
+type callingFunction struct {
+	*tracee.Function
+	returnAddress uint64
+	usedStackSize uint64
 }
 
 // NewController returns the new controller.
@@ -97,10 +110,18 @@ func (c *Controller) findFunction(functionName string) (*tracee.Function, error)
 }
 
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
+	allowedFuncs := []string{"runtime.deferproc", "runtime.gopanic", "runtime.gorecover"}
+	for _, f := range allowedFuncs {
+		if function.Name == f {
+			return true
+		}
+	}
+
 	// TODO: too conservative. At least funcs to operate map, chan, slice should be allowed.
 	if strings.HasPrefix(function.Name, "runtime") && !function.IsExported() {
 		return false
 	}
+
 	prefixesToAvoid := []string{"_rt0", "type."}
 	for _, prefix := range prefixesToAvoid {
 		if strings.HasPrefix(function.Name, prefix) {
@@ -175,9 +196,9 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 
 	goRoutineID := int(goRoutineInfo.ID)
 	status, _ := c.statusStore[goRoutineID]
-	if goRoutineInfo.UsedStackSize < status.usedStackSize {
+	if goRoutineInfo.UsedStackSize < status.usedStackSize() {
 		return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
-	} else if goRoutineInfo.UsedStackSize == status.usedStackSize {
+	} else if goRoutineInfo.UsedStackSize == status.usedStackSize() {
 		// it's likely we are in the same stack frame as before (typical for the stack growth case).
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, goRoutineInfo)
 	}
@@ -193,6 +214,10 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 	goRoutineID := int(goRoutineInfo.ID)
 	status, _ := c.statusStore[goRoutineID]
 	currStackDepth := len(status.callingFunctions) + 1
+	panicking := c.isPanicking(status)
+	if panicking && goRoutineInfo.DeferedBy != nil {
+		currStackDepth -= c.findNumFramesToSkip(status.callingFunctions, goRoutineInfo.DeferedBy.UsedStackSize)
+	}
 
 	if c.tracingPoint.Hit(goRoutineInfo.CurrentPC - 1) {
 		if !c.hitOnce {
@@ -210,7 +235,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		return err
 	}
 
-	if c.shouldPrint(goRoutineInfo.ID, currStackDepth) {
+	if c.canPrint(goRoutineInfo.ID, currStackDepth) {
 		if err := c.printFunctionInput(goRoutineID, stackFrame, currStackDepth); err != nil {
 			return err
 		}
@@ -225,11 +250,35 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		return err
 	}
 
+	callingFunc := callingFunction{
+		Function:      stackFrame.Function,
+		returnAddress: stackFrame.ReturnAddress,
+		usedStackSize: goRoutineInfo.UsedStackSize,
+	}
 	c.statusStore[goRoutineID] = goRoutineStatus{
-		usedStackSize:    goRoutineInfo.UsedStackSize,
-		callingFunctions: append(status.callingFunctions, stackFrame.Function),
+		callingFunctions: append(status.callingFunctions, callingFunc),
+		panicking:        panicking,
 	}
 	return nil
+}
+
+func (c *Controller) isPanicking(status goRoutineStatus) bool {
+	for _, function := range status.callingFunctions {
+		if function.Name == "runtime.gopanic" {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Controller) findNumFramesToSkip(callingFuncs []callingFunction, usedStackSize uint64) int {
+	for i := len(callingFuncs) - 1; i >= 0; i-- {
+		callingFunc := callingFuncs[i]
+		if callingFunc.usedStackSize < usedStackSize {
+			return len(callingFuncs) - 1 - i
+		}
+	}
+	return len(callingFuncs) - 1
 }
 
 func (c *Controller) setBreakpointsExceptTracingPoint() error {
@@ -248,7 +297,7 @@ func (c *Controller) setBreakpointsExceptTracingPoint() error {
 	return nil
 }
 
-func (c *Controller) shouldPrint(goRoutineID int64, currStackDepth int) bool {
+func (c *Controller) canPrint(goRoutineID int64, currStackDepth int) bool {
 	currRelativeDepth := c.tracingPoint.Depth(goRoutineID, currStackDepth)
 	return c.tracingPoint.Inside(goRoutineID) && currRelativeDepth <= c.depth
 }
@@ -257,9 +306,13 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 	goRoutineID := int(goRoutineInfo.ID)
 	status, _ := c.statusStore[goRoutineID]
 	currStackDepth := len(status.callingFunctions)
+	panicking := c.isPanicking(status)
+	if panicking && goRoutineInfo.DeferedBy != nil {
+		currStackDepth -= c.findNumFramesToSkip(status.callingFunctions, goRoutineInfo.DeferedBy.UsedStackSize)
+	}
 
-	if c.shouldPrint(goRoutineInfo.ID, currStackDepth) {
-		function := status.callingFunctions[len(status.callingFunctions)-1]
+	if c.canPrint(goRoutineInfo.ID, currStackDepth) {
+		function := status.callingFunctions[len(status.callingFunctions)-1].Function
 		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, function.Value)
 		if err != nil {
 			return err
@@ -285,7 +338,7 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 
 	c.statusStore[goRoutineID] = goRoutineStatus{
 		callingFunctions: status.callingFunctions[0 : len(status.callingFunctions)-1],
-		usedStackSize:    goRoutineInfo.UsedStackSize,
+		panicking:        panicking,
 	}
 	return nil
 }

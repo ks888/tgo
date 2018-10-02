@@ -345,4 +345,8 @@ func TestCurrentGoRoutineInfo(t *testing.T) {
 	if goRoutineInfo.CurrentStackAddr == 0 {
 		t.Errorf("empty stack address: %d", goRoutineInfo.CurrentStackAddr)
 	}
+	// main go routine always has 'defer' setting. See runtime.main() for the detail.
+	if goRoutineInfo.DeferedBy == nil || goRoutineInfo.DeferedBy.PC == 0 || goRoutineInfo.DeferedBy.UsedStackSize == 0 {
+		t.Errorf("deferedBy is nil or its value is 0")
+	}
 }

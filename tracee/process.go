@@ -35,14 +35,6 @@ type Argument struct {
 	Value []byte
 }
 
-// GoRoutineInfo describes the various info of the go routine like stack frame.
-type GoRoutineInfo struct {
-	ID               int64
-	UsedStackSize    uint64
-	CurrentPC        uint64
-	CurrentStackAddr uint64
-}
-
 // LaunchProcess launches new tracee process.
 func LaunchProcess(name string, arg ...string) (*Process, error) {
 	debugapiClient := lldb.NewClient()
@@ -286,6 +278,21 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 	return
 }
 
+// GoRoutineInfo describes the various info of the go routine like pc.
+type GoRoutineInfo struct {
+	ID               int64
+	UsedStackSize    uint64
+	CurrentPC        uint64
+	CurrentStackAddr uint64
+	DeferedBy        *DeferedBy
+}
+
+// DeferedBy holds the function's context, such as used stack address, at the time of defer.
+type DeferedBy struct {
+	UsedStackSize uint64
+	PC            uint64
+}
+
 // CurrentGoRoutineInfo returns the go routine info associated with the go routine which hits the breakpoint.
 func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 	// TODO: depend on go version and os
@@ -315,7 +322,31 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 	}
 	usedStackSize := stackHi - regs.Rsp
 
-	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp}, nil
+	var offsetToDefer uint64 = 8*2 + 8 + 8 + 8
+	if err = p.debugapiClient.ReadMemory(gAddr+offsetToDefer, buff); err != nil {
+		return GoRoutineInfo{}, err
+	}
+	pointerToDefer := binary.LittleEndian.Uint64(buff)
+
+	var deferedBy *DeferedBy
+	if pointerToDefer != 0 {
+		var offsetToSP uint64 = 4 + 4
+		if err = p.debugapiClient.ReadMemory(pointerToDefer+offsetToSP, buff); err != nil {
+			return GoRoutineInfo{}, err
+		}
+		stackAddress := binary.LittleEndian.Uint64(buff)
+		usedStackSizeAtDefer := stackHi - stackAddress
+
+		var offsetToPC uint64 = 4 + 4 + 8
+		if err = p.debugapiClient.ReadMemory(pointerToDefer+offsetToPC, buff); err != nil {
+			return GoRoutineInfo{}, err
+		}
+		pc := binary.LittleEndian.Uint64(buff)
+
+		deferedBy = &DeferedBy{UsedStackSize: usedStackSizeAtDefer, PC: pc}
+	}
+
+	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, DeferedBy: deferedBy}, nil
 }
 
 type breakpoint struct {
