@@ -162,6 +162,28 @@ func TestMainLoop_Recursive(t *testing.T) {
 	}
 }
 
+func TestMainLoop_Panic(t *testing.T) {
+	controller := NewController()
+	buff := &bytes.Buffer{}
+	controller.outputWriter = buff
+	if err := controller.LaunchTracee(testutils.ProgramPanic); err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	if err := controller.SetTracingPoint("main.main"); err != nil {
+		t.Fatalf("failed to set tracing point: %v", err)
+	}
+	controller.SetDepth(2)
+
+	if err := controller.MainLoop(); err != nil {
+		t.Errorf("failed to run main loop: %v", err)
+	}
+
+	output := buff.String()
+	if strings.Count(output, "main.catch") != 2 {
+		t.Errorf("wrong number of main.catch: %d", strings.Count(output, "main.catch"))
+	}
+}
+
 func TestInterrupt(t *testing.T) {
 	controller := NewController()
 	controller.outputWriter = ioutil.Discard

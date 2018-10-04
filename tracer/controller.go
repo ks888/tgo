@@ -43,6 +43,13 @@ func (status goRoutineStatus) usedStackSize() uint64 {
 	return 0
 }
 
+func (status goRoutineStatus) lastFunctionAddr() uint64 {
+	if len(status.callingFunctions) > 0 {
+		return status.callingFunctions[len(status.callingFunctions)-1].Value
+	}
+	return 0
+}
+
 type callingFunction struct {
 	*tracee.Function
 	returnAddress uint64
@@ -109,14 +116,19 @@ func (c *Controller) findFunction(functionName string) (*tracee.Function, error)
 }
 
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
-	allowedFuncs := []string{"runtime.deferproc", "runtime.gopanic", "runtime.gorecover"}
-	for _, f := range allowedFuncs {
-		if function.Name == f {
+	// TODO: make the blacklist rather than this white list to support more runtime funcs.
+	allowedFuncPrefixes := []string{
+		"runtime.deferproc", "runtime.gopanic", "runtime.gorecover", "runtime.deferreturn",
+		"runtime.make", "runtime.slice", "runtime.growslice", "runtime.memmove",
+		"runtime.map", "runtime.chan", "runtime.close",
+		"runtime.newobject",
+	}
+	for _, f := range allowedFuncPrefixes {
+		if strings.HasPrefix(function.Name, f) {
 			return true
 		}
 	}
 
-	// TODO: too conservative. At least funcs to operate map, chan, slice should be allowed.
 	if strings.HasPrefix(function.Name, "runtime") && !function.IsExported() {
 		return false
 	}
@@ -189,14 +201,15 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 		return err
 	}
 
-	if !c.process.HitBreakpoint(goRoutineInfo.CurrentPC-1, goRoutineInfo.ID) {
+	breakpointAddr := goRoutineInfo.CurrentPC - 1
+	if !c.process.HitBreakpoint(breakpointAddr, goRoutineInfo.ID) {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, goRoutineInfo)
 	}
 
 	status, _ := c.statusStore[int(goRoutineInfo.ID)]
 	if goRoutineInfo.UsedStackSize < status.usedStackSize() {
 		return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
-	} else if goRoutineInfo.UsedStackSize == status.usedStackSize() {
+	} else if goRoutineInfo.UsedStackSize == status.usedStackSize() && breakpointAddr == status.lastFunctionAddr() {
 		// it's likely we are in the same stack frame as before (typical for the stack growth case).
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, goRoutineInfo)
 	}
@@ -215,7 +228,9 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		return err
 	}
 
-	// in the case just recovered from panic
+	// unwinded here in some cases:
+	// * just recovered from panic.
+	// * the last function used 'JMP' to call the next function and didn't change the SP. e.g. runtime.deferreturn
 	remainingFuncs, _, err := c.unwindFunctions(status.callingFunctions, goRoutineInfo)
 	if err != nil {
 		return err
