@@ -27,6 +27,12 @@ var (
 
 	ProgramRecursive  string
 	RecursiveAddrMain uint64
+
+	ProgramPanic           string
+	PanicAddrMain          uint64
+	PanicAddrThrow         uint64
+	PanicAddrInsideThrough uint64
+	PanicAddrCatch         uint64
 )
 
 func init() {
@@ -44,6 +50,9 @@ func init() {
 		panic(err)
 	}
 	if err := buildProgramRecursive(srcDirname); err != nil {
+		panic(err)
+	}
+	if err := buildProgramPanic(srcDirname); err != nil {
 		panic(err)
 	}
 }
@@ -137,6 +146,31 @@ func buildProgramRecursive(srcDirname string) error {
 	}
 
 	return walkSymbols(ProgramRecursive, updateAddressIfMatched)
+}
+
+func buildProgramPanic(srcDirname string) error {
+	ProgramPanic = srcDirname + "/testdata/panic"
+
+	src := ProgramPanic + ".go"
+	if out, err := exec.Command("go", "build", "-o", ProgramPanic, src).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	}
+
+	updateAddressIfMatched := func(name string, value uint64) error {
+		switch name {
+		case "main.main":
+			PanicAddrMain = value
+		case "main.throw":
+			PanicAddrThrow = value
+		case "main.through.func1":
+			PanicAddrInsideThrough = value
+		case "main.catch":
+			PanicAddrCatch = value
+		}
+		return nil
+	}
+
+	return walkSymbols(ProgramPanic, updateAddressIfMatched)
 }
 
 func walkSymbols(programName string, walkFunc func(name string, value uint64) error) error {

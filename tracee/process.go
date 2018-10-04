@@ -111,26 +111,26 @@ func (p *Process) ContinueAndWait() (trappedThreadIDs []int, event debugapi.Even
 }
 
 // SingleStep executes one instruction while clearing and setting breakpoints.
-// It assumes there is the breakpoint at 'trappedAddr'.
 func (p *Process) SingleStep(threadID int, trappedAddr uint64) error {
-	bp, ok := p.breakpoints[trappedAddr]
-	if !ok {
-		return fmt.Errorf("breakpoint is not set at %x", trappedAddr)
-	}
-
 	if err := p.setPC(threadID, trappedAddr); err != nil {
 		return err
 	}
 
-	if err := p.debugapiClient.WriteMemory(trappedAddr, bp.orgInsts); err != nil {
-		return err
+	bp, bpSet := p.breakpoints[trappedAddr]
+	if bpSet {
+		if err := p.debugapiClient.WriteMemory(trappedAddr, bp.orgInsts); err != nil {
+			return err
+		}
 	}
 
 	if _, _, err := p.stepAndWait(threadID); err != nil {
 		return err
 	}
 
-	return p.debugapiClient.WriteMemory(trappedAddr, breakpointInsts)
+	if bpSet {
+		return p.debugapiClient.WriteMemory(trappedAddr, breakpointInsts)
+	}
+	return nil
 }
 
 func (p *Process) setPC(threadID int, addr uint64) error {
@@ -284,13 +284,15 @@ type GoRoutineInfo struct {
 	UsedStackSize    uint64
 	CurrentPC        uint64
 	CurrentStackAddr uint64
-	DeferedBy        *DeferedBy
+	Panicking        bool
+	PanicHandler     *PanicHandler
 }
 
-// DeferedBy holds the function's context, such as used stack address, at the time of defer.
-type DeferedBy struct {
-	UsedStackSize uint64
-	PC            uint64
+// PanicHandler holds the function info which (will) handles panic.
+type PanicHandler struct {
+	// UsedStackSizeAtDefer and PCAtDefer are the function info which register this handler by 'defer'.
+	UsedStackSizeAtDefer uint64
+	PCAtDefer            uint64
 }
 
 // CurrentGoRoutineInfo returns the go routine info associated with the go routine which hits the breakpoint.
@@ -322,31 +324,64 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 	}
 	usedStackSize := stackHi - regs.Rsp
 
-	var offsetToDefer uint64 = 8*2 + 8 + 8 + 8
-	if err = p.debugapiClient.ReadMemory(gAddr+offsetToDefer, buff); err != nil {
+	var offsetToPanic uint64 = 8*2 + 8 + 8
+	if err = p.debugapiClient.ReadMemory(gAddr+offsetToPanic, buff); err != nil {
 		return GoRoutineInfo{}, err
+	}
+	panicAddr := binary.LittleEndian.Uint64(buff)
+	panicking := panicAddr != 0
+
+	panicHandler, err := p.findPanicHandler(gAddr, panicAddr, stackHi)
+	if err != nil {
+		return GoRoutineInfo{}, err
+	}
+
+	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, Panicking: panicking, PanicHandler: panicHandler}, nil
+}
+
+func (p *Process) findPanicHandler(gAddr, panicAddr, stackHi uint64) (*PanicHandler, error) {
+	buff := make([]byte, 8)
+	var offsetToDefer uint64 = 8*2 + 8 + 8 + 8
+	if err := p.debugapiClient.ReadMemory(gAddr+offsetToDefer, buff); err != nil {
+		return nil, err
 	}
 	pointerToDefer := binary.LittleEndian.Uint64(buff)
 
-	var deferedBy *DeferedBy
-	if pointerToDefer != 0 {
-		var offsetToSP uint64 = 4 + 4
-		if err = p.debugapiClient.ReadMemory(pointerToDefer+offsetToSP, buff); err != nil {
-			return GoRoutineInfo{}, err
+	for pointerToDefer != 0 {
+		var offsetToPanicInDefer uint64 = 4 + 4 + 8 + 8 + 8
+		if err := p.debugapiClient.ReadMemory(pointerToDefer+offsetToPanicInDefer, buff); err != nil {
+			return nil, err
 		}
-		stackAddress := binary.LittleEndian.Uint64(buff)
-		usedStackSizeAtDefer := stackHi - stackAddress
-
-		var offsetToPC uint64 = 4 + 4 + 8
-		if err = p.debugapiClient.ReadMemory(pointerToDefer+offsetToPC, buff); err != nil {
-			return GoRoutineInfo{}, err
+		panicInDefer := binary.LittleEndian.Uint64(buff)
+		if panicInDefer == panicAddr {
+			break
 		}
-		pc := binary.LittleEndian.Uint64(buff)
 
-		deferedBy = &DeferedBy{UsedStackSize: usedStackSizeAtDefer, PC: pc}
+		var offsetToNextDefer uint64 = 4 + 4 + 8 + 8 + 8 + 8
+		if err := p.debugapiClient.ReadMemory(pointerToDefer+offsetToNextDefer, buff); err != nil {
+			return nil, err
+		}
+		pointerToDefer = binary.LittleEndian.Uint64(buff)
 	}
 
-	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, DeferedBy: deferedBy}, nil
+	if pointerToDefer == 0 {
+		return nil, nil
+	}
+
+	var offsetToSP uint64 = 4 + 4
+	if err := p.debugapiClient.ReadMemory(pointerToDefer+offsetToSP, buff); err != nil {
+		return nil, err
+	}
+	stackAddress := binary.LittleEndian.Uint64(buff)
+	usedStackSizeAtDefer := stackHi - stackAddress
+
+	var offsetToPC uint64 = 4 + 4 + 8
+	if err := p.debugapiClient.ReadMemory(pointerToDefer+offsetToPC, buff); err != nil {
+		return nil, err
+	}
+	pc := binary.LittleEndian.Uint64(buff)
+
+	return &PanicHandler{UsedStackSizeAtDefer: usedStackSizeAtDefer, PCAtDefer: pc}, nil
 }
 
 type breakpoint struct {

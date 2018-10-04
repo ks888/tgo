@@ -33,7 +33,6 @@ type Controller struct {
 type goRoutineStatus struct {
 	// This list include only the functions which hit the breakpoint before and so is not complete.
 	callingFunctions []callingFunction
-	panicking        bool
 }
 
 func (status goRoutineStatus) usedStackSize() uint64 {
@@ -194,8 +193,7 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, goRoutineInfo)
 	}
 
-	goRoutineID := int(goRoutineInfo.ID)
-	status, _ := c.statusStore[goRoutineID]
+	status, _ := c.statusStore[int(goRoutineInfo.ID)]
 	if goRoutineInfo.UsedStackSize < status.usedStackSize() {
 		return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
 	} else if goRoutineInfo.UsedStackSize == status.usedStackSize() {
@@ -211,15 +209,34 @@ func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, goRoutineInfo
 }
 
 func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	goRoutineID := int(goRoutineInfo.ID)
-	status, _ := c.statusStore[goRoutineID]
-	currStackDepth := len(status.callingFunctions) + 1
-	panicking := c.isPanicking(status)
-	if panicking && goRoutineInfo.DeferedBy != nil {
-		currStackDepth -= c.findNumFramesToSkip(status.callingFunctions, goRoutineInfo.DeferedBy.UsedStackSize)
+	status, _ := c.statusStore[int(goRoutineInfo.ID)]
+	stackFrame, err := c.currentStackFrame(goRoutineInfo)
+	if err != nil {
+		return err
 	}
 
-	if c.tracingPoint.Hit(goRoutineInfo.CurrentPC - 1) {
+	// in the case just recovered from panic
+	remainingFuncs, _, err := c.unwindFunctions(status.callingFunctions, goRoutineInfo)
+	if err != nil {
+		return err
+	}
+
+	callingFunc := callingFunction{
+		Function:      stackFrame.Function,
+		returnAddress: stackFrame.ReturnAddress,
+		usedStackSize: goRoutineInfo.UsedStackSize,
+	}
+	remainingFuncs, err = c.appendFunction(remainingFuncs, callingFunc, goRoutineInfo.ID)
+	if err != nil {
+		return err
+	}
+
+	currStackDepth := len(remainingFuncs)
+	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {
+		currStackDepth -= c.countSkippedFuncs(status.callingFunctions, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
+	}
+
+	if c.tracingPoint.Hit(stackFrame.Function.Value) {
 		if !c.hitOnce {
 			if err := c.setBreakpointsExceptTracingPoint(); err != nil {
 				return err
@@ -230,55 +247,62 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		c.tracingPoint.Enter(goRoutineInfo.ID, currStackDepth)
 	}
 
-	stackFrame, err := c.currentStackFrame(goRoutineInfo)
-	if err != nil {
-		return err
-	}
-
 	if c.canPrint(goRoutineInfo.ID, currStackDepth) {
-		if err := c.printFunctionInput(goRoutineID, stackFrame, currStackDepth); err != nil {
+		if err := c.printFunctionInput(goRoutineInfo.ID, stackFrame, currStackDepth); err != nil {
 			return err
 		}
 	}
 
-	if err := c.process.SetConditionalBreakpoint(stackFrame.ReturnAddress, goRoutineInfo.ID); err != nil {
+	if err := c.process.SingleStep(threadID, stackFrame.Function.Value); err != nil {
 		return err
 	}
 
-	funcAddr := stackFrame.Function.Value
-	if err := c.process.SingleStep(threadID, funcAddr); err != nil {
-		return err
-	}
-
-	callingFunc := callingFunction{
-		Function:      stackFrame.Function,
-		returnAddress: stackFrame.ReturnAddress,
-		usedStackSize: goRoutineInfo.UsedStackSize,
-	}
-	c.statusStore[goRoutineID] = goRoutineStatus{
-		callingFunctions: append(status.callingFunctions, callingFunc),
-		panicking:        panicking,
-	}
+	c.statusStore[int(goRoutineInfo.ID)] = goRoutineStatus{callingFunctions: remainingFuncs}
 	return nil
 }
 
-func (c *Controller) isPanicking(status goRoutineStatus) bool {
-	for _, function := range status.callingFunctions {
-		if function.Name == "runtime.gopanic" {
-			return true
+func (c *Controller) countSkippedFuncs(callingFuncs []callingFunction, usedStackSize uint64) int {
+	panicFuncIndex := c.findPanicFunction(callingFuncs)
+	if panicFuncIndex == -1 {
+		return 0
+	}
+
+	for i := panicFuncIndex; i >= 0; i-- {
+		if callingFuncs[i].usedStackSize < usedStackSize {
+			return panicFuncIndex - i
 		}
 	}
-	return false
+	return panicFuncIndex + 1
 }
 
-func (c *Controller) findNumFramesToSkip(callingFuncs []callingFunction, usedStackSize uint64) int {
-	for i := len(callingFuncs) - 1; i >= 0; i-- {
-		callingFunc := callingFuncs[i]
-		if callingFunc.usedStackSize < usedStackSize {
-			return len(callingFuncs) - 1 - i
+func (c *Controller) findPanicFunction(callingFuncs []callingFunction) int {
+	for i, callingFunc := range callingFuncs {
+		if callingFunc.Name == "runtime.gopanic" {
+			return i
 		}
 	}
-	return len(callingFuncs) - 1
+	return -1
+}
+
+func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineInfo tracee.GoRoutineInfo) (remainingFuncs, unwindedFuncs []callingFunction, err error) {
+	for i := len(callingFuncs) - 1; i >= 0; i-- {
+		if callingFuncs[i].usedStackSize < goRoutineInfo.UsedStackSize {
+			return callingFuncs[0 : i+1], callingFuncs[i+1 : len(callingFuncs)], nil
+		}
+
+		retAddr := callingFuncs[i].returnAddress
+		if err := c.process.ClearConditionalBreakpoint(retAddr, goRoutineInfo.ID); err != nil {
+			return nil, nil, err
+		}
+	}
+	return nil, callingFuncs, nil
+}
+
+func (c *Controller) appendFunction(callingFuncs []callingFunction, newFunc callingFunction, goRoutineID int64) ([]callingFunction, error) {
+	if err := c.process.SetConditionalBreakpoint(newFunc.returnAddress, goRoutineID); err != nil {
+		return nil, err
+	}
+	return append(callingFuncs, newFunc), nil
 }
 
 func (c *Controller) setBreakpointsExceptTracingPoint() error {
@@ -303,43 +327,38 @@ func (c *Controller) canPrint(goRoutineID int64, currStackDepth int) bool {
 }
 
 func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	goRoutineID := int(goRoutineInfo.ID)
-	status, _ := c.statusStore[goRoutineID]
-	currStackDepth := len(status.callingFunctions)
-	panicking := c.isPanicking(status)
-	if panicking && goRoutineInfo.DeferedBy != nil {
-		currStackDepth -= c.findNumFramesToSkip(status.callingFunctions, goRoutineInfo.DeferedBy.UsedStackSize)
+	status, _ := c.statusStore[int(goRoutineInfo.ID)]
+
+	remainingFuncs, unwindedFuncs, err := c.unwindFunctions(status.callingFunctions, goRoutineInfo)
+	if err != nil {
+		return err
+	}
+	returnedFunc := unwindedFuncs[0].Function
+
+	currStackDepth := len(remainingFuncs) + 1 // include returnedFunc for now
+	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {
+		currStackDepth -= c.countSkippedFuncs(status.callingFunctions, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
 	}
 
 	if c.canPrint(goRoutineInfo.ID, currStackDepth) {
-		function := status.callingFunctions[len(status.callingFunctions)-1].Function
-		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, function.Value)
+		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, returnedFunc.Value)
 		if err != nil {
 			return err
 		}
-		if err := c.printFunctionOutput(goRoutineID, prevStackFrame, currStackDepth); err != nil {
+		if err := c.printFunctionOutput(goRoutineInfo.ID, prevStackFrame, currStackDepth); err != nil {
 			return err
 		}
 
-		if c.tracingPoint.Hit(function.Value) {
+		if c.tracingPoint.Hit(returnedFunc.Value) {
 			c.tracingPoint.Exit(goRoutineInfo.ID, currStackDepth)
 		}
 	}
 
-	breakpointAddr := goRoutineInfo.CurrentPC - 1
-
-	if err := c.process.SingleStep(threadID, breakpointAddr); err != nil {
+	if err := c.process.SingleStep(threadID, goRoutineInfo.CurrentPC-1); err != nil {
 		return err
 	}
 
-	if err := c.process.ClearConditionalBreakpoint(breakpointAddr, goRoutineInfo.ID); err != nil {
-		return err
-	}
-
-	c.statusStore[goRoutineID] = goRoutineStatus{
-		callingFunctions: status.callingFunctions[0 : len(status.callingFunctions)-1],
-		panicking:        panicking,
-	}
+	c.statusStore[int(goRoutineInfo.ID)] = goRoutineStatus{callingFunctions: remainingFuncs}
 	return nil
 }
 
@@ -353,7 +372,7 @@ func (c *Controller) prevStackFrame(goRoutineInfo tracee.GoRoutineInfo, rip uint
 	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-16, rip)
 }
 
-func (c *Controller) printFunctionInput(goRoutineID int, stackFrame *tracee.StackFrame, depth int) error {
+func (c *Controller) printFunctionInput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {
 	var args []string
 	for _, arg := range stackFrame.InputArguments {
 		var value string
@@ -366,12 +385,12 @@ func (c *Controller) printFunctionInput(goRoutineID int, stackFrame *tracee.Stac
 		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
 	}
 
-	fmt.Fprintf(c.outputWriter, "%s=> (#%02d) %s(%s)\n", strings.Repeat(" ", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+	fmt.Fprintf(c.outputWriter, "%s\\ (#%02d) %s(%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
 }
 
-func (c *Controller) printFunctionOutput(goRoutineID int, stackFrame *tracee.StackFrame, depth int) error {
+func (c *Controller) printFunctionOutput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {
 	var args []string
 	for _, arg := range stackFrame.OutputArguments {
 		var value string
@@ -383,7 +402,7 @@ func (c *Controller) printFunctionOutput(goRoutineID int, stackFrame *tracee.Sta
 		}
 		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
 	}
-	fmt.Fprintf(c.outputWriter, "%s<= (#%02d) %s(...) (%s)\n", strings.Repeat(" ", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+	fmt.Fprintf(c.outputWriter, "%s/ (#%02d) %s(...) (%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
 }

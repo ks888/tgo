@@ -103,6 +103,31 @@ func TestSingleStep(t *testing.T) {
 	}
 }
 
+func TestSingleStep_NoBreakpoint(t *testing.T) {
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+	tids, _, err := proc.ContinueAndWait()
+	if err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+	if err := proc.ClearBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
+		t.Fatalf("failed to clear breakpoint: %v", err)
+	}
+
+	if err := proc.SingleStep(tids[0], testutils.HelloworldAddrNoParameter); err != nil {
+		t.Fatalf("single-step failed: %v", err)
+	}
+	if proc.HasBreakpoint(testutils.HelloworldAddrNoParameter) {
+		t.Errorf("breakpoint is set")
+	}
+}
+
 func TestSetBreakpoint(t *testing.T) {
 	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
@@ -345,8 +370,40 @@ func TestCurrentGoRoutineInfo(t *testing.T) {
 	if goRoutineInfo.CurrentStackAddr == 0 {
 		t.Errorf("empty stack address: %d", goRoutineInfo.CurrentStackAddr)
 	}
+	if goRoutineInfo.Panicking {
+		t.Errorf("panicking")
+	}
 	// main go routine always has 'defer' setting. See runtime.main() for the detail.
-	if goRoutineInfo.DeferedBy == nil || goRoutineInfo.DeferedBy.PC == 0 || goRoutineInfo.DeferedBy.UsedStackSize == 0 {
+	if goRoutineInfo.PanicHandler == nil || goRoutineInfo.PanicHandler.PCAtDefer == 0 || goRoutineInfo.PanicHandler.UsedStackSizeAtDefer == 0 {
 		t.Errorf("deferedBy is nil or its value is 0")
+	}
+}
+
+func TestCurrentGoRoutineInfo_Panicking(t *testing.T) {
+	proc, err := LaunchProcess(testutils.ProgramPanic)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+
+	if err := proc.SetBreakpoint(testutils.PanicAddrInsideThrough); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	tids, _, err := proc.ContinueAndWait()
+	if err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+
+	goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if !goRoutineInfo.Panicking {
+		t.Errorf("not panicking")
+	}
+
+	function, _ := proc.Binary.FindFunction(goRoutineInfo.PanicHandler.PCAtDefer)
+	if function.Name != "main.g" {
+		t.Errorf("wrong panic handler")
 	}
 }
