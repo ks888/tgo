@@ -90,7 +90,7 @@ func (c *Controller) SetTracingPoint(functionName string) error {
 	}
 
 	if !c.canSetBreakpoint(function) {
-		return fmt.Errorf("can't set the tracing point for %s", functionName)
+		return fmt.Errorf("can't set the tracing point to %s", functionName)
 	}
 
 	if err := c.process.SetBreakpoint(function.Value); err != nil {
@@ -116,24 +116,26 @@ func (c *Controller) findFunction(functionName string) (*tracee.Function, error)
 }
 
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
-	// TODO: make the blacklist rather than this white list to support more runtime funcs.
-	allowedFuncPrefixes := []string{
-		"runtime.deferproc", "runtime.gopanic", "runtime.gorecover", "runtime.deferreturn",
-		"runtime.make", "runtime.slice", "runtime.growslice", "runtime.memmove",
-		"runtime.map", "runtime.chan", "runtime.close",
-		"runtime.newobject",
-	}
-	for _, f := range allowedFuncPrefixes {
-		if strings.HasPrefix(function.Name, f) {
-			return true
+	if strings.HasPrefix(function.Name, "runtime") {
+		// TODO: make the blacklist rather than this white list to support more runtime funcs.
+		allowedFuncPrefixes := []string{
+			"runtime.deferproc", "runtime.gopanic", "runtime.gorecover", "runtime.deferreturn",
+			"runtime.make", "runtime.slice", "runtime.growslice", "runtime.memmove",
+			"runtime.map", "runtime.chan", "runtime.close",
+			"runtime.newobject", "runtime.conv", "runtime.malloc",
+		}
+		for _, f := range allowedFuncPrefixes {
+			if strings.HasPrefix(function.Name, f) {
+				return true
+			}
+		}
+
+		if !function.IsExported() {
+			return false
 		}
 	}
 
-	if strings.HasPrefix(function.Name, "runtime") && !function.IsExported() {
-		return false
-	}
-
-	prefixesToAvoid := []string{"_rt0", "type."}
+	prefixesToAvoid := []string{}
 	for _, prefix := range prefixesToAvoid {
 		if strings.HasPrefix(function.Name, prefix) {
 			return false
@@ -198,12 +200,13 @@ func (c *Controller) handleTrapEvent(trappedThreadIDs []int) ([]int, debugapi.Ev
 func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	goRoutineInfo, err := c.process.CurrentGoRoutineInfo(threadID)
 	if err != nil {
-		return err
+		return c.handleTrappedSystemRoutine(threadID)
+		// return fmt.Errorf("failed to get go routine info: %v", err)
 	}
 
 	breakpointAddr := goRoutineInfo.CurrentPC - 1
 	if !c.process.HitBreakpoint(breakpointAddr, goRoutineInfo.ID) {
-		return c.handleTrapAtUnrelatedBreakpoint(threadID, goRoutineInfo)
+		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 
 	status, _ := c.statusStore[int(goRoutineInfo.ID)]
@@ -211,14 +214,33 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 		return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
 	} else if goRoutineInfo.UsedStackSize == status.usedStackSize() && breakpointAddr == status.lastFunctionAddr() {
 		// it's likely we are in the same stack frame as before (typical for the stack growth case).
-		return c.handleTrapAtUnrelatedBreakpoint(threadID, goRoutineInfo)
+		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 	return c.handleTrapAtFunctionCall(threadID, goRoutineInfo)
 }
 
-func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	trappedAddr := goRoutineInfo.CurrentPC - 1
-	return c.process.SingleStep(threadID, trappedAddr)
+func (c *Controller) handleTrappedSystemRoutine(threadID int) error {
+	threadInfo, err := c.process.CurrentThreadInfo(threadID)
+	if err != nil {
+		return err
+	}
+
+	breakpointAddr := threadInfo.CurrentPC - 1
+	if !c.process.HitBreakpoint(breakpointAddr, 0) {
+		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
+	}
+
+	function, err := c.process.Binary.FindFunction(breakpointAddr)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(c.outputWriter, " (sys) %s\n", function.Name)
+	return nil
+}
+
+func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, breakpointAddr uint64) error {
+	return c.process.SingleStep(threadID, breakpointAddr)
 }
 
 func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {

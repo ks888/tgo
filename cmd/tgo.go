@@ -28,7 +28,9 @@ func run(pid int, function string, depth int, args []string) error {
 		controller.Interrupt()
 	}()
 
-	controller.SetTracingPoint(function)
+	if err := controller.SetTracingPoint(function); err != nil {
+		return err
+	}
 	controller.SetDepth(depth)
 
 	return controller.MainLoop()

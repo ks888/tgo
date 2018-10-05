@@ -384,6 +384,22 @@ func (p *Process) findPanicHandler(gAddr, panicAddr, stackHi uint64) (*PanicHand
 	return &PanicHandler{UsedStackSizeAtDefer: usedStackSizeAtDefer, PCAtDefer: pc}, nil
 }
 
+// ThreadInfo describes the various info of thread.
+type ThreadInfo struct {
+	ID               int
+	CurrentPC        uint64
+	CurrentStackAddr uint64
+}
+
+// CurrentThreadInfo returns the thread info of the specified thread ID.
+func (p *Process) CurrentThreadInfo(threadID int) (ThreadInfo, error) {
+	regs, err := p.debugapiClient.ReadRegisters(threadID)
+	if err != nil {
+		return ThreadInfo{}, err
+	}
+	return ThreadInfo{ID: threadID, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp}, nil
+}
+
 type breakpoint struct {
 	addr     uint64
 	orgInsts []byte

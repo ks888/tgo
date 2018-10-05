@@ -9,7 +9,7 @@ func inc(input, output chan int) {
 
 func main() {
 	chans := []chan int{make(chan int)}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		fromCh := chans[len(chans)-1]
 		var toCh = make(chan int)
 		go inc(fromCh, toCh)
