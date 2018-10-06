@@ -116,31 +116,25 @@ func (c *Controller) findFunction(functionName string) (*tracee.Function, error)
 }
 
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
-	if strings.HasPrefix(function.Name, "runtime") {
-		// TODO: make the blacklist rather than this white list to support more runtime funcs.
-		allowedFuncPrefixes := []string{
-			"runtime.deferproc", "runtime.gopanic", "runtime.gorecover", "runtime.deferreturn",
-			"runtime.make", "runtime.slice", "runtime.growslice", "runtime.memmove",
-			"runtime.map", "runtime.chan", "runtime.close",
-			"runtime.newobject", "runtime.conv", "runtime.malloc",
-		}
-		for _, f := range allowedFuncPrefixes {
-			if strings.HasPrefix(function.Name, f) {
-				return true
-			}
-		}
+	// if strings.HasPrefix(function.Name, "runtime") {
+	// 	// TODO: make the blacklist rather than this white list to support more runtime funcs.
+	// 	allowedFuncPrefixes := []string{
+	// 		"runtime.deferproc", "runtime.gopanic", "runtime.gorecover", "runtime.deferreturn",
+	// 		"runtime.make", "runtime.slice", "runtime.growslice", "runtime.memmove",
+	// 		"runtime.map", "runtime.chan", "runtime.close",
+	// 		"runtime.newobject", "runtime.conv", "runtime.malloc",
+	// 	}
+	// 	for _, f := range allowedFuncPrefixes {
+	// 		if strings.HasPrefix(function.Name, f) {
+	// 			return true
+	// 		}
+	// 	}
 
-		if !function.IsExported() {
-			return false
-		}
-	}
+	// 	if !function.IsExported() {
+	// 		return false
+	// 	}
+	// }
 
-	prefixesToAvoid := []string{}
-	for _, prefix := range prefixesToAvoid {
-		if strings.HasPrefix(function.Name, prefix) {
-			return false
-		}
-	}
 	return true
 }
 
@@ -201,7 +195,6 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	goRoutineInfo, err := c.process.CurrentGoRoutineInfo(threadID)
 	if err != nil {
 		return c.handleTrappedSystemRoutine(threadID)
-		// return fmt.Errorf("failed to get go routine info: %v", err)
 	}
 
 	breakpointAddr := goRoutineInfo.CurrentPC - 1
@@ -210,6 +203,7 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	}
 
 	status, _ := c.statusStore[int(goRoutineInfo.ID)]
+
 	if goRoutineInfo.UsedStackSize < status.usedStackSize() {
 		return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
 	} else if goRoutineInfo.UsedStackSize == status.usedStackSize() && breakpointAddr == status.lastFunctionAddr() {
@@ -325,6 +319,16 @@ func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineIn
 	for i := len(callingFuncs) - 1; i >= 0; i-- {
 		if callingFuncs[i].usedStackSize < goRoutineInfo.UsedStackSize {
 			return callingFuncs[0 : i+1], callingFuncs[i+1 : len(callingFuncs)], nil
+		} else if callingFuncs[i].usedStackSize == goRoutineInfo.UsedStackSize {
+			breakpointAddr := goRoutineInfo.CurrentPC - 1
+			currFunction, err := c.process.Binary.FindFunction(breakpointAddr)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if callingFuncs[i].Name == currFunction.Name {
+				return callingFuncs[0 : i+1], callingFuncs[i+1 : len(callingFuncs)], nil
+			}
 		}
 
 		retAddr := callingFuncs[i].returnAddress
@@ -401,7 +405,7 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 
 // It must be called at the beginning of the function, because it assumes rbp = rsp-8
 func (c *Controller) currentStackFrame(goRoutineInfo tracee.GoRoutineInfo) (*tracee.StackFrame, error) {
-	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-8, goRoutineInfo.CurrentPC)
+	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-8, goRoutineInfo.CurrentPC-1)
 }
 
 // It must be called at return address, because it assumes rbp = rsp-16
