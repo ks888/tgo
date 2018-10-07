@@ -117,19 +117,6 @@ func (c *Controller) findFunction(functionName string) (*tracee.Function, error)
 
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
 	// if strings.HasPrefix(function.Name, "runtime") {
-	// 	// TODO: make the blacklist rather than this white list to support more runtime funcs.
-	// 	allowedFuncPrefixes := []string{
-	// 		"runtime.deferproc", "runtime.gopanic", "runtime.gorecover", "runtime.deferreturn",
-	// 		"runtime.make", "runtime.slice", "runtime.growslice", "runtime.memmove",
-	// 		"runtime.map", "runtime.chan", "runtime.close",
-	// 		"runtime.newobject", "runtime.conv", "runtime.malloc",
-	// 	}
-	// 	for _, f := range allowedFuncPrefixes {
-	// 		if strings.HasPrefix(function.Name, f) {
-	// 			return true
-	// 		}
-	// 	}
-
 	// 	if !function.IsExported() {
 	// 		return false
 	// 	}
@@ -175,7 +162,8 @@ func (c *Controller) MainLoop() error {
 }
 
 func (c *Controller) handleTrapEvent(trappedThreadIDs []int) ([]int, debugapi.Event, error) {
-	for _, threadID := range trappedThreadIDs {
+	for i := 0; i < len(trappedThreadIDs); i++ {
+		threadID := trappedThreadIDs[i]
 		if err := c.handleTrapEventOfThread(threadID); err != nil {
 			return nil, debugapi.Event{}, err
 		}
@@ -193,7 +181,7 @@ func (c *Controller) handleTrapEvent(trappedThreadIDs []int) ([]int, debugapi.Ev
 
 func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	goRoutineInfo, err := c.process.CurrentGoRoutineInfo(threadID)
-	if err != nil {
+	if err != nil || goRoutineInfo.ID == 0 {
 		return c.handleTrappedSystemRoutine(threadID)
 	}
 
@@ -203,14 +191,14 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	}
 
 	status, _ := c.statusStore[int(goRoutineInfo.ID)]
-
-	if goRoutineInfo.UsedStackSize < status.usedStackSize() {
-		return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
-	} else if goRoutineInfo.UsedStackSize == status.usedStackSize() && breakpointAddr == status.lastFunctionAddr() {
+	if goRoutineInfo.UsedStackSize == status.usedStackSize() && breakpointAddr == status.lastFunctionAddr() {
 		// it's likely we are in the same stack frame as before (typical for the stack growth case).
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
+	} else if c.isFunctionCall(breakpointAddr) {
+		return c.handleTrapAtFunctionCall(threadID, goRoutineInfo)
 	}
-	return c.handleTrapAtFunctionCall(threadID, goRoutineInfo)
+
+	return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
 }
 
 func (c *Controller) handleTrappedSystemRoutine(threadID int) error {
@@ -220,17 +208,26 @@ func (c *Controller) handleTrappedSystemRoutine(threadID int) error {
 	}
 
 	breakpointAddr := threadInfo.CurrentPC - 1
-	if !c.process.HitBreakpoint(breakpointAddr, 0) {
-		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
-	}
+	// if !c.process.HitBreakpoint(breakpointAddr, 0) {
+	// 	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
+	// }
 
+	// function, err := c.process.Binary.FindFunction(breakpointAddr)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// fmt.Fprintf(c.outputWriter, "(sys) %s, %x\n", function.Name, breakpointAddr)
+	return c.process.SingleStep(threadID, breakpointAddr)
+}
+
+func (c *Controller) isFunctionCall(breakpointAddr uint64) bool {
 	function, err := c.process.Binary.FindFunction(breakpointAddr)
 	if err != nil {
-		return err
+		return false
 	}
 
-	fmt.Fprintf(c.outputWriter, " (sys) %s\n", function.Name)
-	return nil
+	return function.Value == breakpointAddr
 }
 
 func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, breakpointAddr uint64) error {

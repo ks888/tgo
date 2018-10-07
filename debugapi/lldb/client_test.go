@@ -2,6 +2,7 @@ package lldb
 
 import (
 	"bytes"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -359,15 +360,12 @@ func TestStepAndWait(t *testing.T) {
 		t.Fatalf("failed to get thread ids: %v", err)
 	}
 
-	newTids, event, err := client.StepAndWait(tids[0])
+	event, err := client.StepAndWait(tids[0])
 	if err != nil {
 		t.Fatalf("failed to step and wait: %v", err)
 	}
 	if event != (debugapi.Event{Type: debugapi.EventTypeTrapped}) {
 		t.Fatalf("wrong event: %v", event)
-	}
-	if tids[0] != newTids[0] {
-		t.Fatalf("wrong tid: %d != %d", tids[0], newTids[0])
 	}
 }
 
@@ -389,7 +387,7 @@ func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	_ = client.WriteRegisters(tids[0], regs)
 	_ = client.WriteMemory(testutils.InfloopAddrMain, orgInsts)
 
-	_, _, err = client.StepAndWait(tids[0])
+	_, err = client.StepAndWait(tids[0])
 	if err != nil {
 		t.Fatalf("failed to step and wait: %v", err)
 	}
@@ -398,6 +396,31 @@ func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	if regs.Rip != uint64(testutils.InfloopAddrMain)+9 {
 		t.Errorf("wrong pc: %x", regs.Rip)
 	}
+}
+
+func TestStepAndWait_UnspecifiedThread(t *testing.T) {
+	client := NewClient()
+	err := client.LaunchProcess(testutils.ProgramInfloop)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	defer client.DetachProcess()
+
+	orgInsts := make([]byte, 1)
+	_ = client.ReadMemory(testutils.InfloopAddrMain, orgInsts)
+	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
+	tids, _, _ := client.ContinueAndWait()
+
+	regs, _ := client.ReadRegisters(tids[0])
+	regs.Rip--
+	_ = client.WriteRegisters(tids[0], regs)
+	_ = client.WriteMemory(testutils.InfloopAddrMain, orgInsts)
+
+	_, err = client.StepAndWait(0)
+	if _, ok := err.(debugapi.UnspecifiedThreadError); !ok {
+		t.Fatalf("not UnspecifiedThreadError: %v", err)
+	}
+	fmt.Println(err)
 }
 
 func findProcessID(progName string, parentPID int) (int, error) {

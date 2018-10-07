@@ -123,8 +123,16 @@ func (p *Process) SingleStep(threadID int, trappedAddr uint64) error {
 		}
 	}
 
-	if _, _, err := p.stepAndWait(threadID); err != nil {
-		return err
+	if _, err := p.stepAndWait(threadID); err != nil {
+		unspecifiedError, ok := err.(debugapi.UnspecifiedThreadError)
+		if !ok {
+			return err
+		}
+
+		if err := p.singleStepUnspecifiedThreads(threadID, unspecifiedError); err != nil {
+			return err
+		}
+		return p.SingleStep(threadID, trappedAddr)
 	}
 
 	if bpSet {
@@ -143,12 +151,12 @@ func (p *Process) setPC(threadID int, addr uint64) error {
 	return p.debugapiClient.WriteRegisters(threadID, regs)
 }
 
-func (p *Process) stepAndWait(threadID int) (trappedThreadIDs []int, event debugapi.Event, err error) {
-	trappedThreadIDs, event, err = p.debugapiClient.StepAndWait(threadID)
+func (p *Process) stepAndWait(threadID int) (event debugapi.Event, err error) {
+	event, err = p.debugapiClient.StepAndWait(threadID)
 	if debugapi.IsExitEvent(event.Type) {
 		err = p.close()
 	}
-	return trappedThreadIDs, event, err
+	return event, err
 }
 
 // SetBreakpoint sets the breakpoint at the specified address.
@@ -301,7 +309,15 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 	var offset uint32 = 0x8a0
 	gAddr, err := p.debugapiClient.ReadTLS(threadID, offset)
 	if err != nil {
-		return GoRoutineInfo{}, fmt.Errorf("failed to read tls: %v", err)
+		unspecifiedError, ok := err.(debugapi.UnspecifiedThreadError)
+		if !ok {
+			return GoRoutineInfo{}, err
+		}
+
+		if err := p.singleStepUnspecifiedThreads(threadID, unspecifiedError); err != nil {
+			return GoRoutineInfo{}, err
+		}
+		return p.CurrentGoRoutineInfo(threadID)
 	}
 
 	buff := make([]byte, 8)
@@ -337,6 +353,23 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 	}
 
 	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, Panicking: panicking, PanicHandler: panicHandler}, nil
+}
+
+func (p *Process) singleStepUnspecifiedThreads(threadID int, err debugapi.UnspecifiedThreadError) error {
+	for _, unspecifiedThread := range err.ThreadIDs {
+		if unspecifiedThread == threadID {
+			continue
+		}
+
+		regs, err := p.debugapiClient.ReadRegisters(threadID)
+		if err != nil {
+			return err
+		}
+		if err := p.SingleStep(unspecifiedThread, regs.Rip-1); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Process) findPanicHandler(gAddr, panicAddr, stackHi uint64) (*PanicHandler, error) {

@@ -495,7 +495,7 @@ func (c *Client) ReadTLS(tid int, offset uint32) (uint64, error) {
 		return 0, err
 	}
 
-	if _, _, err = c.StepAndWait(tid); err != nil {
+	if _, err := c.StepAndWait(tid); err != nil {
 		return 0, err
 	}
 
@@ -532,14 +532,21 @@ func (c *Client) ContinueAndWait() ([]int, debugapi.Event, error) {
 }
 
 // StepAndWait executes the one instruction of the specified thread and waits until an event happens.
-// The event may not be the trapped event.
-func (c *Client) StepAndWait(threadID int) ([]int, debugapi.Event, error) {
+// The returned event may not be the trapped event.
+// If unspecified thread is stopped, debugapi.UnspecifiedThreadError is returned.
+func (c *Client) StepAndWait(threadID int) (debugapi.Event, error) {
 	command := fmt.Sprintf("vCont;s:%x", threadID)
 	if err := c.send(command); err != nil {
-		return nil, debugapi.Event{}, fmt.Errorf("send error: %v", err)
+		return debugapi.Event{}, fmt.Errorf("send error: %v", err)
 	}
 
-	return c.wait()
+	tids, event, err := c.wait()
+	if err != nil {
+		return debugapi.Event{}, fmt.Errorf("send error: %v", err)
+	} else if len(tids) != 1 || tids[0] != threadID {
+		return debugapi.Event{}, debugapi.UnspecifiedThreadError{ThreadIDs: tids}
+	}
+	return event, err
 }
 
 func (c *Client) continueAndWait(signalNumber int) ([]int, debugapi.Event, error) {
@@ -635,7 +642,7 @@ func (c *Client) selectTrappedThreads(tids []int) ([]int, error) {
 		case unix.SIGTRAP:
 			trappedThreads = append(trappedThreads, tid)
 		case excBadAccess:
-			return nil, errors.New("bad access")
+			return nil, fmt.Errorf("bad access: %s", data)
 		}
 	}
 	return trappedThreads, nil

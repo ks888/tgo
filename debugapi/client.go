@@ -1,5 +1,7 @@
 package debugapi
 
+import "fmt"
+
 // WIP interface.
 // The thread id is exposed, because it's strange if registers can be read or changed without specifying the thread id.
 type client interface {
@@ -49,4 +51,14 @@ type Registers struct {
 	Rip uint64
 	Rsp uint64
 	Rcx uint64
+}
+
+// UnspecifiedThreadError indicates the stopped threads include unspecified ones.
+type UnspecifiedThreadError struct {
+	ThreadIDs []int
+}
+
+// Error returns the list of unspecified threads.
+func (e UnspecifiedThreadError) Error() string {
+	return fmt.Sprintf("unspecified threads: %v", e.ThreadIDs)
 }
