@@ -115,12 +115,30 @@ func (c *Controller) findFunction(functionName string) (*tracee.Function, error)
 	return nil, errors.New("failed to find function")
 }
 
+// canSetBreakpoint returns true if it's safe to set the breakpoint at the given function.
+// Most unexported runtime functions are not supported, because these functions make the tracer unstable (especially in the case the system stack is used).
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
-	// if strings.HasPrefix(function.Name, "runtime") {
-	// 	if !function.IsExported() {
-	// 		return false
-	// 	}
-	// }
+	const runtimePrefix = "runtime."
+	if strings.HasPrefix(function.Name, runtimePrefix) {
+		if function.IsExported() {
+			return true
+		}
+
+		funcName := function.Name[len(runtimePrefix):len(function.Name)]
+		allowedFuncPrefixes := []string{
+			"deferproc", "gopanic", "gorecover", "deferreturn",
+			"make", "slice", "growslice", "memmove",
+			"map", "chan", "close",
+			"newobject", "conv", "malloc",
+		}
+		for _, allowed := range allowedFuncPrefixes {
+			if strings.HasPrefix(funcName, allowed) {
+				return true
+			}
+		}
+
+		return false
+	}
 
 	return true
 }
@@ -208,16 +226,6 @@ func (c *Controller) handleTrappedSystemRoutine(threadID int) error {
 	}
 
 	breakpointAddr := threadInfo.CurrentPC - 1
-	// if !c.process.HitBreakpoint(breakpointAddr, 0) {
-	// 	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
-	// }
-
-	// function, err := c.process.Binary.FindFunction(breakpointAddr)
-	// if err != nil {
-	// 	return err
-	// }
-
-	// fmt.Fprintf(c.outputWriter, "(sys) %s, %x\n", function.Name, breakpointAddr)
 	return c.process.SingleStep(threadID, breakpointAddr)
 }
 
@@ -316,6 +324,7 @@ func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineIn
 	for i := len(callingFuncs) - 1; i >= 0; i-- {
 		if callingFuncs[i].usedStackSize < goRoutineInfo.UsedStackSize {
 			return callingFuncs[0 : i+1], callingFuncs[i+1 : len(callingFuncs)], nil
+
 		} else if callingFuncs[i].usedStackSize == goRoutineInfo.UsedStackSize {
 			breakpointAddr := goRoutineInfo.CurrentPC - 1
 			currFunction, err := c.process.Binary.FindFunction(breakpointAddr)
