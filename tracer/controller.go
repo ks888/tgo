@@ -1,12 +1,10 @@
 package tracer
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/ks888/tgo/debugapi"
@@ -422,14 +420,7 @@ func (c *Controller) prevStackFrame(goRoutineInfo tracee.GoRoutineInfo, rip uint
 func (c *Controller) printFunctionInput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {
 	var args []string
 	for _, arg := range stackFrame.InputArguments {
-		var value string
-		switch arg.Typ.String() {
-		case "int", "int64":
-			value = strconv.Itoa(int(binary.LittleEndian.Uint64(arg.Value)))
-		default:
-			value = fmt.Sprintf("%v", arg.Value)
-		}
-		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
+		args = append(args, arg.String())
 	}
 
 	fmt.Fprintf(c.outputWriter, "%s\\ (#%02d) %s(%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
@@ -440,14 +431,7 @@ func (c *Controller) printFunctionInput(goRoutineID int64, stackFrame *tracee.St
 func (c *Controller) printFunctionOutput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {
 	var args []string
 	for _, arg := range stackFrame.OutputArguments {
-		var value string
-		switch arg.Typ.String() {
-		case "int", "int64":
-			value = strconv.Itoa(int(binary.LittleEndian.Uint64(arg.Value)))
-		default:
-			value = fmt.Sprintf("%v", arg.Value)
-		}
-		args = append(args, fmt.Sprintf("%s = %s", arg.Name, value))
+		args = append(args, arg.String())
 	}
 	fmt.Fprintf(c.outputWriter, "%s/ (#%02d) %s(...) (%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 

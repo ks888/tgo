@@ -16,6 +16,9 @@ func TestLaunchProcess(t *testing.T) {
 	if proc.debugapiClient == nil {
 		t.Errorf("debugapiClient is nil")
 	}
+	if len(proc.moduleDataList) == 0 {
+		t.Errorf("empty moduleDataList")
+	}
 }
 
 func TestAttachProcess(t *testing.T) {
