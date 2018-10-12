@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"runtime"
+	"strings"
 )
 
 var (
@@ -59,13 +60,12 @@ func init() {
 
 func buildProgramHelloworld(srcDirname string) error {
 	ProgramHelloworld = srcDirname + "/testdata/helloworld"
-	ProgramHelloworldNoDwarf = ProgramHelloworld + ".nodwarf"
-
-	src := ProgramHelloworld + ".go"
-	if out, err := exec.Command("go", "build", "-o", ProgramHelloworld, src).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	if err := buildProgram(ProgramHelloworld); err != nil {
+		return err
 	}
 
+	src := ProgramHelloworld + ".go"
+	ProgramHelloworldNoDwarf = ProgramHelloworld + ".nodwarf"
 	if out, err := exec.Command("go", "build", "-ldflags", "-w", "-o", ProgramHelloworldNoDwarf, src).CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
 	}
@@ -94,9 +94,8 @@ func buildProgramHelloworld(srcDirname string) error {
 func buildProgramInfloop(srcDirname string) error {
 	ProgramInfloop = srcDirname + "/testdata/infloop"
 
-	src := ProgramInfloop + ".go"
-	if out, err := exec.Command("go", "build", "-o", ProgramInfloop, src).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	if err := buildProgram(ProgramInfloop); err != nil {
+		return err
 	}
 
 	updateAddressIfMatched := func(name string, value uint64) error {
@@ -113,9 +112,8 @@ func buildProgramInfloop(srcDirname string) error {
 func buildProgramGoRoutines(srcDirname string) error {
 	ProgramGoRoutines = srcDirname + "/testdata/goroutines"
 
-	src := ProgramGoRoutines + ".go"
-	if out, err := exec.Command("go", "build", "-o", ProgramGoRoutines, src).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	if err := buildProgram(ProgramGoRoutines); err != nil {
+		return err
 	}
 
 	updateAddressIfMatched := func(name string, value uint64) error {
@@ -132,9 +130,8 @@ func buildProgramGoRoutines(srcDirname string) error {
 func buildProgramRecursive(srcDirname string) error {
 	ProgramRecursive = srcDirname + "/testdata/recursive"
 
-	src := ProgramRecursive + ".go"
-	if out, err := exec.Command("go", "build", "-o", ProgramRecursive, src).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	if err := buildProgram(ProgramRecursive); err != nil {
+		return err
 	}
 
 	updateAddressIfMatched := func(name string, value uint64) error {
@@ -151,9 +148,8 @@ func buildProgramRecursive(srcDirname string) error {
 func buildProgramPanic(srcDirname string) error {
 	ProgramPanic = srcDirname + "/testdata/panic"
 
-	src := ProgramPanic + ".go"
-	if out, err := exec.Command("go", "build", "-o", ProgramPanic, src).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	if err := buildProgram(ProgramPanic); err != nil {
+		return err
 	}
 
 	updateAddressIfMatched := func(name string, value uint64) error {
@@ -171,6 +167,19 @@ func buildProgramPanic(srcDirname string) error {
 	}
 
 	return walkSymbols(ProgramPanic, updateAddressIfMatched)
+}
+
+func buildProgram(programName string) error {
+	const compileOptions = "-N -l" // to prevent function inlining.
+	linkOptions := ""
+	if strings.HasPrefix(runtime.Version(), "go1.11") {
+		linkOptions = "-compressdwarf=false" // not required, but useful for debugging.
+	}
+	src := programName + ".go"
+	if out, err := exec.Command("go", "build", "-gcflags", compileOptions, "-ldflags", linkOptions, "-o", programName, src).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	}
+	return nil
 }
 
 func walkSymbols(programName string, walkFunc func(name string, value uint64) error) error {

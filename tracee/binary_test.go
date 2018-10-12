@@ -20,6 +20,9 @@ func TestNewBinary(t *testing.T) {
 	if binary.dwarf == nil {
 		t.Errorf("empty dwarf data")
 	}
+	if len(binary.types) == 0 {
+		t.Errorf("empty types data")
+	}
 }
 
 func TestNewBinary_ProgramNotFound(t *testing.T) {
@@ -182,6 +185,9 @@ func TestSeek_OneParameter(t *testing.T) {
 	}
 	if function.Parameters[0].IsOutput {
 		t.Errorf("wrong flag")
+	}
+	if !function.Parameters[0].Exist {
+		t.Errorf("not exist")
 	}
 }
 

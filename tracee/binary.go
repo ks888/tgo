@@ -2,6 +2,7 @@ package tracee
 
 import (
 	"debug/dwarf"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -14,14 +15,18 @@ import (
 const (
 	// AttrVariableParameter is the extended DWARF attribute. If true, the parameter is output. Else, it's input.
 	attrVariableParameter = 0x4b
-	dwarfOpCallFrameCFA   = 0x9c // DW_OP_call_frame_cfa
-	dwarfOpFbreg          = 0x91 // DW_OP_fbreg
+	attrGoRuntimeType     = 0x2904 // DW_AT_go_runtime_type
+	dwarfOpCallFrameCFA   = 0x9c   // DW_OP_call_frame_cfa
+	dwarfOpFbreg          = 0x91   // DW_OP_fbreg
 )
+
+type runtimeTypeAddr uint64
 
 // Binary represents the program the tracee process executes
 type Binary struct {
 	dwarf  *dwarf.Data
 	closer io.Closer
+	types  map[runtimeTypeAddr]dwarf.Offset
 }
 
 // Function represents a function info in the debug info section.
@@ -36,7 +41,9 @@ type Parameter struct {
 	Name string
 	Typ  dwarf.Type
 	// Offset is the memory offset of the parameter.
-	Offset   int
+	Offset int
+	// Exist is false when the parameter is removed due to the optimization.
+	Exist    bool
 	IsOutput bool
 }
 
@@ -46,24 +53,79 @@ func NewBinary(pathToProgram string) (Binary, error) {
 	if err != nil {
 		return Binary{}, err
 	}
+	binary := Binary{dwarf: dwarfData, closer: closer}
 
-	return Binary{dwarf: dwarfData, closer: closer}, nil
+	binary.types, err = binary.buildTypes()
+	if err != nil {
+		return Binary{}, err
+	}
+
+	return binary, nil
+}
+
+func (b Binary) buildTypes() (map[runtimeTypeAddr]dwarf.Offset, error) {
+	types := make(map[runtimeTypeAddr]dwarf.Offset)
+	reader := b.dwarf.Reader()
+	for {
+		entry, err := reader.Next()
+		if err != nil || entry == nil {
+			return types, err
+		}
+
+		switch entry.Tag {
+		case dwarf.TagArrayType, dwarf.TagPointerType, dwarf.TagStructType, dwarf.TagSubroutineType, dwarf.TagBaseType, dwarf.TagTypedef:
+			// based on the 'abbrevs' variable in src/cmd/internal/dwarf/dwarf.go. It indicates which tag types may have the DW_AT_go_runtime_type attribute.
+			val, err := addressClassAttr(entry, attrGoRuntimeType)
+			if err != nil || val == 0 {
+				break
+			}
+			types[runtimeTypeAddr(val)] = entry.Offset
+		}
+	}
+}
+
+const firstModuleDataName = "runtime.firstmoduledata"
+
+func (b Binary) findFirstModuleDataAddress() (uint64, error) {
+	reader := b.dwarf.Reader()
+	for {
+		entry, err := reader.Next()
+		if err != nil {
+			return 0, err
+		} else if entry == nil {
+			return 0, errors.New("failed to find firstmoduledata")
+		}
+
+		name, err := stringClassAttr(entry, dwarf.AttrName)
+		if err != nil || name != firstModuleDataName {
+			continue
+		}
+
+		loc, err := locationClassAttr(entry, dwarf.AttrLocation)
+		if err != nil {
+			return 0, err
+		}
+		if len(loc) == 0 || loc[0] != 0x3 {
+			return 0, fmt.Errorf("unexpected location format: %v", loc)
+		}
+		return binary.LittleEndian.Uint64(loc[1:len(loc)]), nil
+	}
 }
 
 // Close releases the resources associated with the binary.
-func (binary Binary) Close() error {
-	return binary.closer.Close()
+func (b Binary) Close() error {
+	return b.closer.Close()
 }
 
 // FindFunction looks up the function info described in the debug info section.
-func (binary Binary) FindFunction(pc uint64) (*Function, error) {
-	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
+func (b Binary) FindFunction(pc uint64) (*Function, error) {
+	reader := subprogramReader{raw: b.dwarf.Reader(), dwarfData: b.dwarf}
 	return reader.Seek(pc)
 }
 
 // ListFunctions lists the subprograms in the debug info section. They don't include parameters info.
-func (binary Binary) ListFunctions() ([]*Function, error) {
-	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
+func (b Binary) ListFunctions() ([]*Function, error) {
+	reader := subprogramReader{raw: b.dwarf.Reader(), dwarfData: b.dwarf}
 
 	var funcs []*Function
 	for {
@@ -144,6 +206,7 @@ func (r subprogramReader) Seek(pc uint64) (*Function, error) {
 
 		function.Parameters, err = r.parameters()
 		// Without this, the parameters are sorted by the name.
+		// TODO: maybe sorted by offset in go 1.11
 		sort.Slice(function.Parameters, func(i, j int) bool { return function.Parameters[i].Offset < function.Parameters[j].Offset })
 		return function, err
 	}
@@ -262,12 +325,18 @@ func (r subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error)
 	if err != nil {
 		return nil, errors.New("loc attr not found")
 	}
-	offset, err := parameterOffset(loc)
-	if err != nil {
-		log.Printf("failed to find the parameter offset of the %s: %v", name, err)
+
+	var offset int
+	var exist = false
+	if len(loc) > 0 {
+		offset, err = parameterOffset(loc)
+		if err != nil {
+			log.Printf("failed to find the parameter offset of the %s: %v", name, err)
+		}
+		exist = true
 	}
 
-	return &Parameter{Name: name, Typ: typ, Offset: offset, IsOutput: isOutput}, nil
+	return &Parameter{Name: name, Typ: typ, Offset: offset, IsOutput: isOutput, Exist: exist}, nil
 }
 
 // parameterOffset returns the memory offset of the parameter value.
@@ -276,6 +345,7 @@ func (r subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error)
 // Here, we simply assume the CFA is the rsp+8 because we will not get the parameter value
 // in the middle of the funciton.
 func parameterOffset(loc []byte) (int, error) {
+	// TODO: support location list case
 	switch loc[0] {
 	case dwarfOpCallFrameCFA:
 		return 0, nil

@@ -4,6 +4,9 @@ import (
 	"debug/dwarf"
 	"encoding/binary"
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 
 	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/debugapi/lldb"
@@ -16,6 +19,11 @@ type Process struct {
 	debugapiClient *lldb.Client
 	breakpoints    map[uint64]*breakpoint
 	Binary         Binary
+	moduleDataList []moduleData
+}
+
+type moduleData struct {
+	types, etypes uint64
 }
 
 const countDisabled = -1
@@ -28,13 +36,6 @@ type StackFrame struct {
 	ReturnAddress   uint64
 }
 
-// Argument represents the value passed to the function.
-type Argument struct {
-	Name  string
-	Typ   dwarf.Type
-	Value []byte
-}
-
 // LaunchProcess launches new tracee process.
 func LaunchProcess(name string, arg ...string) (*Process, error) {
 	debugapiClient := lldb.NewClient()
@@ -42,17 +43,7 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 		return nil, err
 	}
 
-	binary, err := NewBinary(name)
-	if err != nil {
-		return nil, err
-	}
-
-	proc := &Process{
-		debugapiClient: debugapiClient,
-		breakpoints:    make(map[uint64]*breakpoint),
-		Binary:         binary,
-	}
-	return proc, nil
+	return newProcess(debugapiClient, name)
 }
 
 // AttachProcess attaches to the existing tracee process.
@@ -68,17 +59,64 @@ func AttachProcess(pid int) (*Process, error) {
 		return nil, err
 	}
 
+	return newProcess(debugapiClient, programPath)
+}
+
+func newProcess(debugapiClient *lldb.Client, programPath string) (*Process, error) {
 	binary, err := NewBinary(programPath)
 	if err != nil {
 		return nil, err
 	}
 
-	proc := &Process{
+	firstModuleDataAddr, err := binary.findFirstModuleDataAddress()
+	if err != nil {
+		return nil, fmt.Errorf("failed to find firstmoduledata: %v", err)
+	}
+
+	moduleDataList, err := buildModuleDataList(firstModuleDataAddr, debugapiClient)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Process{
 		debugapiClient: debugapiClient,
 		breakpoints:    make(map[uint64]*breakpoint),
 		Binary:         binary,
+		moduleDataList: moduleDataList,
+	}, nil
+}
+
+func buildModuleDataList(firstModuleDataAddr uint64, debugapiClient *lldb.Client) ([]moduleData, error) {
+	var moduleDataList []moduleData
+	buff := make([]byte, 8)
+	moduleDataAddr := firstModuleDataAddr
+	for {
+		// TODO: use the DIE of the moduleData type
+		var offsetToTypes uint64 = 24*3 + 8*16
+		if err := debugapiClient.ReadMemory(moduleDataAddr+offsetToTypes, buff); err != nil {
+			return nil, err
+		}
+		types := binary.LittleEndian.Uint64(buff)
+
+		var offsetToEtypes uint64 = 24*3 + 8*17
+		if err := debugapiClient.ReadMemory(moduleDataAddr+offsetToEtypes, buff); err != nil {
+			return nil, err
+		}
+		etypes := binary.LittleEndian.Uint64(buff)
+
+		moduleDataList = append(moduleDataList, moduleData{types: types, etypes: etypes})
+
+		var offsetToNext uint64 = 24*3 + 8*18 + 24*4 + 16 + 24 + 16 + 24 + 8 + (4+8)*2 + 8 + 1
+		if err := debugapiClient.ReadMemory(moduleDataAddr+offsetToNext, buff); err != nil {
+			return nil, err
+		}
+		next := binary.LittleEndian.Uint64(buff)
+		if next == 0 {
+			return moduleDataList, nil
+		}
+
+		moduleDataAddr = next
 	}
-	return proc, nil
 }
 
 // Detach detaches from the tracee process. All breakpoints are cleared.
@@ -239,6 +277,10 @@ func (p *Process) HasBreakpoint(addr uint64) bool {
 	return ok
 }
 
+func (p *Process) findImplType(interfaceTyp *dwarf.StructType, value []byte) (dwarf.Type, error) {
+	return nil, nil
+}
+
 // StackFrameAt returns the stack frame to which the given rbp specified.
 // To get the correct stack frame, it assumes:
 // * rbp+8 points to the return address.
@@ -276,7 +318,7 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 			return
 		}
 
-		arg := Argument{Name: param.Name, Typ: param.Typ, Value: buff}
+		arg := Argument{Name: param.Name, Typ: param.Typ, Value: buff, process: p}
 		if param.IsOutput {
 			outputArgs = append(outputArgs, arg)
 		} else {
