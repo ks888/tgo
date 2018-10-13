@@ -1,4 +1,4 @@
-package utils
+package tracee
 
 import "testing"
 

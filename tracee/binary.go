@@ -24,9 +24,10 @@ type runtimeTypeAddr uint64
 
 // Binary represents the program the tracee process executes
 type Binary struct {
-	dwarf  *dwarf.Data
-	closer io.Closer
-	types  map[runtimeTypeAddr]dwarf.Offset
+	dwarf     *dwarf.Data
+	closer    io.Closer
+	goVersion GoVersion
+	types     map[runtimeTypeAddr]dwarf.Offset
 }
 
 // Function represents a function info in the debug info section.
@@ -59,7 +60,7 @@ func NewBinary(pathToProgram string) (Binary, error) {
 	if err != nil {
 		return Binary{}, err
 	}
-
+	binary.goVersion = binary.findGoVersion()
 	return binary, nil
 }
 
@@ -81,6 +82,31 @@ func (b Binary) buildTypes() (map[runtimeTypeAddr]dwarf.Offset, error) {
 			}
 			types[runtimeTypeAddr(val)] = entry.Offset
 		}
+	}
+}
+
+func (b Binary) findGoVersion() GoVersion {
+	const producerPrefix = "Go cmd/compile"
+
+	reader := b.dwarf.Reader()
+	for {
+		entry, err := reader.Next()
+		if err != nil || entry == nil {
+			return GoVersion{}
+		}
+
+		if entry.Tag != dwarf.TagCompileUnit {
+			reader.SkipChildren()
+			continue
+		}
+
+		producer, err := stringClassAttr(entry, dwarf.AttrProducer)
+		if !strings.HasPrefix(producer, producerPrefix) {
+			reader.SkipChildren()
+			continue
+		}
+
+		return ParseGoVersion(strings.TrimPrefix(producer, producerPrefix))
 	}
 }
 

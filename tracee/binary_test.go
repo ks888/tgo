@@ -23,6 +23,9 @@ func TestNewBinary(t *testing.T) {
 	if len(binary.types) == 0 {
 		t.Errorf("empty types data")
 	}
+	if binary.goVersion == (GoVersion{}) {
+		t.Errorf("empty go version")
+	}
 }
 
 func TestNewBinary_ProgramNotFound(t *testing.T) {
