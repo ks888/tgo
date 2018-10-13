@@ -86,7 +86,7 @@ func (b Binary) buildTypes() (map[runtimeTypeAddr]dwarf.Offset, error) {
 }
 
 func (b Binary) findGoVersion() GoVersion {
-	const producerPrefix = "Go cmd/compile"
+	const producerPrefix = "Go cmd/compile "
 
 	reader := b.dwarf.Reader()
 	for {
@@ -347,22 +347,27 @@ func (r subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error)
 		return nil, err
 	}
 
+	offset, exist, err := offsetWithLocationDesc(param)
+	if err != nil {
+		if _, _, err := offsetWithLocationList(param); err != nil {
+			return nil, err
+		}
+	}
+	return &Parameter{Name: name, Typ: typ, Offset: offset, IsOutput: isOutput, Exist: exist}, nil
+}
+
+func offsetWithLocationDesc(param *dwarf.Entry) (offset int, exist bool, err error) {
 	loc, err := locationClassAttr(param, dwarf.AttrLocation)
 	if err != nil {
-		return nil, errors.New("loc attr not found")
+		return 0, false, fmt.Errorf("loc attr not found: %v", err)
 	}
 
-	var offset int
-	var exist = false
 	if len(loc) > 0 {
-		offset, err = parameterOffset(loc)
-		if err != nil {
-			log.Printf("failed to find the parameter offset of the %s: %v", name, err)
-		}
-		exist = true
+		offset, err := parameterOffset(loc)
+		return offset, true, err
 	}
-
-	return &Parameter{Name: name, Typ: typ, Offset: offset, IsOutput: isOutput, Exist: exist}, nil
+	// the location description may be empty due to the optimization (see the DWARF spec 2.6.1.1.4)
+	return offset, false, nil
 }
 
 // parameterOffset returns the memory offset of the parameter value.
@@ -380,6 +385,16 @@ func parameterOffset(loc []byte) (int, error) {
 	default:
 		return 0, fmt.Errorf("unknown operation: %v", loc[0])
 	}
+}
+
+func offsetWithLocationList(param *dwarf.Entry) (int, bool, error) {
+	_, err := locationListClassAttr(param, dwarf.AttrLocation)
+	if err != nil {
+		return 0, false, fmt.Errorf("loc list attr not found: %v", err)
+	}
+
+	// TODO: support location list
+	return 0, true, nil
 }
 
 func addressClassAttr(entry *dwarf.Entry, attrName dwarf.Attr) (uint64, error) {
@@ -439,6 +454,21 @@ func locationClassAttr(entry *dwarf.Entry, attrName dwarf.Attr) ([]byte, error) 
 
 	// https://golang.org/pkg/debug/dwarf/#Field
 	val := field.Val.([]byte)
+	return val, nil
+}
+
+func locationListClassAttr(entry *dwarf.Entry, attrName dwarf.Attr) (int64, error) {
+	field := entry.AttrField(attrName)
+	if field == nil {
+		return 0, errors.New("attr not found")
+	}
+
+	if field.Class != dwarf.ClassLocListPtr {
+		return 0, fmt.Errorf("invalid class: %v", field.Class)
+	}
+
+	// https://golang.org/pkg/debug/dwarf/#Field
+	val := field.Val.(int64)
 	return val, nil
 }
 

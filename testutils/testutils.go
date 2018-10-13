@@ -19,6 +19,7 @@ var (
 	HelloworldAddrOneParameterAndVariable uint64
 	HelloworldAddrTwoParameters           uint64
 	HelloworldAddrFuncWithAbstractOrigin  uint64 // any function which corresponding DIE has the DW_AT_abstract_origin attribute.
+	HelloworldAddrFmtPrintln              uint64
 
 	ProgramInfloop  string
 	InfloopAddrMain uint64
@@ -82,6 +83,8 @@ func buildProgramHelloworld(srcDirname string) error {
 			HelloworldAddrNoParameter = value
 		case "main.twoParameters":
 			HelloworldAddrTwoParameters = value
+		case "fmt.Println":
+			HelloworldAddrFmtPrintln = value
 		case "reflect.Value.Kind":
 			HelloworldAddrFuncWithAbstractOrigin = value
 		}
@@ -170,7 +173,7 @@ func buildProgramPanic(srcDirname string) error {
 }
 
 func buildProgram(programName string) error {
-	const compileOptions = "-N -l" // to prevent function inlining.
+	const compileOptions = "all=-N -l" // to prevent function inlining.
 	linkOptions := ""
 	if strings.HasPrefix(runtime.Version(), "go1.11") {
 		linkOptions = "-compressdwarf=false" // not required, but useful for debugging.
