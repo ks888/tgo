@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 
@@ -41,6 +42,8 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] [program] [args...]\n", os.Args[0])
 		flag.PrintDefaults()
 	}
+
+	log.SetFlags(0)
 
 	// TODO: offer subcommand for the attach case
 	pid := flag.Int("attach", 0, "The `pid` to attach")

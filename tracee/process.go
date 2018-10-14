@@ -4,6 +4,7 @@ import (
 	"debug/dwarf"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"strings"
@@ -605,6 +606,17 @@ func (p *Process) parseSliceValue(typ *dwarf.StructType, value []byte) string {
 }
 
 func (p *Process) parseInterfaceValue(typ *dwarf.StructType, value []byte) string {
+	ptrToDataTyp, ptrToData := p.memberOfStruct(typ, "data", value)
+	if ptrToDataTyp == nil {
+		return ""
+	}
+	dataAddr := binary.LittleEndian.Uint64(ptrToData)
+
+	if !p.Binary.goVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
+		log.Printf("Warning: use go1.11 or later to show the type which implements the interface")
+		return fmt.Sprintf("%#x", dataAddr)
+	}
+
 	ptrToItabTyp, ptrToItab := p.memberOfStruct(typ, "tab", value)
 	if ptrToItabTyp == nil {
 		return ""
@@ -628,9 +640,18 @@ func (p *Process) parseInterfaceValue(typ *dwarf.StructType, value []byte) strin
 			break
 		}
 	}
-	implTyp := p.Binary.types[runtimeTypeAddr(typeAddr-md.types)]
+	implTypOffset := p.Binary.types[runtimeTypeAddr(typeAddr-md.types)]
+	implTyp, err := p.Binary.dwarf.Type(implTypOffset)
+	if err != nil {
+		return ""
+	}
 
-	return fmt.Sprintf("%#x{} %#v %x %x", itabTypeAddr, implTyp, md, typeAddr)
+	data := make([]byte, implTyp.Size())
+	if err := p.debugapiClient.ReadMemory(dataAddr, data); err != nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%s%s", implTyp.String(), p.parseValue(implTyp, data))
 }
 
 func (p *Process) parseStructValue(typ *dwarf.StructType, value []byte) string {
