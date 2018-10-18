@@ -540,6 +540,7 @@ func (p *Process) parseValue(rawTyp dwarf.Type, value []byte) string {
 		}
 		return fmt.Sprintf("&%s", p.parseValue(typ.Type, buff))
 	case *dwarf.FuncType:
+		// TODO: print the pointer to the actual function (and the variables in closure if possible).
 		addr := binary.LittleEndian.Uint64(value)
 		return fmt.Sprintf("%#x", addr)
 	case *dwarf.StructType:
@@ -570,6 +571,9 @@ func (p *Process) parseValue(rawTyp dwarf.Type, value []byte) string {
 		}
 		return fmt.Sprintf("[%d]{%s}", typ.Count, strings.Join(vals, ", "))
 	case *dwarf.TypedefType:
+		if strings.HasPrefix(typ.String(), "map[") {
+			return p.parseMapValue(typ, value)
+		}
 		return p.parseValue(typ.Type, value)
 	}
 	return fmt.Sprintf("%v", value)
@@ -652,6 +656,80 @@ func (p *Process) parseInterfaceValue(typ *dwarf.StructType, value []byte) strin
 	}
 
 	return fmt.Sprintf("%s%s", implTyp.String(), p.parseValue(implTyp, data))
+}
+
+func (p *Process) parseMapValue(typ *dwarf.TypedefType, value []byte) string {
+	hashTyp, hash := p.dereference(typ.Type, value)
+	if hashTyp == nil {
+		return ""
+	}
+
+	bTyp, b := p.memberOfStruct(hashTyp, "B", hash)
+	if bTyp, ok := bTyp.(*dwarf.UintType); !ok || bTyp.Size() != 1 {
+		return ""
+	}
+	numBuckets := 1 << (b[0])
+
+	ptrToBucketsTyp, ptrToBuckets := p.memberOfStruct(hashTyp, "buckets", hash)
+	if ptrToBucketsTyp == nil {
+		return ""
+	}
+
+	bucketsTyp, buckets := p.dereference(ptrToBucketsTyp, ptrToBuckets)
+	if bucketsTyp == nil {
+		return ""
+	}
+
+	var keyAndValues []string
+	for i := 0; i < numBuckets; i++ {
+		// TODO: handle overflow case
+		tophashTyp, tophash := p.memberOfStruct(bucketsTyp, "tophash", buckets)
+		if tophashTyp == nil {
+			return ""
+		}
+		tophashArrTyp, ok := tophashTyp.(*dwarf.ArrayType)
+		if !ok {
+			return ""
+		}
+
+		keysTyp, keys := p.memberOfStruct(bucketsTyp, "keys", buckets)
+		if keysTyp == nil {
+			return ""
+		}
+		keysArrTyp, ok := keysTyp.(*dwarf.ArrayType)
+		if !ok {
+			return ""
+		}
+
+		valuesTyp, values := p.memberOfStruct(bucketsTyp, "values", buckets)
+		if keysTyp == nil {
+			return ""
+		}
+		valuesArrTyp, ok := valuesTyp.(*dwarf.ArrayType)
+		if !ok {
+			return ""
+		}
+
+		keyStride := int(keysArrTyp.Type.Size())
+		valueStride := int(valuesArrTyp.Type.Size())
+		for i := 0; i < int(tophashArrTyp.Count); i++ {
+			if tophash[i] == 0 {
+				continue
+			}
+
+			key := p.parseValue(keysArrTyp.Type, keys[i*keyStride:(i+1)*keyStride])
+			value := p.parseValue(valuesArrTyp.Type, values[i*valueStride:(i+1)*valueStride])
+			keyAndValues = append(keyAndValues, fmt.Sprintf("%s: %s", key, value))
+		}
+
+		addr := binary.LittleEndian.Uint64(ptrToBuckets)
+		addr += uint64(i+1) * uint64(bucketsTyp.Size())
+		if err := p.debugapiClient.ReadMemory(addr, buckets); err != nil {
+			return ""
+		}
+	}
+
+	return fmt.Sprintf("{%s}", strings.Join(keyAndValues, ", "))
 }
 
 func (p *Process) parseStructValue(typ *dwarf.StructType, value []byte) string {
