@@ -4,10 +4,6 @@ import (
 	"debug/dwarf"
 	"encoding/binary"
 	"fmt"
-	"log"
-	"math"
-	"strconv"
-	"strings"
 
 	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/debugapi/lldb"
@@ -20,7 +16,7 @@ type Process struct {
 	debugapiClient *lldb.Client
 	breakpoints    map[uint64]*breakpoint
 	Binary         Binary
-	moduleDataList []moduleData
+	valueBuilder   valueBuilder
 }
 
 type moduleData struct {
@@ -69,12 +65,7 @@ func newProcess(debugapiClient *lldb.Client, programPath string) (*Process, erro
 		return nil, err
 	}
 
-	firstModuleDataAddr, err := binary.findFirstModuleDataAddress()
-	if err != nil {
-		return nil, fmt.Errorf("failed to find firstmoduledata: %v", err)
-	}
-
-	moduleDataList, err := buildModuleDataList(firstModuleDataAddr, debugapiClient)
+	mapRuntimeType, err := buildMapRuntimeTypeFunc(binary, debugapiClient)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +74,32 @@ func newProcess(debugapiClient *lldb.Client, programPath string) (*Process, erro
 		debugapiClient: debugapiClient,
 		breakpoints:    make(map[uint64]*breakpoint),
 		Binary:         binary,
-		moduleDataList: moduleDataList,
+		valueBuilder:   valueBuilder{reader: debugapiClient, mapRuntimeType: mapRuntimeType},
+	}, nil
+}
+
+func buildMapRuntimeTypeFunc(binary Binary, debugapiClient *lldb.Client) (func(runtimeTypeAddr uint64) (dwarf.Type, error), error) {
+	firstModuleDataAddr, err := binary.findFirstModuleDataAddress()
+	if err != nil {
+		return nil, err
+	}
+
+	moduleDataList, err := buildModuleDataList(firstModuleDataAddr, debugapiClient)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(runtimeTypeAddr uint64) (dwarf.Type, error) {
+		var md moduleData
+		for _, candidate := range moduleDataList {
+			if candidate.types <= runtimeTypeAddr && runtimeTypeAddr < candidate.etypes {
+				md = candidate
+				break
+			}
+		}
+
+		implTypOffset := binary.types[runtimeTypeAddr-md.types]
+		return binary.dwarf.Type(implTypOffset)
 	}, nil
 }
 
@@ -278,19 +294,6 @@ func (p *Process) HasBreakpoint(addr uint64) bool {
 	return ok
 }
 
-func (p *Process) mapRuntimeType(runtimeTypeAddr uint64) (dwarf.Type, error) {
-	var md moduleData
-	for _, candidate := range p.moduleDataList {
-		if candidate.types <= runtimeTypeAddr && runtimeTypeAddr < candidate.etypes {
-			md = candidate
-			break
-		}
-	}
-
-	implTypOffset := p.Binary.types[runtimeTypeAddr-md.types]
-	return p.Binary.dwarf.Type(implTypOffset)
-}
-
 // StackFrameAt returns the stack frame to which the given rbp specified.
 // To get the correct stack frame, it assumes:
 // * rbp+8 points to the return address.
@@ -328,7 +331,7 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 			return
 		}
 
-		arg := Argument{Name: param.Name, Typ: param.Typ, Value: buff, process: p}
+		arg := Argument{Name: param.Name, Typ: param.Typ, Value: p.valueBuilder.buildValue(param.Typ, buff)}
 		if param.IsOutput {
 			outputArgs = append(outputArgs, arg)
 		} else {
@@ -491,313 +494,15 @@ func (p *Process) CurrentThreadInfo(threadID int) (ThreadInfo, error) {
 	return ThreadInfo{ID: threadID, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp}, nil
 }
 
-func (p *Process) parseValue(rawTyp dwarf.Type, value []byte) string {
-	switch typ := rawTyp.(type) {
-	case *dwarf.IntType:
-		switch typ.Size() {
-		case 1:
-			return fmt.Sprintf("%d", int8(value[0]))
-		case 2:
-			return fmt.Sprintf("%d", int16(binary.LittleEndian.Uint16(value)))
-		case 4:
-			return fmt.Sprintf("%d", int32(binary.LittleEndian.Uint32(value)))
-		case 8:
-			return fmt.Sprintf("%d", int64(binary.LittleEndian.Uint64(value)))
-		}
-	case *dwarf.UintType:
-		switch typ.Size() {
-		case 1:
-			return fmt.Sprintf("%d", value[0])
-		case 2:
-			return fmt.Sprintf("%d", binary.LittleEndian.Uint16(value))
-		case 4:
-			return fmt.Sprintf("%d", binary.LittleEndian.Uint32(value))
-		case 8:
-			return fmt.Sprintf("%d", binary.LittleEndian.Uint64(value))
-		}
-	case *dwarf.BoolType:
-		if value[0] == 0 {
-			return "false"
-		} else if value[0] == 1 {
-			return "true"
-		}
-	case *dwarf.FloatType:
-		switch typ.Size() {
-		case 4:
-			raw := binary.LittleEndian.Uint32(value)
-			return fmt.Sprintf("%g", math.Float32frombits(raw))
-		case 8:
-			raw := binary.LittleEndian.Uint64(value)
-			return fmt.Sprintf("%g", math.Float64frombits(raw))
-		}
-	case *dwarf.ComplexType:
-		switch typ.Size() {
-		case 8:
-			real := math.Float32frombits(binary.LittleEndian.Uint32(value[0:4]))
-			img := math.Float32frombits(binary.LittleEndian.Uint32(value[4:8]))
-			return fmt.Sprintf("%g", complex(real, img))
-		case 16:
-			real := math.Float64frombits(binary.LittleEndian.Uint64(value[0:8]))
-			img := math.Float64frombits(binary.LittleEndian.Uint64(value[8:16]))
-			return fmt.Sprintf("%g", complex(real, img))
-		}
-	case *dwarf.PtrType:
-		addr := binary.LittleEndian.Uint64(value)
-		buff := make([]byte, typ.Type.Size())
-		if err := p.debugapiClient.ReadMemory(addr, buff); err != nil {
-			break
-		}
-		return fmt.Sprintf("&%s", p.parseValue(typ.Type, buff))
-	case *dwarf.FuncType:
-		// TODO: print the pointer to the actual function (and the variables in closure if possible).
-		addr := binary.LittleEndian.Uint64(value)
-		return fmt.Sprintf("%#x", addr)
-	case *dwarf.StructType:
-		switch {
-		case typ.StructName == "string":
-			addr := binary.LittleEndian.Uint64(value[:8])
-			len := int(binary.LittleEndian.Uint64(value[8:]))
-			buff := make([]byte, len)
-			if err := p.debugapiClient.ReadMemory(addr, buff); err != nil {
-				break
-			}
-			return strconv.Quote(string(buff))
-		case strings.HasPrefix(typ.StructName, "[]"):
-			return p.parseSliceValue(typ, value)
-		case typ.StructName == "runtime.iface":
-			return p.parseInterfaceValue(typ, value)
-		default:
-			return p.parseStructValue(typ, value)
-		}
-	case *dwarf.ArrayType:
-		if typ.Count == -1 {
-			break
-		}
-		var vals []string
-		stride := int(typ.Type.Size()) // StrideBitSize is 0
-		for i := 0; i < int(typ.Count); i++ {
-			vals = append(vals, p.parseValue(typ.Type, value[i*stride:(i+1)*stride]))
-		}
-		return fmt.Sprintf("[%d]{%s}", typ.Count, strings.Join(vals, ", "))
-	case *dwarf.TypedefType:
-		if strings.HasPrefix(typ.String(), "map[") {
-			return p.parseMapValue(typ, value)
-		}
-		return p.parseValue(typ.Type, value)
-	}
-	return fmt.Sprintf("%v", value)
-}
-
-func (p *Process) parseSliceValue(typ *dwarf.StructType, value []byte) string {
-	var length int
-	var elemType dwarf.Type
-	var pointer uint64
-	for _, field := range typ.Field {
-		if field.Name == "len" {
-			length = int(binary.LittleEndian.Uint64(value[field.ByteOffset : field.ByteOffset+field.Type.Size()]))
-		} else if field.Name == "array" {
-			pointerType, ok := field.Type.(*dwarf.PtrType)
-			if !ok {
-				return ""
-			}
-			elemType = pointerType.Type
-			pointer = binary.LittleEndian.Uint64(value[field.ByteOffset : field.ByteOffset+field.Type.Size()])
-		}
-	}
-
-	buff := make([]byte, int(elemType.Size())*length)
-	if err := p.debugapiClient.ReadMemory(pointer, buff); err != nil {
-		return ""
-	}
-
-	vals := make([]string, 0, length)
-	for i := 0; i < length; i++ {
-		val := p.parseValue(elemType, buff[int(elemType.Size())*i:int(elemType.Size())*(i+1)])
-		vals = append(vals, val)
-	}
-	return fmt.Sprintf("[]{%s}", strings.Join(vals, ", "))
-}
-
-func (p *Process) parseInterfaceValue(typ *dwarf.StructType, value []byte) string {
-	ptrToDataTyp, ptrToData := p.memberOfStruct(typ, "data", value)
-	if ptrToDataTyp == nil {
-		return ""
-	}
-	dataAddr := binary.LittleEndian.Uint64(ptrToData)
-
-	if !p.Binary.goVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
-		log.Printf("Warning: use go1.11 or later to show the type which implements the interface")
-		return fmt.Sprintf("%#x", dataAddr)
-	}
-
-	ptrToItabTyp, ptrToItab := p.memberOfStruct(typ, "tab", value)
-	if ptrToItabTyp == nil {
-		return ""
-	}
-
-	itabTyp, itabVal := p.dereference(ptrToItabTyp, ptrToItab)
-	if itabTyp == nil {
-		return ""
-	}
-
-	itabTypeTyp, itabTypeAddr := p.memberOfStruct(itabTyp, "_type", itabVal)
-	if itabTypeTyp == nil {
-		return ""
-	}
-	typeAddr := binary.LittleEndian.Uint64(itabTypeAddr)
-
-	var md moduleData
-	for _, candidate := range p.moduleDataList {
-		if candidate.types <= typeAddr && typeAddr < candidate.etypes {
-			md = candidate
-			break
-		}
-	}
-	implTypOffset := p.Binary.types[typeAddr-md.types]
-	implTyp, err := p.Binary.dwarf.Type(implTypOffset)
-	if err != nil {
-		return ""
-	}
-
-	data := make([]byte, implTyp.Size())
-	if err := p.debugapiClient.ReadMemory(dataAddr, data); err != nil {
-		return ""
-	}
-
-	return fmt.Sprintf("%s%s", implTyp.String(), p.parseValue(implTyp, data))
-}
-
-func (p *Process) parseMapValue(typ *dwarf.TypedefType, value []byte) string {
-	hashTyp, hash := p.dereference(typ.Type, value)
-	if hashTyp == nil {
-		return ""
-	}
-
-	bTyp, b := p.memberOfStruct(hashTyp, "B", hash)
-	if bTyp, ok := bTyp.(*dwarf.UintType); !ok || bTyp.Size() != 1 {
-		return ""
-	}
-	numBuckets := 1 << (b[0])
-
-	ptrToBucketsTyp, ptrToBuckets := p.memberOfStruct(hashTyp, "buckets", hash)
-	if ptrToBucketsTyp == nil {
-		return ""
-	}
-
-	bucketsTyp, buckets := p.dereference(ptrToBucketsTyp, ptrToBuckets)
-	if bucketsTyp == nil {
-		return ""
-	}
-
-	var keyAndValues []string
-	for i := 0; i < numBuckets; i++ {
-		// TODO: handle overflow case
-		tophashTyp, tophash := p.memberOfStruct(bucketsTyp, "tophash", buckets)
-		if tophashTyp == nil {
-			return ""
-		}
-		tophashArrTyp, ok := tophashTyp.(*dwarf.ArrayType)
-		if !ok {
-			return ""
-		}
-
-		keysTyp, keys := p.memberOfStruct(bucketsTyp, "keys", buckets)
-		if keysTyp == nil {
-			return ""
-		}
-		keysArrTyp, ok := keysTyp.(*dwarf.ArrayType)
-		if !ok {
-			return ""
-		}
-
-		valuesTyp, values := p.memberOfStruct(bucketsTyp, "values", buckets)
-		if keysTyp == nil {
-			return ""
-		}
-		valuesArrTyp, ok := valuesTyp.(*dwarf.ArrayType)
-		if !ok {
-			return ""
-		}
-
-		keyStride := int(keysArrTyp.Type.Size())
-		valueStride := int(valuesArrTyp.Type.Size())
-		for i := 0; i < int(tophashArrTyp.Count); i++ {
-			if tophash[i] == 0 {
-				continue
-			}
-
-			key := p.parseValue(keysArrTyp.Type, keys[i*keyStride:(i+1)*keyStride])
-			value := p.parseValue(valuesArrTyp.Type, values[i*valueStride:(i+1)*valueStride])
-			keyAndValues = append(keyAndValues, fmt.Sprintf("%s: %s", key, value))
-		}
-
-		addr := binary.LittleEndian.Uint64(ptrToBuckets)
-		addr += uint64(i+1) * uint64(bucketsTyp.Size())
-		if err := p.debugapiClient.ReadMemory(addr, buckets); err != nil {
-			return ""
-		}
-	}
-
-	return fmt.Sprintf("{%s}", strings.Join(keyAndValues, ", "))
-}
-
-func (p *Process) parseStructValue(typ *dwarf.StructType, value []byte) string {
-	var vals []string
-	for _, field := range typ.Field {
-		val := p.parseValue(field.Type, value[field.ByteOffset:field.ByteOffset+field.Type.Size()])
-		vals = append(vals, fmt.Sprintf("%s: %s", field.Name, val))
-	}
-	return fmt.Sprintf("{%s}", strings.Join(vals, ", "))
-}
-
-// memberOfStruct returns 'nil, nil' if not struct type or no such a member.
-func (p *Process) memberOfStruct(typ dwarf.Type, memberName string, value []byte) (dwarf.Type, []byte) {
-	structTyp, ok := typ.(*dwarf.StructType)
-	if !ok {
-		return nil, nil
-	}
-
-	for _, field := range structTyp.Field {
-		if field.Name != memberName {
-			continue
-		}
-
-		return field.Type, value[field.ByteOffset : field.ByteOffset+field.Type.Size()]
-	}
-	return nil, nil
-}
-
-func (p *Process) dereference(typ dwarf.Type, value []byte) (dwarf.Type, []byte) {
-	var derefTyp dwarf.Type
-	ptrTyp, ok := typ.(*dwarf.PtrType)
-	if !ok {
-		return typ, value
-	}
-	derefTyp = ptrTyp.Type
-
-	if typedefTyp, ok := derefTyp.(*dwarf.TypedefType); ok {
-		derefTyp = typedefTyp.Type
-	}
-
-	addr := binary.LittleEndian.Uint64(value)
-	val := make([]byte, derefTyp.Size())
-	if err := p.debugapiClient.ReadMemory(addr, val); err != nil {
-		return nil, nil
-	}
-	return derefTyp, val
-}
-
 // Argument represents the value passed to the function.
 type Argument struct {
 	Name  string
 	Typ   dwarf.Type
-	Value []byte
-	// TODO: define value parser interface
-	process *Process
+	Value value
 }
 
 func (arg Argument) String() string {
-	return fmt.Sprintf("%s = %s", arg.Name, arg.process.parseValue(arg.Typ, arg.Value))
+	return fmt.Sprintf("%s = %s", arg.Name, arg.Value)
 }
 
 type breakpoint struct {

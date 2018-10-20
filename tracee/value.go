@@ -222,18 +222,12 @@ func (v mapValue) String() string {
 }
 
 type valueBuilder struct {
-	reader memoryReader
-	mapper runtimeTypeMapper
+	reader         memoryReader
+	mapRuntimeType func(addr uint64) (dwarf.Type, error)
 }
 
 type memoryReader interface {
 	ReadMemory(addr uint64, out []byte) error
-}
-
-type runtimeTypeMapper interface {
-	// mapRuntimeType maps the specified runtime type address to the dwarf.Type.
-	// It is necessary to find the type which implements the interface.
-	mapRuntimeType(addr uint64) (dwarf.Type, error)
 }
 
 func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
@@ -364,14 +358,14 @@ func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte) int
 	structVal := b.buildStructValue(typ, val)
 	data := structVal.fields["data"].(ptrValue)
 
-	if b.mapper == nil {
+	if b.mapRuntimeType == nil {
 		// Old go versions offer the different method to map the runtime type.
 		return interfaceValue{StructType: typ}
 	}
 
 	tab := structVal.fields["tab"].(ptrValue).pointedVal.(structValue)
 	runtimeTypeAddr := tab.fields["_type"].(ptrValue).addr
-	implType, err := b.mapper.mapRuntimeType(runtimeTypeAddr)
+	implType, err := b.mapRuntimeType(runtimeTypeAddr)
 	if err != nil {
 		return interfaceValue{}
 	}

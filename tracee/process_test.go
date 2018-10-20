@@ -1,7 +1,6 @@
 package tracee
 
 import (
-	"encoding/binary"
 	"os/exec"
 	"testing"
 
@@ -15,9 +14,6 @@ func TestLaunchProcess(t *testing.T) {
 	}
 	if proc.debugapiClient == nil {
 		t.Errorf("debugapiClient is nil")
-	}
-	if len(proc.moduleDataList) == 0 {
-		t.Errorf("empty moduleDataList")
 	}
 }
 
@@ -334,7 +330,7 @@ func TestStackFrameAt(t *testing.T) {
 	if stackFrame.InputArguments[0].Name != "a" {
 		t.Errorf("wrong input args: %s", stackFrame.InputArguments[0].Name)
 	}
-	if binary.LittleEndian.Uint64(stackFrame.InputArguments[0].Value) != 1 {
+	if stackFrame.InputArguments[0].Value.String() != "1" {
 		t.Errorf("wrong input args: %s", stackFrame.InputArguments[0].Value)
 	}
 	if len(stackFrame.OutputArguments) != 0 {

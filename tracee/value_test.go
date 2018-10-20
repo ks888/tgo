@@ -139,7 +139,7 @@ func TestBuildValue_NotFixedStringCase(t *testing.T) {
 		if err := proc.debugapiClient.ReadMemory(threadInfo.CurrentStackAddr+8, buff); err != nil {
 			t.Fatalf("failed to ReadMemory: %v", err)
 		}
-		val := (valueBuilder{reader: proc.debugapiClient, mapper: proc}).buildValue(typ, buff)
+		val := proc.valueBuilder.buildValue(typ, buff)
 		testdata.testFunc(t, val)
 
 		proc.SingleStep(tids[0], testdata.funcAddr)
