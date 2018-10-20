@@ -278,8 +278,17 @@ func (p *Process) HasBreakpoint(addr uint64) bool {
 	return ok
 }
 
-func (p *Process) findImplType(interfaceTyp *dwarf.StructType, value []byte) (dwarf.Type, error) {
-	return nil, nil
+func (p *Process) mapRuntimeType(runtimeTypeAddr uint64) (dwarf.Type, error) {
+	var md moduleData
+	for _, candidate := range p.moduleDataList {
+		if candidate.types <= runtimeTypeAddr && runtimeTypeAddr < candidate.etypes {
+			md = candidate
+			break
+		}
+	}
+
+	implTypOffset := p.Binary.types[runtimeTypeAddr-md.types]
+	return p.Binary.dwarf.Type(implTypOffset)
 }
 
 // StackFrameAt returns the stack frame to which the given rbp specified.
@@ -644,7 +653,7 @@ func (p *Process) parseInterfaceValue(typ *dwarf.StructType, value []byte) strin
 			break
 		}
 	}
-	implTypOffset := p.Binary.types[runtimeTypeAddr(typeAddr-md.types)]
+	implTypOffset := p.Binary.types[typeAddr-md.types]
 	implTyp, err := p.Binary.dwarf.Type(implTypOffset)
 	if err != nil {
 		return ""

@@ -20,14 +20,12 @@ const (
 	dwarfOpFbreg          = 0x91   // DW_OP_fbreg
 )
 
-type runtimeTypeAddr uint64
-
 // Binary represents the program the tracee process executes
 type Binary struct {
 	dwarf     *dwarf.Data
 	closer    io.Closer
 	goVersion GoVersion
-	types     map[runtimeTypeAddr]dwarf.Offset
+	types     map[uint64]dwarf.Offset
 }
 
 // Function represents a function info in the debug info section.
@@ -64,8 +62,8 @@ func NewBinary(pathToProgram string) (Binary, error) {
 	return binary, nil
 }
 
-func (b Binary) buildTypes() (map[runtimeTypeAddr]dwarf.Offset, error) {
-	types := make(map[runtimeTypeAddr]dwarf.Offset)
+func (b Binary) buildTypes() (map[uint64]dwarf.Offset, error) {
+	types := make(map[uint64]dwarf.Offset)
 	reader := b.dwarf.Reader()
 	for {
 		entry, err := reader.Next()
@@ -80,7 +78,7 @@ func (b Binary) buildTypes() (map[runtimeTypeAddr]dwarf.Offset, error) {
 			if err != nil || val == 0 {
 				break
 			}
-			types[runtimeTypeAddr(val)] = entry.Offset
+			types[val] = entry.Offset
 		}
 	}
 }

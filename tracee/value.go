@@ -231,9 +231,9 @@ type memoryReader interface {
 }
 
 type runtimeTypeMapper interface {
-	// MapRuntimeType maps the specified runtime type address to the dwarf.Type.
+	// mapRuntimeType maps the specified runtime type address to the dwarf.Type.
 	// It is necessary to find the type which implements the interface.
-	MapRuntimeType(addr uint64) (dwarf.Type, error)
+	mapRuntimeType(addr uint64) (dwarf.Type, error)
 }
 
 func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
@@ -298,6 +298,7 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
 		return ptrValue{PtrType: typ, addr: addr, pointedVal: pointedVal}
 
 	case *dwarf.FuncType:
+		// TODO: print the pointer to the actual function (and the variables in closure if possible).
 		addr := binary.LittleEndian.Uint64(val)
 		return funcValue{FuncType: typ, addr: addr}
 
@@ -363,9 +364,14 @@ func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte) int
 	structVal := b.buildStructValue(typ, val)
 	data := structVal.fields["data"].(ptrValue)
 
+	if b.mapper == nil {
+		// Old go versions offer the different method to map the runtime type.
+		return interfaceValue{StructType: typ}
+	}
+
 	tab := structVal.fields["tab"].(ptrValue).pointedVal.(structValue)
 	runtimeTypeAddr := tab.fields["_type"].(ptrValue).addr
-	implType, err := b.mapper.MapRuntimeType(runtimeTypeAddr)
+	implType, err := b.mapper.mapRuntimeType(runtimeTypeAddr)
 	if err != nil {
 		return interfaceValue{}
 	}
@@ -392,6 +398,7 @@ func (b valueBuilder) buildMapValue(typ *dwarf.TypedefType, val []byte) mapValue
 	numBuckets := 1 << hmapVal.fields["B"].(uint8Value).val
 	ptrToBuckets := hmapVal.fields["buckets"].(ptrValue)
 
+	// TODO: handle overflow case
 	kv := make(map[value]value)
 	for i := 0; ; i++ {
 		buckets := ptrToBuckets.pointedVal.(structValue)

@@ -35,6 +35,30 @@ var (
 	PanicAddrThrow         uint64
 	PanicAddrInsideThrough uint64
 	PanicAddrCatch         uint64
+
+	ProgramTypePrint             string
+	TypePrintAddrPrintBool       uint64
+	TypePrintAddrPrintInt8       uint64
+	TypePrintAddrPrintInt16      uint64
+	TypePrintAddrPrintInt32      uint64
+	TypePrintAddrPrintInt64      uint64
+	TypePrintAddrPrintUint8      uint64
+	TypePrintAddrPrintUint16     uint64
+	TypePrintAddrPrintUint32     uint64
+	TypePrintAddrPrintUint64     uint64
+	TypePrintAddrPrintFloat32    uint64
+	TypePrintAddrPrintFloat64    uint64
+	TypePrintAddrPrintComplex64  uint64
+	TypePrintAddrPrintComplex128 uint64
+	TypePrintAddrPrintString     uint64
+	TypePrintAddrPrintArray      uint64
+	TypePrintAddrPrintSlice      uint64
+	TypePrintAddrPrintStruct     uint64
+	TypePrintAddrPrintPtr        uint64
+	TypePrintAddrPrintFunc       uint64
+	TypePrintAddrPrintInterface  uint64
+	TypePrintAddrPrintMap        uint64
+	TypePrintAddrPrintChan       uint64
 )
 
 func init() {
@@ -55,6 +79,9 @@ func init() {
 		panic(err)
 	}
 	if err := buildProgramPanic(srcDirname); err != nil {
+		panic(err)
+	}
+	if err := buildProgramTypePrint(srcDirname); err != nil {
 		panic(err)
 	}
 }
@@ -170,6 +197,66 @@ func buildProgramPanic(srcDirname string) error {
 	}
 
 	return walkSymbols(ProgramPanic, updateAddressIfMatched)
+}
+
+func buildProgramTypePrint(srcDirname string) error {
+	ProgramTypePrint = srcDirname + "/testdata/typeprint"
+
+	if err := buildProgram(ProgramTypePrint); err != nil {
+		return err
+	}
+
+	updateAddressIfMatched := func(name string, value uint64) error {
+		switch name {
+		case "main.printBool":
+			TypePrintAddrPrintBool = value
+		case "main.printInt8":
+			TypePrintAddrPrintInt8 = value
+		case "main.printInt16":
+			TypePrintAddrPrintInt16 = value
+		case "main.printInt32":
+			TypePrintAddrPrintInt32 = value
+		case "main.printInt64":
+			TypePrintAddrPrintInt64 = value
+		case "main.printUint8":
+			TypePrintAddrPrintUint8 = value
+		case "main.printUint16":
+			TypePrintAddrPrintUint16 = value
+		case "main.printUint32":
+			TypePrintAddrPrintUint32 = value
+		case "main.printUint64":
+			TypePrintAddrPrintUint64 = value
+		case "main.printFloat32":
+			TypePrintAddrPrintFloat32 = value
+		case "main.printFloat64":
+			TypePrintAddrPrintFloat64 = value
+		case "main.printComplex64":
+			TypePrintAddrPrintComplex64 = value
+		case "main.printComplex128":
+			TypePrintAddrPrintComplex128 = value
+		case "main.printString":
+			TypePrintAddrPrintString = value
+		case "main.printArray":
+			TypePrintAddrPrintArray = value
+		case "main.printSlice":
+			TypePrintAddrPrintSlice = value
+		case "main.printStruct":
+			TypePrintAddrPrintStruct = value
+		case "main.printPtr":
+			TypePrintAddrPrintPtr = value
+		case "main.printFunc":
+			TypePrintAddrPrintFunc = value
+		case "main.printInterface":
+			TypePrintAddrPrintInterface = value
+		case "main.printMap":
+			TypePrintAddrPrintMap = value
+		case "main.printChan":
+			TypePrintAddrPrintChan = value
+		}
+		return nil
+	}
+
+	return walkSymbols(ProgramTypePrint, updateAddressIfMatched)
 }
 
 func buildProgram(programName string) error {
