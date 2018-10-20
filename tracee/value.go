@@ -221,6 +221,15 @@ func (v mapValue) String() string {
 	return fmt.Sprintf("{%s}", strings.Join(vals, ", "))
 }
 
+type voidValue struct {
+	dwarf.Type
+	val []byte
+}
+
+func (v voidValue) String() string {
+	return fmt.Sprintf("%v", v.val)
+}
+
 type valueBuilder struct {
 	reader         memoryReader
 	mapRuntimeType func(addr uint64) (dwarf.Type, error)
@@ -282,7 +291,7 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
 	case *dwarf.PtrType:
 		addr := binary.LittleEndian.Uint64(val)
 		if addr == 0 {
-			return nil
+			break
 		}
 		buff := make([]byte, typ.Type.Size())
 		if err := b.reader.ReadMemory(addr, buff); err != nil {
@@ -309,7 +318,7 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
 		}
 	case *dwarf.ArrayType:
 		if typ.Count == -1 {
-			return nil
+			break
 		}
 		var vals []value
 		stride := int(typ.Type.Size())
@@ -323,7 +332,7 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
 		}
 		return b.buildValue(typ.Type, val)
 	}
-	return nil
+	return voidValue{Type: rawTyp, val: val}
 }
 
 func (b valueBuilder) buildStringValue(typ *dwarf.StructType, val []byte) stringValue {
