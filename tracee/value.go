@@ -138,7 +138,13 @@ type ptrValue struct {
 }
 
 func (v ptrValue) String() string {
-	return fmt.Sprintf("&%s", v.pointedVal)
+	if v.pointedVal != nil {
+		return fmt.Sprintf("&%s", v.pointedVal)
+	}
+	if v.addr != 0 {
+		return fmt.Sprintf("%#x", v.addr)
+	}
+	return "nil"
 }
 
 type funcValue struct {
@@ -174,10 +180,14 @@ func (v sliceValue) String() string {
 
 type structValue struct {
 	*dwarf.StructType
-	fields map[string]value
+	fields      map[string]value
+	abbreviated bool
 }
 
 func (v structValue) String() string {
+	if v.abbreviated {
+		return fmt.Sprintf("{...}")
+	}
 	var vals []string
 	for name, val := range v.fields {
 		vals = append(vals, fmt.Sprintf("%s: %s", name, val))
@@ -239,14 +249,10 @@ type memoryReader interface {
 	ReadMemory(addr uint64, out []byte) error
 }
 
-// buildValue builds the value specified by args.
-// The build stops when `remainingDepth` is negative, so that do not analyze too much.
-// `remainingDepth` is decremented when the pointer type is resolved.
+// buildValue parses the `value` using the specified `rawTyp`.
+// `remainingDepth` is the depth of parsing, and parser stops when the depth becomes negative.
+// It is decremented when the struct type value is parsed, though the structs used by builtin types, such as slice and map, are not considered.
 func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte, remainingDepth int) value {
-	if remainingDepth < 0 {
-		return voidValue{Type: rawTyp, val: val}
-	}
-
 	switch typ := rawTyp.(type) {
 	case *dwarf.IntType:
 		switch typ.Size() {
@@ -298,13 +304,21 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte, remainingDepth i
 	case *dwarf.PtrType:
 		addr := binary.LittleEndian.Uint64(val)
 		if addr == 0 {
-			break
+			// nil pointer
+			return ptrValue{PtrType: typ}
 		}
+
+		if _, ok := typ.Type.(*dwarf.VoidType); ok {
+			// unsafe.Pointer
+			return ptrValue{PtrType: typ, addr: addr}
+		}
+
 		buff := make([]byte, typ.Type.Size())
 		if err := b.reader.ReadMemory(addr, buff); err != nil {
-			break
+			// the value may not be initialized yet
+			return ptrValue{PtrType: typ, addr: addr}
 		}
-		pointedVal := b.buildValue(typ.Type, buff, remainingDepth-1)
+		pointedVal := b.buildValue(typ.Type, buff, remainingDepth)
 		return ptrValue{PtrType: typ, addr: addr, pointedVal: pointedVal}
 
 	case *dwarf.FuncType:
@@ -354,7 +368,7 @@ func (b valueBuilder) buildStringValue(typ *dwarf.StructType, val []byte) string
 }
 
 func (b valueBuilder) buildSliceValue(typ *dwarf.StructType, val []byte, remainingDepth int) sliceValue {
-	// Actual values are wrapped by unsafe.Pointer. So +1 here.
+	// Values are wrapped by slice struct. So +1 here.
 	structVal := b.buildStructValue(typ, val, remainingDepth+1)
 	len := int(structVal.fields["len"].(int64Value).val)
 	firstElem := structVal.fields["array"].(ptrValue)
@@ -372,8 +386,8 @@ func (b valueBuilder) buildSliceValue(typ *dwarf.StructType, val []byte, remaini
 }
 
 func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte, remainingDepth int) interfaceValue {
-	// Need to resolve pointer to itab to get runtime type address. So remainingDepth=1 suits here.
-	structVal := b.buildStructValue(typ, val, 1)
+	// Interface is represented by the iface and itab struct. So remainingDepth needs to be at least 2.
+	structVal := b.buildStructValue(typ, val, 2)
 	data := structVal.fields["data"].(ptrValue)
 
 	if b.mapRuntimeType == nil {
@@ -397,15 +411,19 @@ func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte, rem
 }
 
 func (b valueBuilder) buildStructValue(typ *dwarf.StructType, val []byte, remainingDepth int) structValue {
+	if remainingDepth <= 0 {
+		return structValue{StructType: typ, abbreviated: true}
+	}
+
 	fields := make(map[string]value)
 	for _, field := range typ.Field {
-		fields[field.Name] = b.buildValue(field.Type, val[field.ByteOffset:field.ByteOffset+field.Type.Size()], remainingDepth)
+		fields[field.Name] = b.buildValue(field.Type, val[field.ByteOffset:field.ByteOffset+field.Type.Size()], remainingDepth-1)
 	}
 	return structValue{StructType: typ, fields: fields}
 }
 
 func (b valueBuilder) buildMapValue(typ *dwarf.TypedefType, val []byte, remainingDepth int) mapValue {
-	// Actual keys and values are wrapped by *hmap and *buckets. So +2 here.
+	// Actual keys and values are wrapped by hmap struct and buckets struct. So +2 here.
 	ptrVal := b.buildValue(typ.Type, val, remainingDepth+2)
 	hmapVal := ptrVal.(ptrValue).pointedVal.(structValue)
 	numBuckets := 1 << hmapVal.fields["B"].(uint8Value).val
@@ -433,7 +451,7 @@ func (b valueBuilder) buildMapValue(typ *dwarf.TypedefType, val []byte, remainin
 		addr := ptrToBuckets.addr + uint64(i+1)*uint64(buckets.Size())
 		buff := make([]byte, 8)
 		binary.LittleEndian.PutUint64(buff, addr)
-		// Actual keys and values are wrapped by *buckets. So +1 here.
+		// Actual keys and values are wrapped by struct buckets. So +1 here.
 		ptrToBuckets = b.buildValue(ptrToBuckets.PtrType, buff, remainingDepth+1).(ptrValue)
 	}
 

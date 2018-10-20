@@ -60,7 +60,7 @@ func TestBuildValue(t *testing.T) {
 		if err := proc.debugapiClient.ReadMemory(threadInfo.CurrentStackAddr+8, buff); err != nil {
 			t.Fatalf("failed to ReadMemory: %v", err)
 		}
-		val := (valueBuilder{reader: proc.debugapiClient}).buildValue(typ, buff, 1)
+		val := (valueBuilder{reader: proc.debugapiClient}).buildValue(typ, buff, 0)
 		if val.String() != testdata.expected {
 			t.Errorf("[%d] wrong value: %s", i, val)
 		}
@@ -86,8 +86,8 @@ func TestBuildValue_NotFixedStringCase(t *testing.T) {
 				t.Errorf("wrong value: %s", fields)
 			}
 			innerFields := fields["T"].(structValue).fields
-			if innerFields["d"].(int64Value).val != 4 {
-				t.Errorf("wrong value: %s", innerFields)
+			if len(innerFields) != 0 {
+				t.Errorf("The fields of 'T' should be empty because the depth is 1. actual: %d", len(innerFields))
 			}
 		}},
 		{funcAddr: testutils.TypePrintAddrPrintFunc, testFunc: func(t *testing.T, val value) {
