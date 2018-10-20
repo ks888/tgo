@@ -60,7 +60,7 @@ func TestBuildValue(t *testing.T) {
 		if err := proc.debugapiClient.ReadMemory(threadInfo.CurrentStackAddr+8, buff); err != nil {
 			t.Fatalf("failed to ReadMemory: %v", err)
 		}
-		val := (valueBuilder{reader: proc.debugapiClient}).buildValue(typ, buff)
+		val := (valueBuilder{reader: proc.debugapiClient}).buildValue(typ, buff, 1)
 		if val.String() != testdata.expected {
 			t.Errorf("[%d] wrong value: %s", i, val)
 		}
@@ -139,7 +139,7 @@ func TestBuildValue_NotFixedStringCase(t *testing.T) {
 		if err := proc.debugapiClient.ReadMemory(threadInfo.CurrentStackAddr+8, buff); err != nil {
 			t.Fatalf("failed to ReadMemory: %v", err)
 		}
-		val := proc.valueBuilder.buildValue(typ, buff)
+		val := proc.valueBuilder.buildValue(typ, buff, 1)
 		testdata.testFunc(t, val)
 
 		proc.SingleStep(tids[0], testdata.funcAddr)

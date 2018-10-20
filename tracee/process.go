@@ -331,7 +331,7 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 			return
 		}
 
-		arg := Argument{Name: param.Name, Typ: param.Typ, Value: p.valueBuilder.buildValue(param.Typ, buff)}
+		arg := Argument{Name: param.Name, Typ: param.Typ, Value: p.valueBuilder.buildValue(param.Typ, buff, 1)}
 		if param.IsOutput {
 			outputArgs = append(outputArgs, arg)
 		} else {

@@ -239,7 +239,14 @@ type memoryReader interface {
 	ReadMemory(addr uint64, out []byte) error
 }
 
-func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
+// buildValue builds the value specified by args.
+// The build stops when `remainingDepth` is negative, so that do not analyze too much.
+// `remainingDepth` is decremented when the pointer type is resolved.
+func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte, remainingDepth int) value {
+	if remainingDepth < 0 {
+		return voidValue{Type: rawTyp, val: val}
+	}
+
 	switch typ := rawTyp.(type) {
 	case *dwarf.IntType:
 		switch typ.Size() {
@@ -297,7 +304,7 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
 		if err := b.reader.ReadMemory(addr, buff); err != nil {
 			break
 		}
-		pointedVal := b.buildValue(typ.Type, buff)
+		pointedVal := b.buildValue(typ.Type, buff, remainingDepth-1)
 		return ptrValue{PtrType: typ, addr: addr, pointedVal: pointedVal}
 
 	case *dwarf.FuncType:
@@ -310,11 +317,11 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
 		case typ.StructName == "string":
 			return b.buildStringValue(typ, val)
 		case strings.HasPrefix(typ.StructName, "[]"):
-			return b.buildSliceValue(typ, val)
+			return b.buildSliceValue(typ, val, remainingDepth)
 		case typ.StructName == "runtime.iface":
-			return b.buildInterfaceValue(typ, val)
+			return b.buildInterfaceValue(typ, val, remainingDepth)
 		default:
-			return b.buildStructValue(typ, val)
+			return b.buildStructValue(typ, val, remainingDepth)
 		}
 	case *dwarf.ArrayType:
 		if typ.Count == -1 {
@@ -323,14 +330,15 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte) value {
 		var vals []value
 		stride := int(typ.Type.Size())
 		for i := 0; i < int(typ.Count); i++ {
-			vals = append(vals, b.buildValue(typ.Type, val[i*stride:(i+1)*stride]))
+			vals = append(vals, b.buildValue(typ.Type, val[i*stride:(i+1)*stride], remainingDepth))
 		}
 		return arrayValue{ArrayType: typ, val: vals}
 	case *dwarf.TypedefType:
 		if strings.HasPrefix(typ.String(), "map[") {
-			return b.buildMapValue(typ, val)
+			return b.buildMapValue(typ, val, remainingDepth)
 		}
-		return b.buildValue(typ.Type, val)
+		// In this case, virtually do nothing so far. So do not decrement `remainingDepth`.
+		return b.buildValue(typ.Type, val, remainingDepth)
 	}
 	return voidValue{Type: rawTyp, val: val}
 }
@@ -345,8 +353,9 @@ func (b valueBuilder) buildStringValue(typ *dwarf.StructType, val []byte) string
 	return stringValue{StructType: typ, val: string(buff)}
 }
 
-func (b valueBuilder) buildSliceValue(typ *dwarf.StructType, val []byte) sliceValue {
-	structVal := b.buildStructValue(typ, val)
+func (b valueBuilder) buildSliceValue(typ *dwarf.StructType, val []byte, remainingDepth int) sliceValue {
+	// Actual values are wrapped by unsafe.Pointer. So +1 here.
+	structVal := b.buildStructValue(typ, val, remainingDepth+1)
 	len := int(structVal.fields["len"].(int64Value).val)
 	firstElem := structVal.fields["array"].(ptrValue)
 	sliceVal := sliceValue{StructType: typ, val: []value{firstElem.pointedVal}}
@@ -355,16 +364,16 @@ func (b valueBuilder) buildSliceValue(typ *dwarf.StructType, val []byte) sliceVa
 		addr := firstElem.addr + uint64(firstElem.pointedVal.Size())*uint64(i)
 		buff := make([]byte, 8)
 		binary.LittleEndian.PutUint64(buff, addr)
-		elem := b.buildValue(firstElem.PtrType, buff).(ptrValue)
+		elem := b.buildValue(firstElem.PtrType, buff, remainingDepth).(ptrValue)
 		sliceVal.val = append(sliceVal.val, elem.pointedVal)
 	}
 
 	return sliceVal
 }
 
-func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte) interfaceValue {
-	// TODO: need to limit the nest level or parse only a part of struct.
-	structVal := b.buildStructValue(typ, val)
+func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte, remainingDepth int) interfaceValue {
+	// Need to resolve pointer to itab to get runtime type address. So remainingDepth=1 suits here.
+	structVal := b.buildStructValue(typ, val, 1)
 	data := structVal.fields["data"].(ptrValue)
 
 	if b.mapRuntimeType == nil {
@@ -384,19 +393,20 @@ func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte) int
 		return interfaceValue{}
 	}
 
-	return interfaceValue{StructType: typ, implType: implType, implVal: b.buildValue(implType, dataBuff)}
+	return interfaceValue{StructType: typ, implType: implType, implVal: b.buildValue(implType, dataBuff, remainingDepth)}
 }
 
-func (b valueBuilder) buildStructValue(typ *dwarf.StructType, val []byte) structValue {
+func (b valueBuilder) buildStructValue(typ *dwarf.StructType, val []byte, remainingDepth int) structValue {
 	fields := make(map[string]value)
 	for _, field := range typ.Field {
-		fields[field.Name] = b.buildValue(field.Type, val[field.ByteOffset:field.ByteOffset+field.Type.Size()])
+		fields[field.Name] = b.buildValue(field.Type, val[field.ByteOffset:field.ByteOffset+field.Type.Size()], remainingDepth)
 	}
 	return structValue{StructType: typ, fields: fields}
 }
 
-func (b valueBuilder) buildMapValue(typ *dwarf.TypedefType, val []byte) mapValue {
-	ptrVal := b.buildValue(typ.Type, val)
+func (b valueBuilder) buildMapValue(typ *dwarf.TypedefType, val []byte, remainingDepth int) mapValue {
+	// Actual keys and values are wrapped by *hmap and *buckets. So +2 here.
+	ptrVal := b.buildValue(typ.Type, val, remainingDepth+2)
 	hmapVal := ptrVal.(ptrValue).pointedVal.(structValue)
 	numBuckets := 1 << hmapVal.fields["B"].(uint8Value).val
 	ptrToBuckets := hmapVal.fields["buckets"].(ptrValue)
@@ -423,7 +433,8 @@ func (b valueBuilder) buildMapValue(typ *dwarf.TypedefType, val []byte) mapValue
 		addr := ptrToBuckets.addr + uint64(i+1)*uint64(buckets.Size())
 		buff := make([]byte, 8)
 		binary.LittleEndian.PutUint64(buff, addr)
-		ptrToBuckets = b.buildValue(ptrToBuckets.PtrType, buff).(ptrValue)
+		// Actual keys and values are wrapped by *buckets. So +1 here.
+		ptrToBuckets = b.buildValue(ptrToBuckets.PtrType, buff, remainingDepth+1).(ptrValue)
 	}
 
 	return mapValue{TypedefType: typ, val: kv}
