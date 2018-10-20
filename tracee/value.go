@@ -202,7 +202,7 @@ type interfaceValue struct {
 }
 
 func (v interfaceValue) String() string {
-	return fmt.Sprintf("%s%s", v.implType, v.implVal)
+	return fmt.Sprintf("%s(%s)", v.implType, v.implVal)
 }
 
 type arrayValue struct {
@@ -334,6 +334,8 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte, remainingDepth i
 			return b.buildSliceValue(typ, val, remainingDepth)
 		case typ.StructName == "runtime.iface":
 			return b.buildInterfaceValue(typ, val, remainingDepth)
+		case typ.StructName == "runtime.eface":
+			return b.buildEmptyInterfaceValue(typ, val, remainingDepth)
 		default:
 			return b.buildStructValue(typ, val, remainingDepth)
 		}
@@ -397,6 +399,30 @@ func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte, rem
 
 	tab := structVal.fields["tab"].(ptrValue).pointedVal.(structValue)
 	runtimeTypeAddr := tab.fields["_type"].(ptrValue).addr
+	implType, err := b.mapRuntimeType(runtimeTypeAddr)
+	if err != nil {
+		return interfaceValue{}
+	}
+
+	dataBuff := make([]byte, implType.Size())
+	if err := b.reader.ReadMemory(data.addr, dataBuff); err != nil {
+		return interfaceValue{}
+	}
+
+	return interfaceValue{StructType: typ, implType: implType, implVal: b.buildValue(implType, dataBuff, remainingDepth)}
+}
+
+func (b valueBuilder) buildEmptyInterfaceValue(typ *dwarf.StructType, val []byte, remainingDepth int) interfaceValue {
+	// Empty interface is represented by the eface struct. So remainingDepth needs to be at least 1.
+	structVal := b.buildStructValue(typ, val, 1)
+	data := structVal.fields["data"].(ptrValue)
+
+	if b.mapRuntimeType == nil {
+		// Old go versions offer the different method to map the runtime type.
+		return interfaceValue{StructType: typ}
+	}
+
+	runtimeTypeAddr := structVal.fields["_type"].(ptrValue).addr
 	implType, err := b.mapRuntimeType(runtimeTypeAddr)
 	if err != nil {
 		return interfaceValue{}
