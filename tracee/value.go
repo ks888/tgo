@@ -322,7 +322,7 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte, remainingDepth i
 
 		buff := make([]byte, typ.Type.Size())
 		if err := b.reader.ReadMemory(addr, buff); err != nil {
-			// the value may not be initialized yet
+			// the value may not be initialized yet (or too large)
 			return ptrValue{PtrType: typ, addr: addr}
 		}
 		pointedVal := b.buildValue(typ.Type, buff, remainingDepth)
@@ -370,8 +370,9 @@ func (b valueBuilder) buildStringValue(typ *dwarf.StructType, val []byte) string
 	addr := binary.LittleEndian.Uint64(val[:8])
 	len := int(binary.LittleEndian.Uint64(val[8:]))
 	buff := make([]byte, len)
+
 	if err := b.reader.ReadMemory(addr, buff); err != nil {
-		return stringValue{}
+		return stringValue{StructType: typ}
 	}
 	return stringValue{StructType: typ, val: string(buff)}
 }
@@ -397,9 +398,8 @@ func (b valueBuilder) buildSliceValue(typ *dwarf.StructType, val []byte, remaini
 func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte, remainingDepth int) interfaceValue {
 	// Interface is represented by the iface and itab struct. So remainingDepth needs to be at least 2.
 	structVal := b.buildStructValue(typ, val, 2)
-	data := structVal.fields["data"].(ptrValue)
-
-	if data.addr == 0 {
+	ptrToTab := structVal.fields["tab"].(ptrValue)
+	if ptrToTab.pointedVal == nil {
 		return interfaceValue{StructType: typ}
 	}
 	if b.mapRuntimeType == nil {
@@ -407,13 +407,14 @@ func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte, rem
 		return interfaceValue{StructType: typ, abbreviated: true}
 	}
 
-	tab := structVal.fields["tab"].(ptrValue).pointedVal.(structValue)
+	tab := ptrToTab.pointedVal.(structValue)
 	runtimeTypeAddr := tab.fields["_type"].(ptrValue).addr
 	implType, err := b.mapRuntimeType(runtimeTypeAddr)
 	if err != nil {
 		return interfaceValue{StructType: typ}
 	}
 
+	data := structVal.fields["data"].(ptrValue)
 	dataBuff := make([]byte, implType.Size())
 	if err := b.reader.ReadMemory(data.addr, dataBuff); err != nil {
 		return interfaceValue{StructType: typ}

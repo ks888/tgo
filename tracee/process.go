@@ -4,6 +4,7 @@ import (
 	"debug/dwarf"
 	"encoding/binary"
 	"fmt"
+	"log"
 
 	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/debugapi/lldb"
@@ -248,7 +249,6 @@ func (p *Process) SetConditionalBreakpoint(addr uint64, goRoutineID int64) error
 	if err := p.debugapiClient.ReadMemory(addr, originalInsts); err != nil {
 		return err
 	}
-
 	if err := p.debugapiClient.WriteMemory(addr, breakpointInsts); err != nil {
 		return err
 	}
@@ -328,7 +328,8 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 		size := param.Typ.Size()
 		buff := make([]byte, size)
 		if err = p.debugapiClient.ReadMemory(addrBeginningOfArgs+uint64(param.Offset), buff); err != nil {
-			return
+			log.Printf("failed to read the '%s' value: %v", param.Name, err)
+			continue
 		}
 
 		arg := Argument{Name: param.Name, Typ: param.Typ, Value: p.valueBuilder.buildValue(param.Typ, buff, 1)}

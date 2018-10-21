@@ -443,6 +443,11 @@ func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
 
 // ReadMemory reads the specified memory region.
 func (c *Client) ReadMemory(addr uint64, out []byte) error {
+	if len(out) > maxPacketSize-4 /* header 1 byte + footer 3 bytes */ {
+		// TODO: Remove the max size constraint.
+		return fmt.Errorf("can't read the memory region larger than %d (specified %d)", maxPacketSize-4, len(out))
+	}
+
 	command := fmt.Sprintf("m%x,%x", addr, len(out))
 	if err := c.send(command); err != nil {
 		return err

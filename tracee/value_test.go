@@ -98,7 +98,7 @@ func TestBuildValue_NotFixedStringCase(t *testing.T) {
 		{funcAddr: testutils.TypePrintAddrPrintInterface, testFunc: func(t *testing.T, val value) {
 			implVal, ok := val.(interfaceValue).implVal.(structValue)
 			if !ok || implVal.StructName != "main.S" {
-				t.Errorf("wrong type: %s", implVal.StructName)
+				t.Fatalf("wrong type: %#v", implVal)
 			}
 			if implVal.fields["a"].(int64Value).val != 5 {
 				t.Errorf("wrong value: %s", implVal.fields)
@@ -112,7 +112,7 @@ func TestBuildValue_NotFixedStringCase(t *testing.T) {
 		{funcAddr: testutils.TypePrintAddrPrintEmptyInterface, testFunc: func(t *testing.T, val value) {
 			implVal, ok := val.(interfaceValue).implVal.(structValue)
 			if !ok || implVal.StructName != "main.S" {
-				t.Errorf("wrong type: %s", implVal.StructName)
+				t.Fatalf("wrong type: %v", implVal)
 			}
 			if implVal.fields["a"].(int64Value).val != 9 {
 				t.Errorf("wrong value: %s", implVal.fields)
