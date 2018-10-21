@@ -186,7 +186,7 @@ type structValue struct {
 
 func (v structValue) String() string {
 	if v.abbreviated {
-		return fmt.Sprintf("{...}")
+		return "{...}"
 	}
 	var vals []string
 	for name, val := range v.fields {
@@ -197,11 +197,18 @@ func (v structValue) String() string {
 
 type interfaceValue struct {
 	*dwarf.StructType
-	implType dwarf.Type
-	implVal  value
+	implType    dwarf.Type
+	implVal     value
+	abbreviated bool
 }
 
 func (v interfaceValue) String() string {
+	if v.abbreviated {
+		return "{...}"
+	}
+	if v.implType == nil {
+		return "nil"
+	}
 	return fmt.Sprintf("%s(%s)", v.implType, v.implVal)
 }
 
@@ -392,21 +399,24 @@ func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte, rem
 	structVal := b.buildStructValue(typ, val, 2)
 	data := structVal.fields["data"].(ptrValue)
 
+	if data.addr == 0 {
+		return interfaceValue{StructType: typ}
+	}
 	if b.mapRuntimeType == nil {
 		// Old go versions offer the different method to map the runtime type.
-		return interfaceValue{StructType: typ}
+		return interfaceValue{StructType: typ, abbreviated: true}
 	}
 
 	tab := structVal.fields["tab"].(ptrValue).pointedVal.(structValue)
 	runtimeTypeAddr := tab.fields["_type"].(ptrValue).addr
 	implType, err := b.mapRuntimeType(runtimeTypeAddr)
 	if err != nil {
-		return interfaceValue{}
+		return interfaceValue{StructType: typ}
 	}
 
 	dataBuff := make([]byte, implType.Size())
 	if err := b.reader.ReadMemory(data.addr, dataBuff); err != nil {
-		return interfaceValue{}
+		return interfaceValue{StructType: typ}
 	}
 
 	return interfaceValue{StructType: typ, implType: implType, implVal: b.buildValue(implType, dataBuff, remainingDepth)}
@@ -417,20 +427,23 @@ func (b valueBuilder) buildEmptyInterfaceValue(typ *dwarf.StructType, val []byte
 	structVal := b.buildStructValue(typ, val, 1)
 	data := structVal.fields["data"].(ptrValue)
 
+	if data.addr == 0 {
+		return interfaceValue{StructType: typ}
+	}
 	if b.mapRuntimeType == nil {
 		// Old go versions offer the different method to map the runtime type.
-		return interfaceValue{StructType: typ}
+		return interfaceValue{StructType: typ, abbreviated: true}
 	}
 
 	runtimeTypeAddr := structVal.fields["_type"].(ptrValue).addr
 	implType, err := b.mapRuntimeType(runtimeTypeAddr)
 	if err != nil {
-		return interfaceValue{}
+		return interfaceValue{StructType: typ}
 	}
 
 	dataBuff := make([]byte, implType.Size())
 	if err := b.reader.ReadMemory(data.addr, dataBuff); err != nil {
-		return interfaceValue{}
+		return interfaceValue{StructType: typ}
 	}
 
 	return interfaceValue{StructType: typ, implType: implType, implVal: b.buildValue(implType, dataBuff, remainingDepth)}

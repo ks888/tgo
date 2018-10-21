@@ -36,30 +36,32 @@ var (
 	PanicAddrInsideThrough uint64
 	PanicAddrCatch         uint64
 
-	ProgramTypePrint                 string
-	TypePrintAddrPrintBool           uint64
-	TypePrintAddrPrintInt8           uint64
-	TypePrintAddrPrintInt16          uint64
-	TypePrintAddrPrintInt32          uint64
-	TypePrintAddrPrintInt64          uint64
-	TypePrintAddrPrintUint8          uint64
-	TypePrintAddrPrintUint16         uint64
-	TypePrintAddrPrintUint32         uint64
-	TypePrintAddrPrintUint64         uint64
-	TypePrintAddrPrintFloat32        uint64
-	TypePrintAddrPrintFloat64        uint64
-	TypePrintAddrPrintComplex64      uint64
-	TypePrintAddrPrintComplex128     uint64
-	TypePrintAddrPrintString         uint64
-	TypePrintAddrPrintArray          uint64
-	TypePrintAddrPrintSlice          uint64
-	TypePrintAddrPrintStruct         uint64
-	TypePrintAddrPrintPtr            uint64
-	TypePrintAddrPrintFunc           uint64
-	TypePrintAddrPrintInterface      uint64
-	TypePrintAddrPrintEmptyInterface uint64
-	TypePrintAddrPrintMap            uint64
-	TypePrintAddrPrintChan           uint64
+	ProgramTypePrint                    string
+	TypePrintAddrPrintBool              uint64
+	TypePrintAddrPrintInt8              uint64
+	TypePrintAddrPrintInt16             uint64
+	TypePrintAddrPrintInt32             uint64
+	TypePrintAddrPrintInt64             uint64
+	TypePrintAddrPrintUint8             uint64
+	TypePrintAddrPrintUint16            uint64
+	TypePrintAddrPrintUint32            uint64
+	TypePrintAddrPrintUint64            uint64
+	TypePrintAddrPrintFloat32           uint64
+	TypePrintAddrPrintFloat64           uint64
+	TypePrintAddrPrintComplex64         uint64
+	TypePrintAddrPrintComplex128        uint64
+	TypePrintAddrPrintString            uint64
+	TypePrintAddrPrintArray             uint64
+	TypePrintAddrPrintSlice             uint64
+	TypePrintAddrPrintStruct            uint64
+	TypePrintAddrPrintPtr               uint64
+	TypePrintAddrPrintFunc              uint64
+	TypePrintAddrPrintInterface         uint64
+	TypePrintAddrPrintNilInterface      uint64
+	TypePrintAddrPrintEmptyInterface    uint64
+	TypePrintAddrPrintNilEmptyInterface uint64
+	TypePrintAddrPrintMap               uint64
+	TypePrintAddrPrintChan              uint64
 )
 
 func init() {
@@ -249,8 +251,12 @@ func buildProgramTypePrint(srcDirname string) error {
 			TypePrintAddrPrintFunc = value
 		case "main.printInterface":
 			TypePrintAddrPrintInterface = value
+		case "main.printNilInterface":
+			TypePrintAddrPrintNilInterface = value
 		case "main.printEmptyInterface":
 			TypePrintAddrPrintEmptyInterface = value
+		case "main.printNilEmptyInterface":
+			TypePrintAddrPrintNilEmptyInterface = value
 		case "main.printMap":
 			TypePrintAddrPrintMap = value
 		case "main.printChan":

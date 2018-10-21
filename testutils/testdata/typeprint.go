@@ -98,7 +98,15 @@ func printInterface(v I) {
 }
 
 //go:noinline
+func printNilInterface(v I) {
+}
+
+//go:noinline
 func printEmptyInterface(v interface{}) {
+}
+
+//go:noinline
+func printNilEmptyInterface(v interface{}) {
 }
 
 //go:noinline
@@ -131,7 +139,9 @@ func main() {
 	printPtr(&v)
 	printFunc(func(v int) {})
 	printInterface(S{a: 5, b: 6, c: 7, T: T{d: 8}})
+	printNilInterface(nil)
 	printEmptyInterface(S{a: 9})
+	printNilEmptyInterface(nil)
 	printMap(map[int]int{1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10})
 	printChan(make(chan int))
 }
