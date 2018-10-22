@@ -327,6 +327,10 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 	for _, param := range params {
 		param := param // without this, all the closures point to the last param.
 		buildValue := func() value {
+			if !param.Exist {
+				return nil
+			}
+
 			size := param.Typ.Size()
 			buff := make([]byte, size)
 			if err = p.debugapiClient.ReadMemory(addrBeginningOfArgs+uint64(param.Offset), buff); err != nil {
@@ -508,7 +512,11 @@ type Argument struct {
 }
 
 func (arg Argument) String() string {
-	return fmt.Sprintf("%s = %s", arg.Name, arg.buildValue())
+	val := arg.buildValue()
+	if val == nil {
+		return fmt.Sprintf("%s = -", arg.Name)
+	}
+	return fmt.Sprintf("%s = %s", arg.Name, val)
 }
 
 type breakpoint struct {

@@ -431,9 +431,10 @@ func (c *Controller) printFunctionInput(goRoutineID int64, stackFrame *tracee.St
 func (c *Controller) printFunctionOutput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {
 	var args []string
 	for _, arg := range stackFrame.OutputArguments {
+
 		args = append(args, arg.String())
 	}
-	fmt.Fprintf(c.outputWriter, "%s/ (#%02d) %s(...) (%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+	fmt.Fprintf(c.outputWriter, "%s/ (#%02d) %s() (%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
 }
