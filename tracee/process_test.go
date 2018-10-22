@@ -330,8 +330,8 @@ func TestStackFrameAt(t *testing.T) {
 	if stackFrame.InputArguments[0].Name != "a" {
 		t.Errorf("wrong input args: %s", stackFrame.InputArguments[0].Name)
 	}
-	if stackFrame.InputArguments[0].Value.String() != "1" {
-		t.Errorf("wrong input args: %s", stackFrame.InputArguments[0].Value)
+	if stackFrame.InputArguments[0].buildValue().String() != "1" {
+		t.Errorf("wrong input args: %s", stackFrame.InputArguments[0].buildValue())
 	}
 	if len(stackFrame.OutputArguments) != 0 {
 		t.Errorf("wrong output args length: %d", len(stackFrame.OutputArguments))

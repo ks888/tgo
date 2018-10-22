@@ -325,14 +325,18 @@ func (p *Process) StackFrameAt(rbp, rip uint64) (*StackFrame, error) {
 
 func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (inputArgs []Argument, outputArgs []Argument, err error) {
 	for _, param := range params {
-		size := param.Typ.Size()
-		buff := make([]byte, size)
-		if err = p.debugapiClient.ReadMemory(addrBeginningOfArgs+uint64(param.Offset), buff); err != nil {
-			log.Printf("failed to read the '%s' value: %v", param.Name, err)
-			continue
+		param := param // without this, all the closures point to the last param.
+		buildValue := func() value {
+			size := param.Typ.Size()
+			buff := make([]byte, size)
+			if err = p.debugapiClient.ReadMemory(addrBeginningOfArgs+uint64(param.Offset), buff); err != nil {
+				log.Printf("failed to read the '%s' value: %v", param.Name, err)
+				return nil
+			}
+			return p.valueBuilder.buildValue(param.Typ, buff, 1)
 		}
 
-		arg := Argument{Name: param.Name, Typ: param.Typ, Value: p.valueBuilder.buildValue(param.Typ, buff, 1)}
+		arg := Argument{Name: param.Name, Typ: param.Typ, buildValue: buildValue}
 		if param.IsOutput {
 			outputArgs = append(outputArgs, arg)
 		} else {
@@ -497,13 +501,14 @@ func (p *Process) CurrentThreadInfo(threadID int) (ThreadInfo, error) {
 
 // Argument represents the value passed to the function.
 type Argument struct {
-	Name  string
-	Typ   dwarf.Type
-	Value value
+	Name string
+	Typ  dwarf.Type
+	// buildValue lazily build the value. The build every time is not only wasting resource, but the value may not be initialized yet.
+	buildValue func() value
 }
 
 func (arg Argument) String() string {
-	return fmt.Sprintf("%s = %s", arg.Name, arg.Value)
+	return fmt.Sprintf("%s = %s", arg.Name, arg.buildValue())
 }
 
 type breakpoint struct {
