@@ -17,7 +17,7 @@ type Process struct {
 	debugapiClient *lldb.Client
 	breakpoints    map[uint64]*breakpoint
 	Binary         Binary
-	valueBuilder   valueBuilder
+	valueParser    valueParser
 }
 
 type moduleData struct {
@@ -75,7 +75,7 @@ func newProcess(debugapiClient *lldb.Client, programPath string) (*Process, erro
 		debugapiClient: debugapiClient,
 		breakpoints:    make(map[uint64]*breakpoint),
 		Binary:         binary,
-		valueBuilder:   valueBuilder{reader: debugapiClient, mapRuntimeType: mapRuntimeType},
+		valueParser:    valueParser{reader: debugapiClient, mapRuntimeType: mapRuntimeType},
 	}, nil
 }
 
@@ -85,7 +85,7 @@ func buildMapRuntimeTypeFunc(binary Binary, debugapiClient *lldb.Client) (func(r
 		return nil, err
 	}
 
-	moduleDataList, err := buildModuleDataList(firstModuleDataAddr, debugapiClient)
+	moduleDataList, err := parseModuleDataList(firstModuleDataAddr, debugapiClient)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func buildMapRuntimeTypeFunc(binary Binary, debugapiClient *lldb.Client) (func(r
 	}, nil
 }
 
-func buildModuleDataList(firstModuleDataAddr uint64, debugapiClient *lldb.Client) ([]moduleData, error) {
+func parseModuleDataList(firstModuleDataAddr uint64, debugapiClient *lldb.Client) ([]moduleData, error) {
 	var moduleDataList []moduleData
 	buff := make([]byte, 8)
 	moduleDataAddr := firstModuleDataAddr
@@ -326,7 +326,7 @@ func (p *Process) StackFrameAt(rbp, rip uint64) (*StackFrame, error) {
 func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (inputArgs []Argument, outputArgs []Argument, err error) {
 	for _, param := range params {
 		param := param // without this, all the closures point to the last param.
-		buildValue := func() value {
+		parseValue := func(depth int) value {
 			if !param.Exist {
 				return nil
 			}
@@ -337,10 +337,10 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 				log.Printf("failed to read the '%s' value: %v", param.Name, err)
 				return nil
 			}
-			return p.valueBuilder.buildValue(param.Typ, buff, 1)
+			return p.valueParser.parseValue(param.Typ, buff, depth)
 		}
 
-		arg := Argument{Name: param.Name, Typ: param.Typ, buildValue: buildValue}
+		arg := Argument{Name: param.Name, Typ: param.Typ, parseValue: parseValue}
 		if param.IsOutput {
 			outputArgs = append(outputArgs, arg)
 		} else {
@@ -507,12 +507,14 @@ func (p *Process) CurrentThreadInfo(threadID int) (ThreadInfo, error) {
 type Argument struct {
 	Name string
 	Typ  dwarf.Type
-	// buildValue lazily build the value. The build every time is not only wasting resource, but the value may not be initialized yet.
-	buildValue func() value
+	// parseValue lazily parses the value. The parsing every time is not only wasting resource, but the value may not be initialized yet.
+	parseValue func(int) value
 }
 
-func (arg Argument) String() string {
-	val := arg.buildValue()
+// ParseValue parses the arg value and returns string representation.
+// The `depth` option specifies to the depth of the parsing.
+func (arg Argument) ParseValue(depth int) string {
+	val := arg.parseValue(depth)
 	if val == nil {
 		return fmt.Sprintf("%s = -", arg.Name)
 	}

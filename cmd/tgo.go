@@ -10,7 +10,7 @@ import (
 	"github.com/ks888/tgo/tracer"
 )
 
-func run(pid int, function string, depth int, args []string) error {
+func run(pid int, function string, traceLevel int, parseLevel int, args []string) error {
 	controller := tracer.NewController()
 	if pid == 0 {
 		if err := controller.LaunchTracee(args[0], args[1:]...); err != nil {
@@ -29,10 +29,11 @@ func run(pid int, function string, depth int, args []string) error {
 		controller.Interrupt()
 	}()
 
-	if err := controller.SetTracingPoint(function); err != nil {
+	if err := controller.SetTracePoint(function); err != nil {
 		return err
 	}
-	controller.SetDepth(depth)
+	controller.SetTraceLevel(traceLevel)
+	controller.SetParseLevel(parseLevel)
 
 	return controller.MainLoop()
 }
@@ -47,8 +48,9 @@ func main() {
 
 	// TODO: offer subcommand for the attach case
 	pid := flag.Int("attach", 0, "The `pid` to attach")
-	function := flag.String("func", "main.main", "The tracing is enabled when this `function` is called and then disabled when returned")
-	depth := flag.Int("depth", 1, "The traced info is printed if the stack depth is within this `depth`")
+	function := flag.String("func", "main.main", "The tracing is enabled when this `function` is called and then disabled when returned.")
+	traceLevel := flag.Int("tracelevel", 1, "The function info is printed if the stack depth is within this `tracelevel`. The stack depth here is based on the point the tracing is enabled.")
+	parseLevel := flag.Int("parselevel", 1, "The printed function info includes the value of args. The `parselevel` option determines how detailed these values should be.")
 	flag.Parse()
 	if *pid == 0 && flag.NArg() == 0 {
 		flag.Usage()
@@ -56,7 +58,7 @@ func main() {
 	}
 	args := flag.Args()
 
-	if err := run(*pid, *function, *depth, args); err != nil {
+	if err := run(*pid, *function, *traceLevel, *parseLevel, args); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}

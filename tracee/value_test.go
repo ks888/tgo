@@ -8,7 +8,7 @@ import (
 	"github.com/ks888/tgo/testutils"
 )
 
-func TestBuildValue(t *testing.T) {
+func TestParseValue(t *testing.T) {
 	proc, err := LaunchProcess(testutils.ProgramTypePrint)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -60,7 +60,7 @@ func TestBuildValue(t *testing.T) {
 		if err := proc.debugapiClient.ReadMemory(threadInfo.CurrentStackAddr+8, buff); err != nil {
 			t.Fatalf("failed to ReadMemory: %v", err)
 		}
-		val := (valueBuilder{reader: proc.debugapiClient}).buildValue(typ, buff, 0)
+		val := (valueParser{reader: proc.debugapiClient}).parseValue(typ, buff, 0)
 		if val.String() != testdata.expected {
 			t.Errorf("[%d] wrong value: %s", i, val)
 		}
@@ -69,7 +69,7 @@ func TestBuildValue(t *testing.T) {
 	}
 }
 
-func TestBuildValue_NotFixedStringCase(t *testing.T) {
+func TestParseValue_NotFixedStringCase(t *testing.T) {
 	proc, err := LaunchProcess(testutils.ProgramTypePrint)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -158,7 +158,7 @@ func TestBuildValue_NotFixedStringCase(t *testing.T) {
 		if err := proc.debugapiClient.ReadMemory(threadInfo.CurrentStackAddr+8, buff); err != nil {
 			t.Fatalf("failed to ReadMemory: %v", err)
 		}
-		val := proc.valueBuilder.buildValue(typ, buff, 1)
+		val := proc.valueParser.parseValue(typ, buff, 1)
 		testdata.testFunc(t, val)
 
 		proc.SingleStep(tids[0], testdata.funcAddr)

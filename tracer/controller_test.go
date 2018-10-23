@@ -30,14 +30,14 @@ func TestAttachProcess(t *testing.T) {
 	}
 }
 
-func TestSetTracingPoint(t *testing.T) {
+func TestSetTracePoint(t *testing.T) {
 	controller := NewController()
 	err := controller.LaunchTracee(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := controller.SetTracingPoint("main.main"); err != nil {
+	if err := controller.SetTracePoint("main.main"); err != nil {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
 
@@ -46,18 +46,18 @@ func TestSetTracingPoint(t *testing.T) {
 	}
 }
 
-func TestSetTracingPoint_SetTwice(t *testing.T) {
+func TestSetTracePoint_SetTwice(t *testing.T) {
 	controller := NewController()
 	err := controller.LaunchTracee(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := controller.SetTracingPoint("main.init"); err != nil {
+	if err := controller.SetTracePoint("main.init"); err != nil {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
 
-	if err := controller.SetTracingPoint("main.main"); err == nil {
+	if err := controller.SetTracePoint("main.main"); err == nil {
 		t.Errorf("error not returned")
 	}
 }
@@ -81,7 +81,7 @@ func TestMainLoop_MainMain(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramHelloworld); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracingPoint("main.main"); err != nil {
+	if err := controller.SetTracePoint("main.main"); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestMainLoop_MainNoParameter(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramHelloworld); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracingPoint("main.noParameter"); err != nil {
+	if err := controller.SetTracePoint("main.noParameter"); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestMainLoop_GoRoutines(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramGoRoutines); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracingPoint("main.inc"); err != nil {
+	if err := controller.SetTracePoint("main.inc"); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 
@@ -147,10 +147,10 @@ func TestMainLoop_Recursive(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramRecursive); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracingPoint("main.main"); err != nil {
+	if err := controller.SetTracePoint("main.main"); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
-	controller.SetDepth(3)
+	controller.SetTraceLevel(3)
 
 	if err := controller.MainLoop(); err != nil {
 		t.Errorf("failed to run main loop: %v", err)
@@ -169,10 +169,10 @@ func TestMainLoop_Panic(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramPanic); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracingPoint("main.main"); err != nil {
+	if err := controller.SetTracePoint("main.main"); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
-	controller.SetDepth(2)
+	controller.SetTraceLevel(2)
 
 	if err := controller.MainLoop(); err != nil {
 		t.Errorf("failed to run main loop: %v", err)
@@ -191,7 +191,7 @@ func TestInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracingPoint("main.main"); err != nil {
+	if err := controller.SetTracePoint("main.main"); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 

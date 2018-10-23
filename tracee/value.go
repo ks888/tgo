@@ -247,7 +247,7 @@ func (v voidValue) String() string {
 	return fmt.Sprintf("%v", v.val)
 }
 
-type valueBuilder struct {
+type valueParser struct {
 	reader         memoryReader
 	mapRuntimeType func(addr uint64) (dwarf.Type, error)
 }
@@ -256,10 +256,10 @@ type memoryReader interface {
 	ReadMemory(addr uint64, out []byte) error
 }
 
-// buildValue parses the `value` using the specified `rawTyp`.
+// parseValue parses the `value` using the specified `rawTyp`.
 // `remainingDepth` is the depth of parsing, and parser stops when the depth becomes negative.
 // It is decremented when the struct type value is parsed, though the structs used by builtin types, such as slice and map, are not considered.
-func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte, remainingDepth int) value {
+func (b valueParser) parseValue(rawTyp dwarf.Type, val []byte, remainingDepth int) value {
 	switch typ := rawTyp.(type) {
 	case *dwarf.IntType:
 		switch typ.Size() {
@@ -325,7 +325,7 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte, remainingDepth i
 			// the value may not be initialized yet (or too large)
 			return ptrValue{PtrType: typ, addr: addr}
 		}
-		pointedVal := b.buildValue(typ.Type, buff, remainingDepth)
+		pointedVal := b.parseValue(typ.Type, buff, remainingDepth)
 		return ptrValue{PtrType: typ, addr: addr, pointedVal: pointedVal}
 
 	case *dwarf.FuncType:
@@ -336,15 +336,15 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte, remainingDepth i
 	case *dwarf.StructType:
 		switch {
 		case typ.StructName == "string":
-			return b.buildStringValue(typ, val)
+			return b.parseStringValue(typ, val)
 		case strings.HasPrefix(typ.StructName, "[]"):
-			return b.buildSliceValue(typ, val, remainingDepth)
+			return b.parseSliceValue(typ, val, remainingDepth)
 		case typ.StructName == "runtime.iface":
-			return b.buildInterfaceValue(typ, val, remainingDepth)
+			return b.parseInterfaceValue(typ, val, remainingDepth)
 		case typ.StructName == "runtime.eface":
-			return b.buildEmptyInterfaceValue(typ, val, remainingDepth)
+			return b.parseEmptyInterfaceValue(typ, val, remainingDepth)
 		default:
-			return b.buildStructValue(typ, val, remainingDepth)
+			return b.parseStructValue(typ, val, remainingDepth)
 		}
 	case *dwarf.ArrayType:
 		if typ.Count == -1 {
@@ -353,20 +353,20 @@ func (b valueBuilder) buildValue(rawTyp dwarf.Type, val []byte, remainingDepth i
 		var vals []value
 		stride := int(typ.Type.Size())
 		for i := 0; i < int(typ.Count); i++ {
-			vals = append(vals, b.buildValue(typ.Type, val[i*stride:(i+1)*stride], remainingDepth))
+			vals = append(vals, b.parseValue(typ.Type, val[i*stride:(i+1)*stride], remainingDepth))
 		}
 		return arrayValue{ArrayType: typ, val: vals}
 	case *dwarf.TypedefType:
 		if strings.HasPrefix(typ.String(), "map[") {
-			return b.buildMapValue(typ, val, remainingDepth)
+			return b.parseMapValue(typ, val, remainingDepth)
 		}
 		// In this case, virtually do nothing so far. So do not decrement `remainingDepth`.
-		return b.buildValue(typ.Type, val, remainingDepth)
+		return b.parseValue(typ.Type, val, remainingDepth)
 	}
 	return voidValue{Type: rawTyp, val: val}
 }
 
-func (b valueBuilder) buildStringValue(typ *dwarf.StructType, val []byte) stringValue {
+func (b valueParser) parseStringValue(typ *dwarf.StructType, val []byte) stringValue {
 	addr := binary.LittleEndian.Uint64(val[:8])
 	len := int(binary.LittleEndian.Uint64(val[8:]))
 	buff := make([]byte, len)
@@ -377,9 +377,9 @@ func (b valueBuilder) buildStringValue(typ *dwarf.StructType, val []byte) string
 	return stringValue{StructType: typ, val: string(buff)}
 }
 
-func (b valueBuilder) buildSliceValue(typ *dwarf.StructType, val []byte, remainingDepth int) sliceValue {
+func (b valueParser) parseSliceValue(typ *dwarf.StructType, val []byte, remainingDepth int) sliceValue {
 	// Values are wrapped by slice struct. So +1 here.
-	structVal := b.buildStructValue(typ, val, remainingDepth+1)
+	structVal := b.parseStructValue(typ, val, remainingDepth+1)
 	len := int(structVal.fields["len"].(int64Value).val)
 	firstElem := structVal.fields["array"].(ptrValue)
 	sliceVal := sliceValue{StructType: typ, val: []value{firstElem.pointedVal}}
@@ -388,16 +388,16 @@ func (b valueBuilder) buildSliceValue(typ *dwarf.StructType, val []byte, remaini
 		addr := firstElem.addr + uint64(firstElem.pointedVal.Size())*uint64(i)
 		buff := make([]byte, 8)
 		binary.LittleEndian.PutUint64(buff, addr)
-		elem := b.buildValue(firstElem.PtrType, buff, remainingDepth).(ptrValue)
+		elem := b.parseValue(firstElem.PtrType, buff, remainingDepth).(ptrValue)
 		sliceVal.val = append(sliceVal.val, elem.pointedVal)
 	}
 
 	return sliceVal
 }
 
-func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte, remainingDepth int) interfaceValue {
+func (b valueParser) parseInterfaceValue(typ *dwarf.StructType, val []byte, remainingDepth int) interfaceValue {
 	// Interface is represented by the iface and itab struct. So remainingDepth needs to be at least 2.
-	structVal := b.buildStructValue(typ, val, 2)
+	structVal := b.parseStructValue(typ, val, 2)
 	ptrToTab := structVal.fields["tab"].(ptrValue)
 	if ptrToTab.pointedVal == nil {
 		return interfaceValue{StructType: typ}
@@ -420,12 +420,12 @@ func (b valueBuilder) buildInterfaceValue(typ *dwarf.StructType, val []byte, rem
 		return interfaceValue{StructType: typ}
 	}
 
-	return interfaceValue{StructType: typ, implType: implType, implVal: b.buildValue(implType, dataBuff, remainingDepth)}
+	return interfaceValue{StructType: typ, implType: implType, implVal: b.parseValue(implType, dataBuff, remainingDepth)}
 }
 
-func (b valueBuilder) buildEmptyInterfaceValue(typ *dwarf.StructType, val []byte, remainingDepth int) interfaceValue {
+func (b valueParser) parseEmptyInterfaceValue(typ *dwarf.StructType, val []byte, remainingDepth int) interfaceValue {
 	// Empty interface is represented by the eface struct. So remainingDepth needs to be at least 1.
-	structVal := b.buildStructValue(typ, val, 1)
+	structVal := b.parseStructValue(typ, val, 1)
 	data := structVal.fields["data"].(ptrValue)
 
 	if data.addr == 0 {
@@ -447,24 +447,24 @@ func (b valueBuilder) buildEmptyInterfaceValue(typ *dwarf.StructType, val []byte
 		return interfaceValue{StructType: typ}
 	}
 
-	return interfaceValue{StructType: typ, implType: implType, implVal: b.buildValue(implType, dataBuff, remainingDepth)}
+	return interfaceValue{StructType: typ, implType: implType, implVal: b.parseValue(implType, dataBuff, remainingDepth)}
 }
 
-func (b valueBuilder) buildStructValue(typ *dwarf.StructType, val []byte, remainingDepth int) structValue {
+func (b valueParser) parseStructValue(typ *dwarf.StructType, val []byte, remainingDepth int) structValue {
 	if remainingDepth <= 0 {
 		return structValue{StructType: typ, abbreviated: true}
 	}
 
 	fields := make(map[string]value)
 	for _, field := range typ.Field {
-		fields[field.Name] = b.buildValue(field.Type, val[field.ByteOffset:field.ByteOffset+field.Type.Size()], remainingDepth-1)
+		fields[field.Name] = b.parseValue(field.Type, val[field.ByteOffset:field.ByteOffset+field.Type.Size()], remainingDepth-1)
 	}
 	return structValue{StructType: typ, fields: fields}
 }
 
-func (b valueBuilder) buildMapValue(typ *dwarf.TypedefType, val []byte, remainingDepth int) mapValue {
+func (b valueParser) parseMapValue(typ *dwarf.TypedefType, val []byte, remainingDepth int) mapValue {
 	// Actual keys and values are wrapped by hmap struct and buckets struct. So +2 here.
-	ptrVal := b.buildValue(typ.Type, val, remainingDepth+2)
+	ptrVal := b.parseValue(typ.Type, val, remainingDepth+2)
 	hmapVal := ptrVal.(ptrValue).pointedVal.(structValue)
 	numBuckets := 1 << hmapVal.fields["B"].(uint8Value).val
 	ptrToBuckets := hmapVal.fields["buckets"].(ptrValue)
@@ -492,7 +492,7 @@ func (b valueBuilder) buildMapValue(typ *dwarf.TypedefType, val []byte, remainin
 		buff := make([]byte, 8)
 		binary.LittleEndian.PutUint64(buff, addr)
 		// Actual keys and values are wrapped by struct buckets. So +1 here.
-		ptrToBuckets = b.buildValue(ptrToBuckets.PtrType, buff, remainingDepth+1).(ptrValue)
+		ptrToBuckets = b.parseValue(ptrToBuckets.PtrType, buff, remainingDepth+1).(ptrValue)
 	}
 
 	return mapValue{TypedefType: typ, val: kv}

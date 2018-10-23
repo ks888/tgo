@@ -20,7 +20,8 @@ type Controller struct {
 	statusStore map[int]goRoutineStatus
 
 	tracingPoint *tracingPoint
-	depth        int
+	traceLevel   int
+	parseLevel   int
 	hitOnce      bool
 
 	interrupted bool
@@ -75,9 +76,9 @@ func (c *Controller) AttachTracee(pid int) error {
 	return err
 }
 
-// SetTracingPoint sets the starting point of the tracing. The tracing is enabled when this function is called and disabled when it is returned.
+// SetTracePoint sets the starting point of the tracing. The tracing is enabled when this function is called and disabled when it is returned.
 // The tracing point can be set only once.
-func (c *Controller) SetTracingPoint(functionName string) error {
+func (c *Controller) SetTracePoint(functionName string) error {
 	if c.tracingPoint != nil {
 		return errors.New("tracing point is set already")
 	}
@@ -141,12 +142,17 @@ func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
 	return true
 }
 
-// SetDepth sets the depth, which decides whether to print the traced info.
-// It is the stack's relative depth from the point the tracing starts.
-// For example, when the stack depth is 'x' at the start point, the called function info is printed
-// if the stack depth is within 'x+depth'.
-func (c *Controller) SetDepth(depth int) {
-	c.depth = depth
+// SetTraceLevel set the tracing level, which determines whether to print the traced info of the functions.
+// The traced info is printed if the function is (directly or indirectly) called by the trace point function AND
+// the stack depth is within the `level`.
+// The depth here is the relative value from the point the tracing starts.
+func (c *Controller) SetTraceLevel(level int) {
+	c.traceLevel = level
+}
+
+// SetParseLevel sets the parsing level, which determines how deeply the parser parses the value of args.
+func (c *Controller) SetParseLevel(level int) {
+	c.parseLevel = level
 }
 
 // MainLoop repeatedly lets the tracee continue and then wait an event.
@@ -368,7 +374,7 @@ func (c *Controller) setBreakpointsExceptTracingPoint() error {
 
 func (c *Controller) canPrint(goRoutineID int64, currStackDepth int) bool {
 	currRelativeDepth := c.tracingPoint.Depth(goRoutineID, currStackDepth)
-	return c.tracingPoint.Inside(goRoutineID) && currRelativeDepth <= c.depth
+	return c.tracingPoint.Inside(goRoutineID) && currRelativeDepth <= c.traceLevel
 }
 
 func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
@@ -420,7 +426,7 @@ func (c *Controller) prevStackFrame(goRoutineInfo tracee.GoRoutineInfo, rip uint
 func (c *Controller) printFunctionInput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {
 	var args []string
 	for _, arg := range stackFrame.InputArguments {
-		args = append(args, arg.String())
+		args = append(args, arg.ParseValue(c.parseLevel))
 	}
 
 	fmt.Fprintf(c.outputWriter, "%s\\ (#%02d) %s(%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
@@ -431,8 +437,7 @@ func (c *Controller) printFunctionInput(goRoutineID int64, stackFrame *tracee.St
 func (c *Controller) printFunctionOutput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {
 	var args []string
 	for _, arg := range stackFrame.OutputArguments {
-
-		args = append(args, arg.String())
+		args = append(args, arg.ParseValue(c.parseLevel))
 	}
 	fmt.Fprintf(c.outputWriter, "%s/ (#%02d) %s() (%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
