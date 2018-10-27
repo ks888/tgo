@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ks888/tgo/debugapi"
+	"github.com/ks888/tgo/log"
 	"github.com/ks888/tgo/tracee"
 )
 
@@ -235,6 +236,7 @@ func (c *Controller) handleTrappedSystemRoutine(threadID int) error {
 func (c *Controller) isFunctionCall(breakpointAddr uint64) bool {
 	function, err := c.process.Binary.FindFunction(breakpointAddr)
 	if err != nil {
+		log.Debugf("failed to find function (addr: %x): %v", breakpointAddr, err)
 		return false
 	}
 

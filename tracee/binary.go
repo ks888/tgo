@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/ks888/tgo/log"
 )
 
 const (
@@ -78,7 +79,7 @@ func (b Binary) buildTypes() (map[uint64]dwarf.Offset, error) {
 
 		switch entry.Tag {
 		case dwarf.TagArrayType, dwarf.TagPointerType, dwarf.TagStructType, dwarf.TagSubroutineType, dwarf.TagBaseType, dwarf.TagTypedef:
-			// based on the 'abbrevs' variable in src/cmd/internal/dwarf/dwarf.go. It indicates which tag types may have the DW_AT_go_runtime_type attribute.
+			// based on the 'abbrevs' variable in src/cmd/internal/dwarf/dwarf.go. It indicates which tag types *may* have the DW_AT_go_runtime_type attribute.
 			val, err := addressClassAttr(entry, attrGoRuntimeType)
 			if err != nil || val == 0 {
 				break
@@ -95,6 +96,7 @@ func (b Binary) findGoVersion() GoVersion {
 	for {
 		entry, err := reader.Next()
 		if err != nil || entry == nil {
+			log.Debugf("failed to find the go version of the binary: %v", err)
 			return GoVersion{}
 		}
 
@@ -104,7 +106,7 @@ func (b Binary) findGoVersion() GoVersion {
 		}
 
 		producer, err := stringClassAttr(entry, dwarf.AttrProducer)
-		if !strings.HasPrefix(producer, producerPrefix) {
+		if err != nil || !strings.HasPrefix(producer, producerPrefix) {
 			reader.SkipChildren()
 			continue
 		}
@@ -243,6 +245,7 @@ func (r subprogramReader) Seek(pc uint64) (*Function, error) {
 func (r subprogramReader) includesPC(subprogram *dwarf.Entry, pc uint64) bool {
 	lowPC, err := addressClassAttr(subprogram, dwarf.AttrLowpc)
 	if err != nil {
+		// inlined subprogram doesn't have the lowPC and highPC attributes.
 		return false
 	}
 
@@ -365,11 +368,16 @@ func (r subprogramReader) offsetWithLocationDesc(param *dwarf.Entry) (offset int
 		return 0, false, fmt.Errorf("loc attr not found: %v", err)
 	}
 
-	offset, err = parameterOffset(loc)
-	if err != nil {
+	if len(loc) == 0 {
+		// the location description may be empty due to the optimization (see the DWARF spec 2.6.1.1.4)
 		return 0, false, nil
 	}
-	return offset, true, nil
+
+	offset, err = parameterOffset(loc)
+	if err != nil {
+		log.Debug(err)
+	}
+	return offset, err == nil, nil
 }
 
 // parameterOffset returns the offset from the beginning of the parameter list.
@@ -377,8 +385,7 @@ func (r subprogramReader) offsetWithLocationDesc(param *dwarf.Entry) (offset int
 // Also, it's supposed the function's frame base always specifies to the CFA.
 func parameterOffset(loc []byte) (int, error) {
 	if len(loc) == 0 {
-		// the location description may be empty due to the optimization (see the DWARF spec 2.6.1.1.4)
-		return 0, errors.New("empty")
+		return 0, errors.New("location description is empty")
 	}
 
 	// TODO: support the value in the register and the separated value.
@@ -418,6 +425,9 @@ func (r subprogramReader) offsetWithLocationList(param *dwarf.Entry) (int, bool,
 	}
 
 	offset, err := parameterOffset(buff)
+	if err != nil {
+		log.Debug(err)
+	}
 	return offset, err == nil, nil
 }
 

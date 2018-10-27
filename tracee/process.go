@@ -4,10 +4,10 @@ import (
 	"debug/dwarf"
 	"encoding/binary"
 	"fmt"
-	"log"
 
 	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/debugapi/lldb"
+	"github.com/ks888/tgo/log"
 )
 
 var breakpointInsts = []byte{0xcc}
@@ -337,7 +337,7 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 			size := param.Typ.Size()
 			buff := make([]byte, size)
 			if err = p.debugapiClient.ReadMemory(addrBeginningOfArgs+uint64(param.Offset), buff); err != nil {
-				log.Printf("failed to read the '%s' value: %v", param.Name, err)
+				log.Debugf("failed to read the '%s' value: %v", param.Name, err)
 				return nil
 			}
 			return p.valueParser.parseValue(param.Typ, buff, depth)

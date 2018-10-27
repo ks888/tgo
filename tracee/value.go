@@ -7,6 +7,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/ks888/tgo/log"
 )
 
 type value interface {
@@ -322,6 +324,7 @@ func (b valueParser) parseValue(rawTyp dwarf.Type, val []byte, remainingDepth in
 
 		buff := make([]byte, typ.Type.Size())
 		if err := b.reader.ReadMemory(addr, buff); err != nil {
+			log.Debugf("failed to read memory (addr: %x): %v", addr, err)
 			// the value may not be initialized yet (or too large)
 			return ptrValue{PtrType: typ, addr: addr}
 		}
@@ -372,6 +375,7 @@ func (b valueParser) parseStringValue(typ *dwarf.StructType, val []byte) stringV
 	buff := make([]byte, len)
 
 	if err := b.reader.ReadMemory(addr, buff); err != nil {
+		log.Debugf("failed to read memory (addr: %x): %v", addr, err)
 		return stringValue{StructType: typ}
 	}
 	return stringValue{StructType: typ, val: string(buff)}
@@ -411,12 +415,14 @@ func (b valueParser) parseInterfaceValue(typ *dwarf.StructType, val []byte, rema
 	runtimeTypeAddr := tab.fields["_type"].(ptrValue).addr
 	implType, err := b.mapRuntimeType(runtimeTypeAddr)
 	if err != nil {
+		log.Debugf("failed to find the impl type (runtime type addr: %x): %v", runtimeTypeAddr, err)
 		return interfaceValue{StructType: typ}
 	}
 
 	data := structVal.fields["data"].(ptrValue)
 	dataBuff := make([]byte, implType.Size())
 	if err := b.reader.ReadMemory(data.addr, dataBuff); err != nil {
+		log.Debugf("failed to read memory (addr: %x): %v", data.addr, err)
 		return interfaceValue{StructType: typ}
 	}
 
@@ -439,11 +445,13 @@ func (b valueParser) parseEmptyInterfaceValue(typ *dwarf.StructType, val []byte,
 	runtimeTypeAddr := structVal.fields["_type"].(ptrValue).addr
 	implType, err := b.mapRuntimeType(runtimeTypeAddr)
 	if err != nil {
+		log.Debugf("failed to find the impl type (runtime type addr: %x): %v", runtimeTypeAddr, err)
 		return interfaceValue{StructType: typ}
 	}
 
 	dataBuff := make([]byte, implType.Size())
 	if err := b.reader.ReadMemory(data.addr, dataBuff); err != nil {
+		log.Debugf("failed to read memory (addr: %x): %v", data.addr, err)
 		return interfaceValue{StructType: typ}
 	}
 

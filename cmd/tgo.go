@@ -3,10 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 
+	"github.com/ks888/tgo/log"
 	"github.com/ks888/tgo/tracer"
 )
 
@@ -49,13 +49,12 @@ func main() {
 		flag.PrintDefaults()
 	}
 
-	log.SetFlags(0)
-
 	// TODO: use subcommand for the attach case
 	pid := flag.Int("attach", 0, "The `pid` to attach")
 	function := flag.String("func", "main.main", "The tracing is enabled when this `function` is called and then disabled when returned.")
 	traceLevel := flag.Int("tracelevel", 1, "The function info is printed if the stack depth is within this `tracelevel`. The stack depth here is based on the point the tracing is enabled.")
 	parseLevel := flag.Int("parselevel", 1, "The printed function info includes the value of args. The `parselevel` option determines how detailed these values should be.")
+	verbose := flag.Bool("verbose", false, "Show the logging message")
 	flag.Parse()
 	if *pid == 0 && flag.NArg() == 0 {
 		flag.Usage()
@@ -63,6 +62,7 @@ func main() {
 	}
 	args := flag.Args()
 
+	log.EnableDebugLog = *verbose
 	opts := options{function: *function, traceLevel: *traceLevel, parseLevel: *parseLevel}
 	if err := run(*pid, args, opts); err != nil {
 		fmt.Println(err)
