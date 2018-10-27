@@ -1,7 +1,10 @@
 package tracee
 
 import (
+	"bytes"
+	"compress/zlib"
 	"debug/macho"
+	"encoding/binary"
 	"io"
 )
 
@@ -25,11 +28,38 @@ func findDWARF(pathToProgram string) (io.Closer, dwarfData, error) {
 	}
 	// older go version doesn't create a location list section.
 
-	var locListSectionReader io.ReadSeeker
-	if locListSection != nil {
-		locListSectionReader = locListSection.Open()
+	locList, err := buildLocationListData(locListSection)
+	if err != nil {
+		return nil, dwarfData{}, err
 	}
 
 	data, err := machoFile.DWARF()
-	return machoFile, dwarfData{Data: data, locationList: locListSectionReader}, err
+	return machoFile, dwarfData{Data: data, locationList: locList}, err
+}
+
+func buildLocationListData(locListSection *macho.Section) ([]byte, error) {
+	if locListSection == nil {
+		return nil, nil
+	}
+
+	rawData, err := locListSection.Data()
+	if err != nil {
+		return nil, err
+	}
+
+	if string(rawData[:4]) != "ZLIB" || len(rawData) < 12 {
+		return rawData, nil
+	}
+
+	dlen := binary.BigEndian.Uint64(rawData[4:12])
+	uncompressedData := make([]byte, dlen)
+
+	r, err := zlib.NewReader(bytes.NewBuffer(rawData[12:]))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	_, err = io.ReadFull(r, uncompressedData)
+	return uncompressedData, err
 }

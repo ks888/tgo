@@ -31,7 +31,7 @@ type Binary struct {
 
 type dwarfData struct {
 	*dwarf.Data
-	locationList io.ReadSeeker
+	locationList []byte
 }
 
 // Function represents a function info in the debug info section.
@@ -405,26 +405,12 @@ func (r subprogramReader) offsetWithLocationList(param *dwarf.Entry) (int, bool,
 		return 0, false, fmt.Errorf("loc list attr not found: %v", err)
 	}
 
-	// TODO: the right offset depends on the current PC. Use address offsets for this.
-	_, err = r.dwarfData.locationList.Seek(loc+8+8 /* skip address offsets */, io.SeekStart)
-	if err != nil {
-		return 0, false, fmt.Errorf("failed to find the location list entry: %v", err)
-	}
-
-	buff := make([]byte, 2)
-	_, err = r.dwarfData.locationList.Read(buff)
-	if err != nil {
-		return 0, false, fmt.Errorf("failed to read the location list entry: %v", err)
-	}
-	expLength := binary.LittleEndian.Uint16(buff)
-
-	buff = make([]byte, expLength)
-	_, err = r.dwarfData.locationList.Read(buff)
-	if err != nil {
-		return 0, false, fmt.Errorf("failed to read the location list entry: %v", err)
-	}
-
-	offset, err := parameterOffset(buff)
+	// TODO: the right offset depends on the current PC. Use address offsets.
+	beginExpressionLength := loc + 8 + 8
+	beginExpression := beginExpressionLength + 2
+	expressionLength := binary.LittleEndian.Uint16(r.dwarfData.locationList[beginExpressionLength:beginExpression])
+	expression := r.dwarfData.locationList[beginExpression : beginExpression+int64(expressionLength)]
+	offset, err := parameterOffset(expression)
 	if err != nil {
 		log.Debug(err)
 	}
