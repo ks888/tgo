@@ -300,7 +300,7 @@ func TestStackFrameAt(t *testing.T) {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := proc.SetBreakpoint(testutils.HelloworldAddrOneParameter); err != nil {
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrOneParameterAndVariable); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
 	}
 
@@ -314,11 +314,11 @@ func TestStackFrameAt(t *testing.T) {
 		t.Fatalf("failed to read registers: %v", err)
 	}
 
-	stackFrame, err := proc.StackFrameAt(regs.Rsp-8, regs.Rip)
+	stackFrame, err := proc.StackFrameAt(regs.Rsp, regs.Rip)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	if stackFrame.Function.Name != "main.oneParameter" {
+	if stackFrame.Function.Name != "main.oneParameterAndOneVariable" {
 		t.Errorf("wrong function name: %s", stackFrame.Function.Name)
 	}
 	if stackFrame.ReturnAddress == 0x0 {
@@ -327,7 +327,7 @@ func TestStackFrameAt(t *testing.T) {
 	if len(stackFrame.InputArguments) != 1 {
 		t.Errorf("wrong input args length: %d", len(stackFrame.InputArguments))
 	}
-	if stackFrame.InputArguments[0].ParseValue(1) != "a = 1" {
+	if stackFrame.InputArguments[0].ParseValue(1) != "i = 1" {
 		t.Errorf("wrong input args: %s", stackFrame.InputArguments[0].ParseValue(1))
 	}
 	if len(stackFrame.OutputArguments) != 0 {

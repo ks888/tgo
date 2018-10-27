@@ -296,24 +296,24 @@ func (p *Process) HasBreakpoint(addr uint64) bool {
 
 // StackFrameAt returns the stack frame to which the given rbp specified.
 // To get the correct stack frame, it assumes:
-// * rbp+8 points to the return address.
-// * rbp+16 points to the beginning of the args list.
+// * rsp points to the return address.
+// * rsp+8 points to the beginning of the args list.
 //
 // To be accurate, we need to check the .debug_frame section to find the CFA and return address.
 // But we omit the check here because this function is called at only the beginning or end of the tracee's function call.
-func (p *Process) StackFrameAt(rbp, rip uint64) (*StackFrame, error) {
+func (p *Process) StackFrameAt(rsp, rip uint64) (*StackFrame, error) {
 	function, err := p.Binary.FindFunction(rip)
 	if err != nil {
 		return nil, err
 	}
 
 	buff := make([]byte, 8)
-	if err := p.debugapiClient.ReadMemory(rbp+8, buff); err != nil {
+	if err := p.debugapiClient.ReadMemory(rsp, buff); err != nil {
 		return nil, err
 	}
 	retAddr := binary.LittleEndian.Uint64(buff)
 
-	inputArgs, outputArgs, err := p.currentArgs(function.Parameters, rbp+16)
+	inputArgs, outputArgs, err := p.currentArgs(function.Parameters, rsp+8)
 	if err != nil {
 		return nil, err
 	}

@@ -322,7 +322,7 @@ func (c *Controller) findPanicFunction(callingFuncs []callingFunction) int {
 	return -1
 }
 
-func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineInfo tracee.GoRoutineInfo) (remainingFuncs, unwindedFuncs []callingFunction, err error) {
+func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineInfo tracee.GoRoutineInfo) ([]callingFunction, []callingFunction, error) {
 	for i := len(callingFuncs) - 1; i >= 0; i-- {
 		if callingFuncs[i].usedStackSize < goRoutineInfo.UsedStackSize {
 			return callingFuncs[0 : i+1], callingFuncs[i+1 : len(callingFuncs)], nil
@@ -431,14 +431,14 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 	return nil
 }
 
-// It must be called at the beginning of the function, because it assumes rbp = rsp-8
+// It must be called at the beginning of the function due to the StackFrameAt's constraint.
 func (c *Controller) currentStackFrame(goRoutineInfo tracee.GoRoutineInfo) (*tracee.StackFrame, error) {
-	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-8, goRoutineInfo.CurrentPC-1)
+	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr, goRoutineInfo.CurrentPC-1)
 }
 
-// It must be called at return address, because it assumes rbp = rsp-16
+// It must be called at return address due to the StackFrameAt's constraint.
 func (c *Controller) prevStackFrame(goRoutineInfo tracee.GoRoutineInfo, rip uint64) (*tracee.StackFrame, error) {
-	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-16, rip)
+	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-8, rip)
 }
 
 func (c *Controller) printFunctionInput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {

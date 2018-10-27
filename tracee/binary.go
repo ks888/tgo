@@ -365,19 +365,23 @@ func (r subprogramReader) offsetWithLocationDesc(param *dwarf.Entry) (offset int
 		return 0, false, fmt.Errorf("loc attr not found: %v", err)
 	}
 
-	if len(loc) > 0 {
-		offset, err := parameterOffset(loc)
-		return offset, true, err
+	offset, err = parameterOffset(loc)
+	if err != nil {
+		return 0, false, nil
 	}
-	// the location description may be empty due to the optimization (see the DWARF spec 2.6.1.1.4)
-	return offset, false, nil
+	return offset, true, nil
 }
 
 // parameterOffset returns the offset from the beginning of the parameter list.
 // It assumes the value is present in the memory and not separated.
 // Also, it's supposed the function's frame base always specifies to the CFA.
 func parameterOffset(loc []byte) (int, error) {
-	// TODO: support location list case
+	if len(loc) == 0 {
+		// the location description may be empty due to the optimization (see the DWARF spec 2.6.1.1.4)
+		return 0, errors.New("empty")
+	}
+
+	// TODO: support the value in the register and the separated value.
 	switch loc[0] {
 	case dwarfOpCallFrameCFA:
 		return 0, nil
@@ -403,18 +407,18 @@ func (r subprogramReader) offsetWithLocationList(param *dwarf.Entry) (int, bool,
 	buff := make([]byte, 2)
 	_, err = r.dwarfData.locationList.Read(buff)
 	if err != nil {
-		return 0, false, fmt.Errorf("failed to find the location list entry: %v", err)
+		return 0, false, fmt.Errorf("failed to read the location list entry: %v", err)
 	}
 	expLength := binary.LittleEndian.Uint16(buff)
 
 	buff = make([]byte, expLength)
 	_, err = r.dwarfData.locationList.Read(buff)
 	if err != nil {
-		return 0, false, fmt.Errorf("failed to find the location list entry: %v", err)
+		return 0, false, fmt.Errorf("failed to read the location list entry: %v", err)
 	}
 
 	offset, err := parameterOffset(buff)
-	return offset, true, err
+	return offset, err == nil, nil
 }
 
 func addressClassAttr(entry *dwarf.Entry, attrName dwarf.Attr) (uint64, error) {
