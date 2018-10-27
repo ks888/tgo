@@ -269,13 +269,13 @@ func buildProgramTypePrint(srcDirname string) error {
 }
 
 func buildProgram(programName string) error {
-	const compileOptions = "all=-N -l" // to prevent function inlining.
+	// Optimization is enabled, because the tool aims to work well even if the binary is optimized.
 	linkOptions := ""
 	if strings.HasPrefix(runtime.Version(), "go1.11") {
 		linkOptions = "-compressdwarf=false" // not required, but useful for debugging.
 	}
 	src := programName + ".go"
-	if out, err := exec.Command("go", "build", "-gcflags", compileOptions, "-ldflags", linkOptions, "-o", programName, src).CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-ldflags", linkOptions, "-o", programName, src).CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
 	}
 	return nil

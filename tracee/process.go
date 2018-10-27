@@ -298,6 +298,9 @@ func (p *Process) HasBreakpoint(addr uint64) bool {
 // To get the correct stack frame, it assumes:
 // * rbp+8 points to the return address.
 // * rbp+16 points to the beginning of the args list.
+//
+// To be accurate, we need to check the .debug_frame section to find the CFA and return address.
+// But we omit the check here because this function is called at only the beginning or end of the tracee's function call.
 func (p *Process) StackFrameAt(rbp, rip uint64) (*StackFrame, error) {
 	function, err := p.Binary.FindFunction(rip)
 	if err != nil {

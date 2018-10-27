@@ -17,7 +17,7 @@ func TestNewBinary(t *testing.T) {
 		t.Fatalf("failed to create new binary: %v", err)
 	}
 
-	if binary.dwarf == nil {
+	if binary.dwarf.Data == nil {
 		t.Errorf("empty dwarf data")
 	}
 	if len(binary.types) == 0 {
@@ -44,7 +44,7 @@ func TestNewBinary_NoDwarfProgram(t *testing.T) {
 
 func TestFindFunction(t *testing.T) {
 	binary, _ := NewBinary(testutils.ProgramHelloworld)
-	function, err := binary.FindFunction(testutils.HelloworldAddrOneParameter)
+	function, err := binary.FindFunction(testutils.HelloworldAddrOneParameterAndVariable)
 	if err != nil {
 		t.Fatalf("failed to find function: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestSeek_OneParameter(t *testing.T) {
 	binary, _ := NewBinary(testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
 
-	function, err := reader.Seek(testutils.HelloworldAddrOneParameter)
+	function, err := reader.Seek(testutils.HelloworldAddrOneParameterAndVariable)
 	if err != nil {
 		t.Fatalf("failed to seek to parameter: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestSeek_OneParameter(t *testing.T) {
 	if len(function.Parameters) != 1 {
 		t.Fatalf("wrong parameters length: %d", len(function.Parameters))
 	}
-	if function.Parameters[0].Name != "a" {
+	if function.Parameters[0].Name != "i" {
 		t.Errorf("invalid parameter name: %s", function.Parameters[0].Name)
 	}
 	if function.Parameters[0].Typ == nil {

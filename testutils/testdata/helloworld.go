@@ -11,8 +11,9 @@ func noParameter() {
 }
 
 //go:noinline
-func oneParameter(a int) {
-	fmt.Println(a)
+func oneParameter(s []int) []int {
+	s2 := []int{}
+	return append(s, s2...)
 }
 
 //go:noinline
@@ -24,12 +25,14 @@ func oneParameterAndOneVariable(i int) {
 
 //go:noinline
 func twoParameters(j, i int) { // intentionally inverse
-	fmt.Println(i, j)
+	a := rand.Int()
+	fmt.Println(j, a)
+	fmt.Println(i, a)
 }
 
 func main() {
 	noParameter()
-	oneParameter(1)
+	oneParameter([]int{})
 	oneParameterAndOneVariable(1)
 	twoParameters(1, 1)
 }

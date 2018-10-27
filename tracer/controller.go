@@ -22,7 +22,6 @@ type Controller struct {
 	tracingPoint *tracingPoint
 	traceLevel   int
 	parseLevel   int
-	hitOnce      bool
 
 	interrupted bool
 	// The traced data is written to this writer.
@@ -277,11 +276,10 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 	}
 
 	if c.tracingPoint.Hit(stackFrame.Function.Value) {
-		if !c.hitOnce {
+		if c.tracingPoint.Empty() {
 			if err := c.setBreakpointsExceptTracingPoint(); err != nil {
 				return err
 			}
-			c.hitOnce = true
 		}
 
 		c.tracingPoint.Enter(goRoutineInfo.ID, currStackDepth)
@@ -357,6 +355,14 @@ func (c *Controller) appendFunction(callingFuncs []callingFunction, newFunc call
 }
 
 func (c *Controller) setBreakpointsExceptTracingPoint() error {
+	return c.alterBreakpointsExceptTracingPoint(true)
+}
+
+func (c *Controller) clearBreakpointsExceptTracingPoint() error {
+	return c.alterBreakpointsExceptTracingPoint(false)
+}
+
+func (c *Controller) alterBreakpointsExceptTracingPoint(enable bool) error {
 	functions, err := c.process.Binary.ListFunctions()
 	if err != nil {
 		return err
@@ -365,7 +371,13 @@ func (c *Controller) setBreakpointsExceptTracingPoint() error {
 		if !c.canSetBreakpoint(function) || function.Name == c.tracingPoint.function.Name {
 			continue
 		}
-		if err := c.process.SetBreakpoint(function.Value); err != nil {
+
+		if enable {
+			err = c.process.SetBreakpoint(function.Value)
+		} else {
+			err = c.process.ClearBreakpoint(function.Value)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -399,9 +411,15 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 		if err := c.printFunctionOutput(goRoutineInfo.ID, prevStackFrame, currStackDepth); err != nil {
 			return err
 		}
+	}
 
-		if c.tracingPoint.Hit(returnedFunc.Value) {
-			c.tracingPoint.Exit(goRoutineInfo.ID, currStackDepth)
+	if c.tracingPoint.Hit(returnedFunc.Value) {
+		c.tracingPoint.Exit(goRoutineInfo.ID, currStackDepth)
+
+		if c.tracingPoint.Empty() {
+			if err := c.clearBreakpointsExceptTracingPoint(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -463,6 +481,11 @@ type tracingPoint struct {
 // Hit returns true if pc is same as tracing point.
 func (p *tracingPoint) Hit(pc uint64) bool {
 	return pc == p.function.Value
+}
+
+// Empty returns true if no go routines are inside the tracing point
+func (p *tracingPoint) Empty() bool {
+	return len(p.goRoutinesInside) == 0
 }
 
 // Enter updates the list of the go routines which are inside the tracing point.

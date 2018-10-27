@@ -22,10 +22,15 @@ const (
 
 // Binary represents the program the tracee process executes
 type Binary struct {
-	dwarf     *dwarf.Data
+	dwarf     dwarfData
 	closer    io.Closer
 	goVersion GoVersion
 	types     map[uint64]dwarf.Offset
+}
+
+type dwarfData struct {
+	*dwarf.Data
+	locationList io.ReadSeeker
 }
 
 // Function represents a function info in the debug info section.
@@ -39,7 +44,7 @@ type Function struct {
 type Parameter struct {
 	Name string
 	Typ  dwarf.Type
-	// Offset is the memory offset of the parameter.
+	// Offset is the offset from the beginning of the parameter list.
 	Offset int
 	// Exist is false when the parameter is removed due to the optimization.
 	Exist    bool
@@ -176,7 +181,7 @@ func (f Function) IsExported() bool {
 
 type subprogramReader struct {
 	raw       *dwarf.Reader
-	dwarfData *dwarf.Data
+	dwarfData dwarfData
 }
 
 func (r subprogramReader) Next(setParameters bool) (*Function, error) {
@@ -229,8 +234,7 @@ func (r subprogramReader) Seek(pc uint64) (*Function, error) {
 		}
 
 		function.Parameters, err = r.parameters()
-		// Without this, the parameters are sorted by the name.
-		// TODO: maybe sorted by offset in go 1.11
+		// the parameters are sorted by the name.
 		sort.Slice(function.Parameters, func(i, j int) bool { return function.Parameters[i].Offset < function.Parameters[j].Offset })
 		return function, err
 	}
@@ -259,7 +263,7 @@ func (r subprogramReader) isInline(subprogram *dwarf.Entry) bool {
 
 func (r subprogramReader) buildFunction(subprogram *dwarf.Entry) (*Function, error) {
 	var name string
-	err := walkUpOrigins(subprogram, r.dwarfData, func(entry *dwarf.Entry) bool {
+	err := walkUpOrigins(subprogram, r.dwarfData.Data, func(entry *dwarf.Entry) bool {
 		var err error
 		name, err = stringClassAttr(entry, dwarf.AttrName)
 		return err == nil
@@ -321,7 +325,7 @@ func (r subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error)
 	var name string
 	var typeOffset dwarf.Offset
 	var isOutput bool
-	err := walkUpOrigins(param, r.dwarfData, func(entry *dwarf.Entry) bool {
+	err := walkUpOrigins(param, r.dwarfData.Data, func(entry *dwarf.Entry) bool {
 		var err error
 		name, err = stringClassAttr(entry, dwarf.AttrName)
 		if err != nil {
@@ -345,16 +349,17 @@ func (r subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error)
 		return nil, err
 	}
 
-	offset, exist, err := offsetWithLocationDesc(param)
+	offset, exist, err := r.offsetWithLocationDesc(param)
 	if err != nil {
-		if _, _, err := offsetWithLocationList(param); err != nil {
+		offset, exist, err = r.offsetWithLocationList(param)
+		if err != nil {
 			return nil, err
 		}
 	}
 	return &Parameter{Name: name, Typ: typ, Offset: offset, IsOutput: isOutput, Exist: exist}, nil
 }
 
-func offsetWithLocationDesc(param *dwarf.Entry) (offset int, exist bool, err error) {
+func (r subprogramReader) offsetWithLocationDesc(param *dwarf.Entry) (offset int, exist bool, err error) {
 	loc, err := locationClassAttr(param, dwarf.AttrLocation)
 	if err != nil {
 		return 0, false, fmt.Errorf("loc attr not found: %v", err)
@@ -368,11 +373,9 @@ func offsetWithLocationDesc(param *dwarf.Entry) (offset int, exist bool, err err
 	return offset, false, nil
 }
 
-// parameterOffset returns the memory offset of the parameter value.
-// It's not the canonical way to interpret the location attribute, because we need to parse
-// the CIE and FDE of the debug_frame section to find the current CFA.
-// Here, we simply assume the CFA is the rsp+8 because we will not get the parameter value
-// in the middle of the funciton.
+// parameterOffset returns the offset from the beginning of the parameter list.
+// It assumes the value is present in the memory and not separated.
+// Also, it's supposed the function's frame base always specifies to the CFA.
 func parameterOffset(loc []byte) (int, error) {
 	// TODO: support location list case
 	switch loc[0] {
@@ -385,14 +388,33 @@ func parameterOffset(loc []byte) (int, error) {
 	}
 }
 
-func offsetWithLocationList(param *dwarf.Entry) (int, bool, error) {
-	_, err := locationListClassAttr(param, dwarf.AttrLocation)
+func (r subprogramReader) offsetWithLocationList(param *dwarf.Entry) (int, bool, error) {
+	loc, err := locationListClassAttr(param, dwarf.AttrLocation)
 	if err != nil {
 		return 0, false, fmt.Errorf("loc list attr not found: %v", err)
 	}
 
-	// TODO: support location list
-	return 0, true, nil
+	// TODO: the right offset depends on the current PC. Use address offsets for this.
+	_, err = r.dwarfData.locationList.Seek(loc+8+8 /* skip address offsets */, io.SeekStart)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to find the location list entry: %v", err)
+	}
+
+	buff := make([]byte, 2)
+	_, err = r.dwarfData.locationList.Read(buff)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to find the location list entry: %v", err)
+	}
+	expLength := binary.LittleEndian.Uint16(buff)
+
+	buff = make([]byte, expLength)
+	_, err = r.dwarfData.locationList.Read(buff)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to find the location list entry: %v", err)
+	}
+
+	offset, err := parameterOffset(buff)
+	return offset, true, err
 }
 
 func addressClassAttr(entry *dwarf.Entry, attrName dwarf.Attr) (uint64, error) {
