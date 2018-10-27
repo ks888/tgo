@@ -129,6 +129,7 @@ func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
 			"make", "slice", "growslice", "memmove",
 			"map", "chan", "close",
 			"newobject", "conv", "malloc",
+			"print",
 		}
 		for _, allowed := range allowedFuncPrefixes {
 			if strings.HasPrefix(funcName, allowed) {
