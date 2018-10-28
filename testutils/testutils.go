@@ -8,6 +8,8 @@ import (
 	"path"
 	"runtime"
 	"strings"
+
+	"github.com/ks888/tgo/log"
 )
 
 var (
@@ -87,6 +89,8 @@ func init() {
 	if err := buildProgramTypePrint(srcDirname); err != nil {
 		panic(err)
 	}
+
+	log.EnableDebugLog = true
 }
 
 func buildProgramHelloworld(srcDirname string) error {

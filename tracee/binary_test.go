@@ -117,20 +117,26 @@ func TestNext(t *testing.T) {
 
 func TestSeek(t *testing.T) {
 	binary, _ := NewBinary(testutils.ProgramHelloworld)
-	reader := subprogramReader{raw: binary.dwarf.Reader()}
+	reader := subprogramReader{raw: binary.dwarf.Reader(), dwarfData: binary.dwarf}
 
-	function, err := reader.Seek(testutils.HelloworldAddrMain)
+	function, err := reader.Seek(testutils.HelloworldAddrOneParameterAndVariable)
 	if err != nil {
 		t.Fatalf("failed to seek to subprogram: %v", err)
 	}
 	if function == nil {
 		t.Fatalf("function is nil")
 	}
-	if function.Name != "main.main" {
-		t.Fatalf("invalid function name: %s", function.Name)
+	if function.Name != "main.oneParameterAndOneVariable" {
+		t.Errorf("invalid function name: %s", function.Name)
 	}
-	if function.Parameters != nil {
-		t.Fatalf("parameters field is not nil")
+	if function.Parameters == nil {
+		t.Fatalf("parameters field is nil")
+	}
+	if function.Parameters[0].Name != "i" {
+		t.Errorf("wrong parameter name")
+	}
+	if !function.Parameters[0].Exist || function.Parameters[0].Offset != 0 {
+		t.Errorf("wrong parameter location: %v, %v", function.Parameters[0].Exist, function.Parameters[0].Offset)
 	}
 }
 

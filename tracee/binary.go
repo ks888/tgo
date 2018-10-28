@@ -236,8 +236,6 @@ func (r subprogramReader) Seek(pc uint64) (*Function, error) {
 		}
 
 		function.Parameters, err = r.parameters()
-		// the parameters are sorted by the name.
-		sort.Slice(function.Parameters, func(i, j int) bool { return function.Parameters[i].Offset < function.Parameters[j].Offset })
 		return function, err
 	}
 }
@@ -300,6 +298,8 @@ func (r subprogramReader) parameters() ([]Parameter, error) {
 	for {
 		param, err := r.nextParameter()
 		if err != nil || param == nil {
+			// the parameters are sorted by the name.
+			sort.Slice(params, func(i, j int) bool { return params[i].Offset < params[j].Offset })
 			return params, err
 		}
 
@@ -352,17 +352,19 @@ func (r subprogramReader) buildParameter(param *dwarf.Entry) (*Parameter, error)
 		return nil, err
 	}
 
-	offset, exist, err := r.offsetWithLocationDesc(param)
-	if err != nil {
-		offset, exist, err = r.offsetWithLocationList(param)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return &Parameter{Name: name, Typ: typ, Offset: offset, IsOutput: isOutput, Exist: exist}, nil
+	offset, exist, err := r.findLocation(param)
+	return &Parameter{Name: name, Typ: typ, Offset: offset, IsOutput: isOutput, Exist: exist}, err
 }
 
-func (r subprogramReader) offsetWithLocationDesc(param *dwarf.Entry) (offset int, exist bool, err error) {
+func (r subprogramReader) findLocation(param *dwarf.Entry) (offset int, exist bool, err error) {
+	offset, exist, err = r.findLocationByLocationDesc(param)
+	if err != nil && r.dwarfData.locationList != nil {
+		offset, exist, err = r.findLocationByLocationList(param)
+	}
+	return
+}
+
+func (r subprogramReader) findLocationByLocationDesc(param *dwarf.Entry) (offset int, exist bool, err error) {
 	loc, err := locationClassAttr(param, dwarf.AttrLocation)
 	if err != nil {
 		return 0, false, fmt.Errorf("loc attr not found: %v", err)
@@ -399,14 +401,14 @@ func parameterOffset(loc []byte) (int, error) {
 	}
 }
 
-func (r subprogramReader) offsetWithLocationList(param *dwarf.Entry) (int, bool, error) {
+func (r subprogramReader) findLocationByLocationList(param *dwarf.Entry) (int, bool, error) {
 	loc, err := locationListClassAttr(param, dwarf.AttrLocation)
 	if err != nil {
 		return 0, false, fmt.Errorf("loc list attr not found: %v", err)
 	}
 
-	// TODO: the right offset depends on the current PC. Use address offsets.
-	beginExpressionLength := loc + 8 + 8
+	// TODO: find a right location list entry using the current PC and address offsets.
+	beginExpressionLength := loc + 8 + 8 /* beginning and end of address offset */
 	beginExpression := beginExpressionLength + 2
 	expressionLength := binary.LittleEndian.Uint16(r.dwarfData.locationList[beginExpressionLength:beginExpression])
 	expression := r.dwarfData.locationList[beginExpression : beginExpression+int64(expressionLength)]
