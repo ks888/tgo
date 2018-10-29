@@ -407,16 +407,56 @@ func (r subprogramReader) findLocationByLocationList(param *dwarf.Entry) (int, b
 		return 0, false, fmt.Errorf("loc list attr not found: %v", err)
 	}
 
-	// TODO: find a right location list entry using the current PC and address offsets.
-	beginExpressionLength := loc + 8 + 8 /* beginning and end of address offset */
-	beginExpression := beginExpressionLength + 2
-	expressionLength := binary.LittleEndian.Uint16(r.dwarfData.locationList[beginExpressionLength:beginExpression])
-	expression := r.dwarfData.locationList[beginExpression : beginExpression+int64(expressionLength)]
-	offset, err := parameterOffset(expression)
+	locList := buildLocationList(r.dwarfData.locationList, int(loc))
+	if len(locList.locListEntries) == 0 {
+		return 0, false, errors.New("no location list entry")
+	}
+
+	// TODO: it's more precise to choose the right location list entry using PC and address offsets.
+	//       Usually the first entry specifies to the right location in our use case, though.
+	offset, err := parameterOffset(locList.locListEntries[0].locationDesc)
 	if err != nil {
 		log.Debug(err)
 	}
 	return offset, err == nil, nil
+}
+
+type locationList struct {
+	baseAddress    uint64
+	locListEntries []locationListEntry
+}
+
+type locationListEntry struct {
+	beginOffset, endOffset int
+	locationDesc           []byte
+}
+
+func buildLocationList(locSectionData []byte, offset int) (locList locationList) {
+	for {
+		beginOffset := binary.LittleEndian.Uint64(locSectionData[offset : offset+8])
+		offset += 8
+		endOffset := binary.LittleEndian.Uint64(locSectionData[offset : offset+8])
+		offset += 8
+		if beginOffset == 0x0 && endOffset == 0x0 {
+			// end of list entry
+			break
+		} else if beginOffset == ^uint64(0) {
+			// base address selection entry
+			locList.baseAddress = endOffset
+			continue
+		}
+
+		// location list entry
+		locListEntry := locationListEntry{beginOffset: int(beginOffset), endOffset: int(endOffset)}
+		locationDescLen := int(binary.LittleEndian.Uint16(locSectionData[offset : offset+2]))
+		offset += 2
+
+		locListEntry.locationDesc = locSectionData[offset : offset+locationDescLen]
+		offset += locationDescLen
+
+		locList.locListEntries = append(locList.locListEntries, locListEntry)
+	}
+	return
 }
 
 func addressClassAttr(entry *dwarf.Entry, attrName dwarf.Attr) (uint64, error) {
