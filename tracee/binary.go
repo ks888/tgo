@@ -375,17 +375,17 @@ func (r subprogramReader) findLocationByLocationDesc(param *dwarf.Entry) (offset
 		return 0, false, nil
 	}
 
-	offset, err = parameterOffset(loc)
+	offset, err = parseLocationDesc(loc)
 	if err != nil {
-		log.Debug(err)
+		log.Debugf("failed to parse location description at %#x: %v", param.Offset, err)
 	}
 	return offset, err == nil, nil
 }
 
-// parameterOffset returns the offset from the beginning of the parameter list.
+// parseLocationDesc returns the offset from the beginning of the parameter list.
 // It assumes the value is present in the memory and not separated.
 // Also, it's supposed the function's frame base always specifies to the CFA.
-func parameterOffset(loc []byte) (int, error) {
+func parseLocationDesc(loc []byte) (int, error) {
 	if len(loc) == 0 {
 		return 0, errors.New("location description is empty")
 	}
@@ -397,7 +397,7 @@ func parameterOffset(loc []byte) (int, error) {
 	case dwarfOpFbreg:
 		return decodeSignedLEB128(loc[1:]), nil
 	default:
-		return 0, fmt.Errorf("unknown operation: %v", loc[0])
+		return 0, fmt.Errorf("unknown operation: %#x", loc[0])
 	}
 }
 
@@ -414,9 +414,9 @@ func (r subprogramReader) findLocationByLocationList(param *dwarf.Entry) (int, b
 
 	// TODO: it's more precise to choose the right location list entry using PC and address offsets.
 	//       Usually the first entry specifies to the right location in our use case, though.
-	offset, err := parameterOffset(locList.locListEntries[0].locationDesc)
+	offset, err := parseLocationDesc(locList.locListEntries[0].locationDesc)
 	if err != nil {
-		log.Debug(err)
+		log.Debugf("failed to parse location list at %#x: %v", param.Offset, err)
 	}
 	return offset, err == nil, nil
 }
