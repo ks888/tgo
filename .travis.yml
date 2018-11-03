@@ -1,0 +1,12 @@
+language: go
+go:
+  - 1.10.x
+  - 1.11.x
+  - tip
+os:
+  - osx
+matrix:
+  allow_failures:
+    - go: tip
+git:
+  depth: false
