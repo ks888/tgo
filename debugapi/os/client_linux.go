@@ -9,8 +9,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// TODO: filename client.go -> client_linux.go
-// TODO: change impl at build time using build tag.
 // TODO: wrap client so that the ptrace action is execed from always same thread.
 
 // Client is the debug api client which depends on OS API.
