@@ -301,7 +301,7 @@ func (c *Client) qfThreadInfo() (string, error) {
 		return "", fmt.Errorf("unexpected response: %s", data)
 	}
 
-	return data[1:len(data)], nil
+	return data[1:], nil
 }
 
 // AttachProcess lets the debugserver attach the new prcoess.
@@ -417,7 +417,7 @@ func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
 
 	for _, metadata := range c.registerMetadataList {
 		prefix := data[0 : metadata.offset*2]
-		suffix := data[(metadata.offset+metadata.size)*2 : len(data)]
+		suffix := data[(metadata.offset+metadata.size)*2:]
 
 		var err error
 		switch metadata.name {
@@ -669,7 +669,7 @@ func (c *Client) qThreadStopInfo(tid int) (string, error) {
 }
 
 func (c *Client) handleOPacket(data string) ([]int, debugapi.Event, error) {
-	out, err := hexToByteArray(data[1:len(data)])
+	out, err := hexToByteArray(data[1:])
 	if err != nil {
 		return nil, debugapi.Event{}, err
 	}
@@ -766,7 +766,7 @@ func verifyPacket(packet string) error {
 
 	body := packet[1 : len(packet)-3]
 	bodyChecksum := strconv.FormatUint(uint64(calcChecksum([]byte(body))), 16)
-	tailChecksum := packet[len(packet)-2 : len(packet)]
+	tailChecksum := packet[len(packet)-2:]
 	if tailChecksum != bodyChecksum {
 		return fmt.Errorf("invalid checksum: %s", tailChecksum)
 	}

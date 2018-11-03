@@ -139,7 +139,7 @@ func (b Binary) findFirstModuleDataAddress() (uint64, error) {
 		if len(loc) == 0 || loc[0] != 0x3 {
 			return 0, fmt.Errorf("unexpected location format: %v", loc)
 		}
-		return binary.LittleEndian.Uint64(loc[1:len(loc)]), nil
+		return binary.LittleEndian.Uint64(loc[1:]), nil
 	}
 }
 

@@ -328,7 +328,7 @@ func (c *Controller) findPanicFunction(callingFuncs []callingFunction) int {
 func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineInfo tracee.GoRoutineInfo) ([]callingFunction, []callingFunction, error) {
 	for i := len(callingFuncs) - 1; i >= 0; i-- {
 		if callingFuncs[i].usedStackSize < goRoutineInfo.UsedStackSize {
-			return callingFuncs[0 : i+1], callingFuncs[i+1 : len(callingFuncs)], nil
+			return callingFuncs[0 : i+1], callingFuncs[i+1:], nil
 
 		} else if callingFuncs[i].usedStackSize == goRoutineInfo.UsedStackSize {
 			breakpointAddr := goRoutineInfo.CurrentPC - 1
@@ -338,7 +338,7 @@ func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineIn
 			}
 
 			if callingFuncs[i].Name == currFunction.Name {
-				return callingFuncs[0 : i+1], callingFuncs[i+1 : len(callingFuncs)], nil
+				return callingFuncs[0 : i+1], callingFuncs[i+1:], nil
 			}
 		}
 

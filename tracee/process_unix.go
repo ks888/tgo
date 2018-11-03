@@ -29,7 +29,7 @@ func findProgramPath(pid int) (string, error) {
 			continue
 		}
 
-		absFileName := line[1:len(line)]
+		absFileName := line[1:]
 		if strings.HasSuffix(absFileName, commandNameBase) {
 			return absFileName, nil
 		}
