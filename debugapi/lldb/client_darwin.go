@@ -590,12 +590,15 @@ func (c *Client) handleStopReply(data string) (tids []int, event debugapi.Event,
 	default:
 		err = fmt.Errorf("unknown packet type: %s", data)
 	}
+	if err != nil {
+		return nil, debugapi.Event{}, fmt.Errorf("failed to handle stop reply: %v (data: %s)", err, data)
+	}
 
 	if debugapi.IsExitEvent(event.Type) {
 		// the connection may be closed already.
 		_ = c.close()
 	}
-	return tids, event, err
+	return tids, event, nil
 }
 
 func (c *Client) handleTPacket(data string) ([]int, debugapi.Event, error) {
@@ -735,6 +738,11 @@ func (c *Client) receive() (string, error) {
 		}
 
 		return data, c.sendAck()
+	}
+
+	// quick check
+	if packet[n-3] != '#' {
+		return data, fmt.Errorf("No checksum. There may be unreceived packets: %s", packet)
 	}
 
 	return data, nil
