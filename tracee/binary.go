@@ -60,15 +60,19 @@ func NewBinary(pathToProgram string) (Binary, error) {
 	}
 	binary := Binary{dwarf: dwarfData, closer: closer}
 
+	binary.goVersion = binary.findGoVersion()
 	binary.types, err = binary.buildTypes()
 	if err != nil {
 		return Binary{}, err
 	}
-	binary.goVersion = binary.findGoVersion()
 	return binary, nil
 }
 
 func (b Binary) buildTypes() (map[uint64]dwarf.Offset, error) {
+	if !b.goVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+		// attrGoRuntimeType is not supported
+		return nil, nil
+	}
 	types := make(map[uint64]dwarf.Offset)
 	reader := b.dwarf.Reader()
 	for {
