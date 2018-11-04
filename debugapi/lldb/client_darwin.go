@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/ks888/tgo/debugapi"
+	"github.com/ks888/tgo/log"
 	"golang.org/x/sys/unix"
 )
 
@@ -569,6 +570,7 @@ func (c *Client) continueAndWait(signalNumber int) ([]int, debugapi.Event, error
 }
 
 func (c *Client) wait() ([]int, debugapi.Event, error) {
+	// TODO: there may be two or more stop reply packets at once.
 	data, err := c.receive()
 	if err != nil {
 		return nil, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
@@ -591,7 +593,7 @@ func (c *Client) handleStopReply(data string) (tids []int, event debugapi.Event,
 		err = fmt.Errorf("unknown packet type: %s", data)
 	}
 	if err != nil {
-		return nil, debugapi.Event{}, fmt.Errorf("failed to handle stop reply: %v (data: %s)", err, data)
+		return nil, debugapi.Event{}, fmt.Errorf("failed to handle stop reply (data: %s): %v", data, err)
 	}
 
 	if debugapi.IsExitEvent(event.Type) {
@@ -672,7 +674,13 @@ func (c *Client) qThreadStopInfo(tid int) (string, error) {
 }
 
 func (c *Client) handleOPacket(data string) ([]int, debugapi.Event, error) {
-	out, err := hexToByteArray(data[1:])
+	hexOutput := data[1:]
+	remaining := ""
+	if idx := strings.Index(data, "#"); idx != -1 {
+		hexOutput = data[1:idx]
+		remaining = data[idx+4:]
+	}
+	out, err := hexToByteArray(hexOutput)
 	if err != nil {
 		return nil, debugapi.Event{}, err
 	}
@@ -682,6 +690,9 @@ func (c *Client) handleOPacket(data string) ([]int, debugapi.Event, error) {
 		return nil, debugapi.Event{}, err
 	}
 
+	if remaining != "" {
+		return c.handleStopReply(remaining)
+	}
 	return c.wait()
 }
 
@@ -741,7 +752,9 @@ func (c *Client) receive() (string, error) {
 	}
 
 	// quick check
-	if packet[n-3] != '#' {
+	if strings.Count(packet, "#") > 1 {
+		log.Debugf("The received data may contain two or more packets: %s", packet)
+	} else if packet[n-3] != '#' {
 		return data, fmt.Errorf("No checksum. There may be unreceived packets: %s", packet)
 	}
 
