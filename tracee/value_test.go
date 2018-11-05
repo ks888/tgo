@@ -74,10 +74,12 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	go1_11 := GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}
 
 	for _, testdata := range []struct {
-		funcAddr uint64
-		testFunc func(t *testing.T, val value)
+		funcAddr        uint64
+		testFunc        func(t *testing.T, val value)
+		testIfLaterThan GoVersion
 	}{
 		// Note: the test order must be same as the order of functions called in typeprint.
 		{funcAddr: testutils.TypePrintAddrPrintStruct, testFunc: func(t *testing.T, val value) {
@@ -103,7 +105,7 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 			if implVal.fields["a"].(int64Value).val != 5 {
 				t.Errorf("wrong value: %s", implVal.fields)
 			}
-		}},
+		}, testIfLaterThan: go1_11},
 		{funcAddr: testutils.TypePrintAddrPrintNilInterface, testFunc: func(t *testing.T, val value) {
 			if val.String() != "nil" {
 				t.Errorf("wrong val: %s", val)
@@ -117,7 +119,7 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 			if implVal.fields["a"].(int64Value).val != 9 {
 				t.Errorf("wrong value: %s", implVal.fields)
 			}
-		}},
+		}, testIfLaterThan: go1_11},
 		{funcAddr: testutils.TypePrintAddrPrintNilEmptyInterface, testFunc: func(t *testing.T, val value) {
 			if val.String() != "nil" {
 				t.Errorf("wrong val: %s", val)
@@ -135,6 +137,10 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 			}
 		}},
 	} {
+		if !proc.Binary.goVersion.LaterThan(testdata.testIfLaterThan) {
+			continue
+		}
+
 		if err := proc.SetBreakpoint(testdata.funcAddr); err != nil {
 			t.Fatalf("failed to set breakpoint: %v", err)
 		}

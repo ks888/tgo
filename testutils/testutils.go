@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -13,6 +14,10 @@ import (
 )
 
 var (
+	// goBinaryPath is the path to the go binary used to build this test program.
+	// This go binary is used to build the testdata.
+	goBinaryPath string = filepath.Join(runtime.GOROOT(), "bin", "go")
+
 	ProgramHelloworld                     string
 	ProgramHelloworldNoDwarf              string
 	HelloworldAddrMain                    uint64
@@ -101,7 +106,7 @@ func buildProgramHelloworld(srcDirname string) error {
 
 	src := ProgramHelloworld + ".go"
 	ProgramHelloworldNoDwarf = ProgramHelloworld + ".nodwarf"
-	if out, err := exec.Command("go", "build", "-ldflags", "-w", "-o", ProgramHelloworldNoDwarf, src).CombinedOutput(); err != nil {
+	if out, err := exec.Command(goBinaryPath, "build", "-ldflags", "-w", "-o", ProgramHelloworldNoDwarf, src).CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
 	}
 
@@ -279,7 +284,7 @@ func buildProgram(programName string) error {
 		linkOptions = "-compressdwarf=false" // not required, but useful for debugging.
 	}
 	src := programName + ".go"
-	if out, err := exec.Command("go", "build", "-ldflags", linkOptions, "-o", programName, src).CombinedOutput(); err != nil {
+	if out, err := exec.Command(goBinaryPath, "build", "-ldflags", linkOptions, "-o", programName, src).CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
 	}
 	return nil
