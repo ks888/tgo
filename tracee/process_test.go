@@ -12,6 +12,7 @@ func TestLaunchProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 	if proc.debugapiClient == nil {
 		t.Errorf("debugapiClient is nil")
 	}
@@ -55,6 +56,7 @@ func TestContinueAndWait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	// 1. stop at NoParameter func
 	if err := proc.SetBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
@@ -78,6 +80,13 @@ func TestContinueAndWait(t *testing.T) {
 	if _, _, err := proc.ContinueAndWait(); err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
+	info, err := proc.CurrentGoRoutineInfo(tids[0])
+	if err != nil {
+		t.Fatalf("failed to get CurrentGoRoutineInfo: %v", err)
+	}
+	if info.CurrentPC-1 != testutils.HelloworldAddrOneParameter {
+		t.Errorf("stop at unexpected address: %x", info.CurrentPC)
+	}
 }
 
 func TestSingleStep(t *testing.T) {
@@ -85,6 +94,7 @@ func TestSingleStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	if err := proc.SetBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
@@ -107,6 +117,7 @@ func TestSingleStep_NoBreakpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	if err := proc.SetBreakpoint(testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
@@ -132,6 +143,7 @@ func TestSetBreakpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	err = proc.SetBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
@@ -150,6 +162,7 @@ func TestSetBreakpoint_AlreadySet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	expected := make([]byte, 1)
 	_ = proc.debugapiClient.ReadMemory(testutils.HelloworldAddrMain, expected)
@@ -179,6 +192,7 @@ func TestSetConditionalBreakpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	err = proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1)
 	if err != nil {
@@ -197,6 +211,7 @@ func TestSetConditionalBreakpoint_MultipleGoRoutines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	if err := proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
@@ -226,6 +241,7 @@ func TestClearBreakpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	expected := make([]byte, 1)
 	_ = proc.debugapiClient.ReadMemory(testutils.HelloworldAddrMain, expected)
@@ -251,6 +267,7 @@ func TestClearBreakpoint_BPNotSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	err = proc.ClearBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
@@ -263,6 +280,7 @@ func TestHitBreakpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	err = proc.SetConditionalBreakpoint(testutils.HelloworldAddrMain, 1)
 	if err != nil {
@@ -283,6 +301,7 @@ func TestHitBreakpoint_NoCondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	err = proc.SetBreakpoint(testutils.HelloworldAddrMain)
 	if err != nil {
@@ -299,6 +318,7 @@ func TestStackFrameAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	if err := proc.SetBreakpoint(testutils.HelloworldAddrOneParameterAndVariable); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
@@ -340,6 +360,7 @@ func TestCurrentGoRoutineInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	if err := proc.SetBreakpoint(testutils.HelloworldAddrMain); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)
@@ -380,6 +401,7 @@ func TestCurrentGoRoutineInfo_Panicking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	if err := proc.SetBreakpoint(testutils.PanicAddrInsideThrough); err != nil {
 		t.Fatalf("failed to set breakpoint: %v", err)

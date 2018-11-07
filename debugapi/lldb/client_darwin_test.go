@@ -270,6 +270,7 @@ func TestContinueAndWait_Exited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	for {
 		_, event, err := client.ContinueAndWait()
@@ -290,6 +291,7 @@ func TestContinueAndWait_ConsoleWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	for {
 		_, _, err := client.ContinueAndWait()
@@ -308,6 +310,7 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	pid, _ := findProcessID(path.Base(testutils.ProgramInfloop), client.pid)
 	// Note that the debugserver does not pass the signals like SIGTERM and SIGINT to the debugee.
@@ -328,6 +331,7 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer client.DetachProcess()
 
 	pid, err := findProcessID(path.Base(testutils.ProgramHelloworld), client.pid)
 	if err != nil {

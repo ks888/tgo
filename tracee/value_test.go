@@ -13,6 +13,7 @@ func TestParseValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 
 	for i, testdata := range []struct {
 		funcAddr uint64
@@ -74,6 +75,7 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	defer proc.Detach()
 	go1_11 := GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}
 
 	for _, testdata := range []struct {
