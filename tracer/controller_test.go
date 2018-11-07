@@ -21,13 +21,16 @@ func TestLaunchProcess(t *testing.T) {
 func TestAttachProcess(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
-	defer cmd.Process.Kill()
 
 	controller := NewController()
 	err := controller.AttachTracee(cmd.Process.Pid)
 	if err != nil {
 		t.Fatalf("failed to attch to the process: %v", err)
 	}
+
+	controller.process.Detach() // must detach before kill. Otherwise, the program becomes zombie.
+	cmd.Process.Kill()
+	cmd.Process.Wait()
 }
 
 func TestSetTracePoint(t *testing.T) {

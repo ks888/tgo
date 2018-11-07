@@ -14,7 +14,10 @@ import (
 func TestFindProgramPath(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
-	defer cmd.Process.Kill()
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Process.Wait()
+	}()
 
 	path, err := findProgramPath(cmd.Process.Pid)
 	if err != nil {
@@ -30,7 +33,10 @@ func TestFindProgramPath_RelativePath(t *testing.T) {
 	relPath, _ := filepath.Rel(wd, testutils.ProgramInfloop)
 	cmd := exec.Command(relPath)
 	_ = cmd.Start()
-	defer cmd.Process.Kill()
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Process.Wait()
+	}()
 
 	path, err := findProgramPath(cmd.Process.Pid)
 	if err != nil {

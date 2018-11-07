@@ -21,15 +21,19 @@ func TestLaunchProcess(t *testing.T) {
 func TestAttachProcess(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
-	defer cmd.Process.Kill()
 
 	proc, err := AttachProcess(cmd.Process.Pid)
 	if err != nil {
-		t.Fatalf("failed to launch process: %v", err)
+		t.Fatalf("failed to attach process: %v", err)
 	}
 	if proc.debugapiClient == nil {
 		t.Errorf("debugapiClient is nil")
 	}
+	defer func() {
+		proc.Detach() // must detach before kill. Otherwise, the program becomes zombie.
+		cmd.Process.Kill()
+		cmd.Process.Wait()
+	}()
 }
 
 func TestDetach(t *testing.T) {

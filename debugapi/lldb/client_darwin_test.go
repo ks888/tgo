@@ -44,7 +44,9 @@ func TestAttachProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	client.DetachProcess() // must detach before kill. Otherwise, the program becomes zombie.
 	cmd.Process.Kill()
+	cmd.Process.Wait()
 }
 
 func TestAttachProcess_WrongPID(t *testing.T) {
