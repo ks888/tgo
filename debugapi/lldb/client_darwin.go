@@ -533,7 +533,7 @@ func (c *Client) buildReadTLSFunction(offset uint32) []byte {
 
 // ContinueAndWait resumes processes and waits until an event happens.
 // The exited event is reported when the main process exits (and not when its threads exit).
-func (c *Client) ContinueAndWait() ([]int, debugapi.Event, error) {
+func (c *Client) ContinueAndWait() (debugapi.Event, error) {
 	return c.continueAndWait(0)
 }
 
@@ -546,16 +546,18 @@ func (c *Client) StepAndWait(threadID int) (debugapi.Event, error) {
 		return debugapi.Event{}, fmt.Errorf("send error: %v", err)
 	}
 
-	tids, event, err := c.wait()
+	event, err := c.wait()
 	if err != nil {
-		return debugapi.Event{}, fmt.Errorf("send error: %v", err)
-	} else if len(tids) != 1 || tids[0] != threadID {
+		return debugapi.Event{}, fmt.Errorf("wait error: %v", err)
+	} else if event.Type != debugapi.EventTypeTrapped {
+		return debugapi.Event{}, fmt.Errorf("unexpected event: %#v", event)
+	} else if tids := event.Data.([]int); len(tids) != 1 || tids[0] != threadID {
 		return debugapi.Event{}, debugapi.UnspecifiedThreadError{ThreadIDs: tids}
 	}
 	return event, err
 }
 
-func (c *Client) continueAndWait(signalNumber int) ([]int, debugapi.Event, error) {
+func (c *Client) continueAndWait(signalNumber int) (debugapi.Event, error) {
 	var command string
 	if signalNumber == 0 {
 		command = "vCont;c"
@@ -563,50 +565,50 @@ func (c *Client) continueAndWait(signalNumber int) ([]int, debugapi.Event, error
 		command = fmt.Sprintf("vCont;C%02x", signalNumber)
 	}
 	if err := c.send(command); err != nil {
-		return nil, debugapi.Event{}, fmt.Errorf("send error: %v", err)
+		return debugapi.Event{}, fmt.Errorf("send error: %v", err)
 	}
 
 	return c.wait()
 }
 
-func (c *Client) wait() ([]int, debugapi.Event, error) {
+func (c *Client) wait() (debugapi.Event, error) {
 	// TODO: there may be two or more stop reply packets at once.
 	data, err := c.receive()
 	if err != nil {
-		return nil, debugapi.Event{}, fmt.Errorf("receive error: %v", err)
+		return debugapi.Event{}, fmt.Errorf("receive error: %v", err)
 	}
 
 	return c.handleStopReply(data)
 }
 
-func (c *Client) handleStopReply(data string) (tids []int, event debugapi.Event, err error) {
+func (c *Client) handleStopReply(data string) (event debugapi.Event, err error) {
 	switch data[0] {
 	case 'T':
-		tids, event, err = c.handleTPacket(data)
+		event, err = c.handleTPacket(data)
 	case 'O':
-		tids, event, err = c.handleOPacket(data)
+		event, err = c.handleOPacket(data)
 	case 'W':
-		tids, event, err = c.handleWPacket(data)
+		event, err = c.handleWPacket(data)
 	case 'X':
-		tids, event, err = c.handleXPacket(data)
+		event, err = c.handleXPacket(data)
 	default:
 		err = fmt.Errorf("unknown packet type: %s", data)
 	}
 	if err != nil {
-		return nil, debugapi.Event{}, fmt.Errorf("failed to handle stop reply (data: %s): %v", data, err)
+		return debugapi.Event{}, fmt.Errorf("failed to handle stop reply (data: %s): %v", data, err)
 	}
 
 	if debugapi.IsExitEvent(event.Type) {
 		// the connection may be closed already.
 		_ = c.close()
 	}
-	return tids, event, nil
+	return event, nil
 }
 
-func (c *Client) handleTPacket(data string) ([]int, debugapi.Event, error) {
+func (c *Client) handleTPacket(data string) (debugapi.Event, error) {
 	signalNumber, err := hexToUint64(data[1:3], false)
 	if err != nil {
-		return nil, debugapi.Event{}, err
+		return debugapi.Event{}, err
 	}
 
 	var threadIDs []int
@@ -617,7 +619,7 @@ func (c *Client) handleTPacket(data string) ([]int, debugapi.Event, error) {
 			for _, tid := range strings.Split(value, ",") {
 				tidInNum, err := hexToUint64(tid, false)
 				if err != nil {
-					return nil, debugapi.Event{}, err
+					return debugapi.Event{}, err
 				}
 				threadIDs = append(threadIDs, int(tidInNum))
 			}
@@ -626,13 +628,13 @@ func (c *Client) handleTPacket(data string) ([]int, debugapi.Event, error) {
 
 	trappedThreadIDs, err := c.selectTrappedThreads(threadIDs)
 	if err != nil {
-		return nil, debugapi.Event{}, err
+		return debugapi.Event{}, err
 	} else if len(trappedThreadIDs) == 0 {
 		// this logic may swallow signals if there are two or more signaled threads
 		return c.continueAndWait(int(signalNumber))
 	}
 
-	return trappedThreadIDs, debugapi.Event{Type: debugapi.EventTypeTrapped}, nil
+	return debugapi.Event{Type: debugapi.EventTypeTrapped, Data: trappedThreadIDs}, nil
 }
 
 func (c *Client) selectTrappedThreads(tids []int) ([]int, error) {
@@ -673,7 +675,7 @@ func (c *Client) qThreadStopInfo(tid int) (string, error) {
 	return data, nil
 }
 
-func (c *Client) handleOPacket(data string) ([]int, debugapi.Event, error) {
+func (c *Client) handleOPacket(data string) (debugapi.Event, error) {
 	hexOutput := data[1:]
 	remaining := ""
 	if idx := strings.Index(data, "#"); idx != -1 {
@@ -682,12 +684,12 @@ func (c *Client) handleOPacket(data string) ([]int, debugapi.Event, error) {
 	}
 	out, err := hexToByteArray(hexOutput)
 	if err != nil {
-		return nil, debugapi.Event{}, err
+		return debugapi.Event{}, err
 	}
 
 	_, err = c.outputWriter.Write(out)
 	if err != nil {
-		return nil, debugapi.Event{}, err
+		return debugapi.Event{}, err
 	}
 
 	if remaining != "" {
@@ -696,15 +698,15 @@ func (c *Client) handleOPacket(data string) ([]int, debugapi.Event, error) {
 	return c.wait()
 }
 
-func (c *Client) handleWPacket(data string) ([]int, debugapi.Event, error) {
+func (c *Client) handleWPacket(data string) (debugapi.Event, error) {
 	exitStatus, err := hexToUint64(data[1:3], false)
-	return nil, debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
+	return debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
 }
 
-func (c *Client) handleXPacket(data string) ([]int, debugapi.Event, error) {
+func (c *Client) handleXPacket(data string) (debugapi.Event, error) {
 	signalNumber, err := hexToUint64(data[1:3], false)
 	// TODO: signalNumber here looks always 0. The number in the description looks correct, so maybe better to use it instead.
-	return nil, debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
+	return debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
 }
 
 func (c *Client) send(command string) error {

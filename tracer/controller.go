@@ -158,7 +158,7 @@ func (c *Controller) SetParseLevel(level int) {
 
 // MainLoop repeatedly lets the tracee continue and then wait an event.
 func (c *Controller) MainLoop() error {
-	trappedThreadIDs, event, err := c.process.ContinueAndWait()
+	event, err := c.process.ContinueAndWait()
 	if err != nil {
 		return err
 	}
@@ -170,9 +170,10 @@ func (c *Controller) MainLoop() error {
 		case debugapi.EventTypeCoreDump:
 			return errors.New("the process exited due to core dump")
 		case debugapi.EventTypeTerminated:
-			return fmt.Errorf("the process exited due to signal %d", event.Data)
+			return fmt.Errorf("the process exited due to signal %d", event.Data.(int))
 		case debugapi.EventTypeTrapped:
-			trappedThreadIDs, event, err = c.handleTrapEvent(trappedThreadIDs)
+			trappedThreadIDs := event.Data.([]int)
+			event, err = c.handleTrapEvent(trappedThreadIDs)
 			if err == ErrInterrupted {
 				return err
 			} else if err != nil {
@@ -184,20 +185,20 @@ func (c *Controller) MainLoop() error {
 	}
 }
 
-func (c *Controller) handleTrapEvent(trappedThreadIDs []int) ([]int, debugapi.Event, error) {
+func (c *Controller) handleTrapEvent(trappedThreadIDs []int) (debugapi.Event, error) {
 	for i := 0; i < len(trappedThreadIDs); i++ {
 		threadID := trappedThreadIDs[i]
 		if err := c.handleTrapEventOfThread(threadID); err != nil {
-			return nil, debugapi.Event{}, err
+			return debugapi.Event{}, err
 		}
 	}
 
 	select {
 	case <-c.interruptCh:
 		if err := c.process.Detach(); err != nil {
-			return nil, debugapi.Event{}, err
+			return debugapi.Event{}, err
 		}
-		return nil, debugapi.Event{}, ErrInterrupted
+		return debugapi.Event{}, ErrInterrupted
 	default:
 		return c.process.ContinueAndWait()
 	}

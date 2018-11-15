@@ -43,7 +43,15 @@ func IsExitEvent(event EventType) bool {
 // Event describes the event happens to the target process.
 type Event struct {
 	Type EventType
-	Data int
+	// Data is one of these go types:
+	//
+	//    EventType            Go type     Description
+	//    -----------          -------     -----------
+	//    EventTypeTrapped     []int       A list of trapped thread id
+	//    EventTypeCoreDump    NA          NA
+	//    EventTypeExited      int         Exit status
+	//    EventTypeTerminated  int         Signal number
+	Data interface{}
 }
 
 // Registers represents the target's registers.

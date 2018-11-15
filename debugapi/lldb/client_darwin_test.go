@@ -98,10 +98,11 @@ func TestReadRegisters(t *testing.T) {
 	if err := client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc}); err != nil {
 		t.Fatalf("failed to write memory: %v", err)
 	}
-	tids, _, err := client.ContinueAndWait()
+	event, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
+	tids := event.Data.([]int)
 
 	regs, err := client.ReadRegisters(tids[0])
 	if err != nil {
@@ -228,7 +229,8 @@ func TestReadTLS(t *testing.T) {
 	defer client.DetachProcess()
 
 	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
-	tids, _, _ := client.ContinueAndWait()
+	event, _ := client.ContinueAndWait()
+	tids := event.Data.([]int)
 
 	var offset uint32 = 0xf
 	_, err = client.ReadTLS(tids[0], offset)
@@ -254,15 +256,16 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 		t.Fatalf("failed to write memory: %v", err)
 	}
 
-	tids, event, err := client.ContinueAndWait()
+	event, err := client.ContinueAndWait()
+	tids := event.Data.([]int)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 	if len(tids) == 0 {
 		t.Errorf("empty tids")
 	}
-	if event != (debugapi.Event{Type: debugapi.EventTypeTrapped}) {
-		t.Errorf("wrong event: %v", event)
+	if event.Type != debugapi.EventTypeTrapped {
+		t.Errorf("wrong event type: %v", event.Type)
 	}
 }
 
@@ -275,11 +278,11 @@ func TestContinueAndWait_Exited(t *testing.T) {
 	defer client.DetachProcess()
 
 	for {
-		_, event, err := client.ContinueAndWait()
+		event, err := client.ContinueAndWait()
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
-		if event == (debugapi.Event{Type: debugapi.EventTypeExited}) {
+		if event == (debugapi.Event{Type: debugapi.EventTypeExited, Data: 0}) {
 			break
 		}
 	}
@@ -296,7 +299,7 @@ func TestContinueAndWait_ConsoleWrite(t *testing.T) {
 	defer client.DetachProcess()
 
 	for {
-		_, _, err := client.ContinueAndWait()
+		_, err := client.ContinueAndWait()
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
@@ -318,11 +321,11 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 	// Note that the debugserver does not pass the signals like SIGTERM and SIGINT to the debugee.
 	_ = sendSignal(pid, unix.SIGKILL)
 
-	_, event, err := client.ContinueAndWait()
+	event, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	if event != (debugapi.Event{Type: debugapi.EventTypeTerminated}) {
+	if event != (debugapi.Event{Type: debugapi.EventTypeTerminated, Data: 0}) {
 		t.Fatalf("wrong event: %v", event)
 	}
 }
@@ -342,11 +345,11 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 	_ = sendSignal(pid, unix.SIGUSR1)
 
 	// non-SIGTRAP signal is handled internally.
-	_, event, err := client.ContinueAndWait()
+	event, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	if event != (debugapi.Event{Type: debugapi.EventTypeExited}) {
+	if event != (debugapi.Event{Type: debugapi.EventTypeExited, Data: 0}) {
 		t.Fatalf("wrong event: %v", event)
 	}
 }
@@ -370,8 +373,8 @@ func TestStepAndWait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to step and wait: %v", err)
 	}
-	if event != (debugapi.Event{Type: debugapi.EventTypeTrapped}) {
-		t.Fatalf("wrong event: %v", event)
+	if event.Type != debugapi.EventTypeTrapped {
+		t.Fatalf("wrong event type: %v", event.Type)
 	}
 }
 
@@ -386,7 +389,8 @@ func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	orgInsts := make([]byte, 1)
 	_ = client.ReadMemory(testutils.InfloopAddrMain, orgInsts)
 	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
-	tids, _, _ := client.ContinueAndWait()
+	event, _ := client.ContinueAndWait()
+	tids := event.Data.([]int)
 
 	regs, _ := client.ReadRegisters(tids[0])
 	regs.Rip--
@@ -415,7 +419,8 @@ func TestStepAndWait_UnspecifiedThread(t *testing.T) {
 	orgInsts := make([]byte, 1)
 	_ = client.ReadMemory(testutils.InfloopAddrMain, orgInsts)
 	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
-	tids, _, _ := client.ContinueAndWait()
+	event, _ := client.ContinueAndWait()
+	tids := event.Data.([]int)
 
 	regs, _ := client.ReadRegisters(tids[0])
 	regs.Rip--

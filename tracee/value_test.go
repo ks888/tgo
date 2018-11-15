@@ -41,11 +41,12 @@ func TestParseValue(t *testing.T) {
 		if err := proc.SetBreakpoint(testdata.funcAddr); err != nil {
 			t.Fatalf("failed to set breakpoint: %v", err)
 		}
-		tids, _, err := proc.ContinueAndWait()
+		event, err := proc.ContinueAndWait()
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
 
+		tids := event.Data.([]int)
 		threadInfo, err := proc.CurrentThreadInfo(tids[0])
 		if err != nil {
 			t.Fatalf("failed to get CurrentThreadInfo: %v", err)
@@ -146,11 +147,12 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 		if err := proc.SetBreakpoint(testdata.funcAddr); err != nil {
 			t.Fatalf("failed to set breakpoint: %v", err)
 		}
-		tids, _, err := proc.ContinueAndWait()
+		event, err := proc.ContinueAndWait()
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
 
+		tids := event.Data.([]int)
 		threadInfo, err := proc.CurrentThreadInfo(tids[0])
 		if err != nil {
 			t.Fatalf("failed to get CurrentThreadInfo: %v", err)

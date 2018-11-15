@@ -119,14 +119,14 @@ func (c Client) WriteRegisters(pid int, regs *debugapi.Registers) error {
 
 // ContinueAndWait resumes the list of processes and waits until an event happens.
 // Note that an event happens to any children of the current process is reported.
-func (c Client) ContinueAndWait(pidsToContinue ...int) (waitedPID int, event debugapi.Event, err error) {
+func (c Client) ContinueAndWait(pidsToContinue ...int) (debugapi.Event, error) {
 	return c.continueAndWait(pidsToContinue, 0)
 }
 
-func (c Client) continueAndWait(pidsToContinue []int, sig int) (int, debugapi.Event, error) {
+func (c Client) continueAndWait(pidsToContinue []int, sig int) (debugapi.Event, error) {
 	for _, pid := range pidsToContinue {
 		if err := unix.PtraceCont(pid, sig); err != nil {
-			return 0, debugapi.Event{}, err
+			return debugapi.Event{}, err
 		}
 	}
 
@@ -135,19 +135,19 @@ func (c Client) continueAndWait(pidsToContinue []int, sig int) (int, debugapi.Ev
 
 // StepAndWait executes the single instruction of the specified process and waits until an event happens.
 // Note that an event happens to any children of the current process is reported.
-func (c Client) StepAndWait(pid int) (waitedPID int, event debugapi.Event, err error) {
+func (c Client) StepAndWait(pid int) (debugapi.Event, error) {
 	if err := unix.PtraceSingleStep(pid); err != nil {
-		return 0, debugapi.Event{}, err
+		return debugapi.Event{}, err
 	}
 
 	return c.wait(-1)
 }
 
-func (c Client) wait(pid int) (int, debugapi.Event, error) {
+func (c Client) wait(pid int) (debugapi.Event, error) {
 	var status unix.WaitStatus
 	waitedPid, err := unix.Wait4(pid, &status, 0, nil)
 	if err != nil {
-		return 0, debugapi.Event{}, err
+		return debugapi.Event{}, err
 	}
 
 	var event debugapi.Event
@@ -156,13 +156,13 @@ func (c Client) wait(pid int) (int, debugapi.Event, error) {
 			if status.TrapCause() == unix.PTRACE_EVENT_CLONE {
 				_, err := c.continueClone(waitedPid)
 				if err != nil {
-					return 0, debugapi.Event{}, err
+					return debugapi.Event{}, err
 				}
 
 				return c.continueAndWait([]int{waitedPid}, 0)
 			}
 
-			event = debugapi.Event{Type: debugapi.EventTypeTrapped}
+			event = debugapi.Event{Type: debugapi.EventTypeTrapped, Data: []int{waitedPid}}
 		} else {
 			return c.continueAndWait([]int{waitedPid}, int(status.StopSignal()))
 		}
@@ -173,7 +173,7 @@ func (c Client) wait(pid int) (int, debugapi.Event, error) {
 	} else if status.Signaled() {
 		event = debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(status.Signal())}
 	}
-	return waitedPid, event, nil
+	return event, nil
 }
 
 func (c Client) continueClone(parentPID int) (int, error) {

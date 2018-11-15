@@ -158,12 +158,12 @@ func (p *Process) close() error {
 
 // ContinueAndWait continues the execution and waits until an event happens.
 // Note that the id of the stopped thread may be different from the id of the continued thread.
-func (p *Process) ContinueAndWait() (trappedThreadIDs []int, event debugapi.Event, err error) {
-	trappedThreadIDs, event, err = p.debugapiClient.ContinueAndWait()
+func (p *Process) ContinueAndWait() (debugapi.Event, error) {
+	event, err := p.debugapiClient.ContinueAndWait()
 	if debugapi.IsExitEvent(event.Type) {
 		err = p.close()
 	}
-	return trappedThreadIDs, event, err
+	return event, err
 }
 
 // SingleStep executes one instruction while clearing and setting breakpoints.

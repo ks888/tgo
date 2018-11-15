@@ -191,16 +191,16 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 	defer terminateProcess(pid)
 
 	_ = client.WriteMemory(pid, uintptr(testutils.InfloopAddrMain), []byte{0xcc})
-	stoppedPID, event, err := client.ContinueAndWait(pid)
+	event, err := client.ContinueAndWait(pid)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	if stoppedPID != pid {
-		t.Fatalf("unexpected process is stopped: %d", stoppedPID)
+	if event.Type != debugapi.EventTypeTrapped {
+		t.Fatalf("unexpected event: %#v", event.Type)
 	}
-	expectedEvent := debugapi.Event{Type: debugapi.EventTypeTrapped}
-	if event != expectedEvent {
-		t.Fatalf("unexpected event: %#v", event)
+	stoppedPID := event.Data.([]int)
+	if stoppedPID[0] != pid {
+		t.Fatalf("unexpected process is stopped: %d", stoppedPID[0])
 	}
 }
 
@@ -211,14 +211,14 @@ func TestContinueAndWait_Exited(t *testing.T) {
 
 	wpid := pid
 	for {
-		stoppedPID, event, err := client.ContinueAndWait(wpid)
+		event, err := client.ContinueAndWait(wpid)
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
 		if event.Type == debugapi.EventTypeExited {
 			break
 		}
-		wpid = stoppedPID
+		wpid = event.Data.([]int)[0]
 	}
 }
 
@@ -230,12 +230,9 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 	proc, _ := os.FindProcess(pid)
 	_ = proc.Signal(unix.SIGTERM)
 
-	signaledPID, event, err := client.ContinueAndWait(pid)
+	event, err := client.ContinueAndWait(pid)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
-	}
-	if signaledPID != pid {
-		t.Fatalf("unexpected process is stopped: %d", signaledPID)
 	}
 	expectedEvent := debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(unix.SIGTERM)}
 	if event != expectedEvent {
@@ -252,7 +249,7 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 	_ = proc.Signal(unix.SIGUSR1)
 
 	// non-SIGTRAP signal is handled internally.
-	_, _, err := client.ContinueAndWait(pid)
+	_, err := client.ContinueAndWait(pid)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
@@ -266,12 +263,9 @@ func TestContinueAndWait_CoreDump(t *testing.T) {
 	proc, _ := os.FindProcess(pid)
 	_ = proc.Signal(unix.SIGQUIT)
 
-	coreDumpPID, event, err := client.ContinueAndWait(pid)
+	event, err := client.ContinueAndWait(pid)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
-	}
-	if coreDumpPID != pid {
-		t.Fatalf("unexpected process id: %d", coreDumpPID)
 	}
 	expectedEvent := debugapi.Event{Type: debugapi.EventTypeCoreDump}
 	if event != expectedEvent {
@@ -287,7 +281,7 @@ func TestContinueAndWait_Continued(t *testing.T) {
 	proc, _ := os.FindProcess(pid)
 	_ = proc.Signal(unix.SIGCONT)
 
-	_, _, err := client.ContinueAndWait(pid)
+	_, err := client.ContinueAndWait(pid)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
@@ -300,12 +294,12 @@ func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
 
 	pids := []int{pid}
 	for {
-		wpid, event, err := client.ContinueAndWait(pids...)
+		event, err := client.ContinueAndWait(pids...)
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
 
-		if wpid == pid && event.Type == debugapi.EventTypeExited {
+		if event.Type == debugapi.EventTypeExited {
 			break
 		}
 
@@ -313,7 +307,7 @@ func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
 		case debugapi.EventTypeExited:
 			pids = nil
 		default:
-			pids = []int{wpid}
+			pids = event.Data.([]int)
 		}
 	}
 }
@@ -323,15 +317,15 @@ func TestStepAndWait(t *testing.T) {
 	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
 	defer terminateProcess(pid)
 
-	stoppedPID, event, err := client.StepAndWait(pid)
+	event, err := client.StepAndWait(pid)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
+	if event.Type != debugapi.EventTypeTrapped {
+		t.Fatalf("unexpected event type: %v", event.Type)
+	}
+	stoppedPID := event.Data.([]int)[0]
 	if stoppedPID != pid {
 		t.Fatalf("unexpected process is stopped: %d", stoppedPID)
-	}
-	expectedEvent := debugapi.Event{Type: debugapi.EventTypeTrapped}
-	if event != expectedEvent {
-		t.Fatalf("unexpected event: %#v", event)
 	}
 }
