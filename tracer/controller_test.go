@@ -138,7 +138,7 @@ func TestMainLoop_GoRoutines(t *testing.T) {
 	}
 
 	output := buff.String()
-	if strings.Count(output, "main.inc") != 20 {
+	if strings.Count(output, "main.inc") != 40 {
 		t.Errorf("unexpected output: %s", output)
 	}
 }

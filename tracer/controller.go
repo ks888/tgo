@@ -24,7 +24,7 @@ type Controller struct {
 	traceLevel   int
 	parseLevel   int
 
-	interrupted bool
+	interruptCh chan bool
 	// The traced data is written to this writer.
 	outputWriter io.Writer
 }
@@ -57,7 +57,7 @@ type callingFunction struct {
 
 // NewController returns the new controller.
 func NewController() *Controller {
-	return &Controller{outputWriter: os.Stdout}
+	return &Controller{outputWriter: os.Stdout, interruptCh: make(chan bool)}
 }
 
 // LaunchTracee launches the new tracee process to be controlled.
@@ -192,14 +192,15 @@ func (c *Controller) handleTrapEvent(trappedThreadIDs []int) ([]int, debugapi.Ev
 		}
 	}
 
-	if c.interrupted {
+	select {
+	case <-c.interruptCh:
 		if err := c.process.Detach(); err != nil {
 			return nil, debugapi.Event{}, err
 		}
 		return nil, debugapi.Event{}, ErrInterrupted
+	default:
+		return c.process.ContinueAndWait()
 	}
-
-	return c.process.ContinueAndWait()
 }
 
 func (c *Controller) handleTrapEventOfThread(threadID int) error {
@@ -467,7 +468,7 @@ func (c *Controller) printFunctionOutput(goRoutineID int64, stackFrame *tracee.S
 
 // Interrupt interrupts the main loop.
 func (c *Controller) Interrupt() {
-	c.interrupted = true
+	c.interruptCh <- true
 }
 
 type goRoutineInside struct {

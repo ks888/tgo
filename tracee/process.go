@@ -434,7 +434,7 @@ func (p *Process) singleStepUnspecifiedThreads(threadID int, err debugapi.Unspec
 			continue
 		}
 
-		regs, err := p.debugapiClient.ReadRegisters(threadID)
+		regs, err := p.debugapiClient.ReadRegisters(unspecifiedThread)
 		if err != nil {
 			return err
 		}
