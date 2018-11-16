@@ -578,24 +578,63 @@ func (c *Client) wait() (debugapi.Event, error) {
 		return debugapi.Event{}, fmt.Errorf("receive error: %v", err)
 	}
 
-	return c.handleStopReply(data)
+	stopReplies := c.buildStopReplies(data)
+	// process O packet beforehand in order to simplify further processing.
+	stopReplies, err = c.processOutputPacket(stopReplies)
+	if err != nil {
+		return debugapi.Event{}, fmt.Errorf("failed to process output packet: %v", err)
+	}
+	if len(stopReplies) == 0 {
+		return c.wait()
+	}
+	return c.handleStopReply(stopReplies)
 }
 
-func (c *Client) handleStopReply(data string) (event debugapi.Event, err error) {
-	switch data[0] {
+func (c *Client) buildStopReplies(data string) []string {
+	replies := strings.Split(data, "$")
+	for i, reply := range replies {
+		if reply[len(reply)-3] == '#' {
+			replies[i] = reply[0 : len(reply)-3]
+		}
+	}
+	return replies
+}
+
+func (c *Client) processOutputPacket(stopReplies []string) ([]string, error) {
+	var unprocessedReplies []string
+	for _, stopReply := range stopReplies {
+		if stopReply[0] != 'O' {
+			unprocessedReplies = append(unprocessedReplies, stopReply)
+			continue
+		}
+
+		out, err := hexToByteArray(stopReply[1:])
+		if err != nil {
+			return nil, err
+		}
+		c.outputWriter.Write(out)
+	}
+	return unprocessedReplies, nil
+}
+
+func (c *Client) handleStopReply(stopReplies []string) (event debugapi.Event, err error) {
+	switch stopReplies[0][0] {
 	case 'T':
-		event, err = c.handleTPacket(data)
-	case 'O':
-		event, err = c.handleOPacket(data)
+		if len(stopReplies) > 1 {
+			log.Debugf("received 2 or more stop replies at once. Consider only first one. data: %v", stopReplies)
+		}
+		event, err = c.handleTPacket(stopReplies[0])
 	case 'W':
-		event, err = c.handleWPacket(data)
+		// Ignore remaining packets because the process ends.
+		event, err = c.handleWPacket(stopReplies[0])
 	case 'X':
-		event, err = c.handleXPacket(data)
+		// Ignore remaining packets because the process ends.
+		event, err = c.handleXPacket(stopReplies[0])
 	default:
-		err = fmt.Errorf("unknown packet type: %s", data)
+		err = fmt.Errorf("unknown packet type: %s", stopReplies[0])
 	}
 	if err != nil {
-		return debugapi.Event{}, fmt.Errorf("failed to handle stop reply (data: %s): %v", data, err)
+		return debugapi.Event{}, fmt.Errorf("failed to handle stop reply (data: %v): %v", stopReplies[0], err)
 	}
 
 	if debugapi.IsExitEvent(event.Type) {
@@ -605,14 +644,14 @@ func (c *Client) handleStopReply(data string) (event debugapi.Event, err error) 
 	return event, nil
 }
 
-func (c *Client) handleTPacket(data string) (debugapi.Event, error) {
-	signalNumber, err := hexToUint64(data[1:3], false)
+func (c *Client) handleTPacket(packet string) (debugapi.Event, error) {
+	signalNumber, err := hexToUint64(packet[1:3], false)
 	if err != nil {
 		return debugapi.Event{}, err
 	}
 
 	var threadIDs []int
-	for _, kvInStr := range strings.Split(data[3:len(data)-1], ";") {
+	for _, kvInStr := range strings.Split(packet[3:len(packet)-1], ";") {
 		kvArr := strings.Split(kvInStr, ":")
 		key, value := kvArr[0], kvArr[1]
 		if key == "threads" {
@@ -630,7 +669,6 @@ func (c *Client) handleTPacket(data string) (debugapi.Event, error) {
 	if err != nil {
 		return debugapi.Event{}, err
 	} else if len(trappedThreadIDs) == 0 {
-		// this logic may swallow signals if there are two or more signaled threads
 		return c.continueAndWait(int(signalNumber))
 	}
 
@@ -675,36 +713,13 @@ func (c *Client) qThreadStopInfo(tid int) (string, error) {
 	return data, nil
 }
 
-func (c *Client) handleOPacket(data string) (debugapi.Event, error) {
-	hexOutput := data[1:]
-	remaining := ""
-	if idx := strings.Index(data, "#"); idx != -1 {
-		hexOutput = data[1:idx]
-		remaining = data[idx+4:]
-	}
-	out, err := hexToByteArray(hexOutput)
-	if err != nil {
-		return debugapi.Event{}, err
-	}
-
-	_, err = c.outputWriter.Write(out)
-	if err != nil {
-		return debugapi.Event{}, err
-	}
-
-	if remaining != "" {
-		return c.handleStopReply(remaining)
-	}
-	return c.wait()
-}
-
-func (c *Client) handleWPacket(data string) (debugapi.Event, error) {
-	exitStatus, err := hexToUint64(data[1:3], false)
+func (c *Client) handleWPacket(packet string) (debugapi.Event, error) {
+	exitStatus, err := hexToUint64(packet[1:3], false)
 	return debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
 }
 
-func (c *Client) handleXPacket(data string) (debugapi.Event, error) {
-	signalNumber, err := hexToUint64(data[1:3], false)
+func (c *Client) handleXPacket(packet string) (debugapi.Event, error) {
+	signalNumber, err := hexToUint64(packet[1:3], false)
 	// TODO: signalNumber here looks always 0. The number in the description looks correct, so maybe better to use it instead.
 	return debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
 }
@@ -754,9 +769,7 @@ func (c *Client) receive() (string, error) {
 	}
 
 	// quick check
-	if strings.Count(packet, "#") > 1 {
-		log.Debugf("The received data may contain two or more packets: %s", packet)
-	} else if packet[n-3] != '#' {
+	if packet[n-3] != '#' {
 		return data, fmt.Errorf("No checksum. There may be unreceived packets: %s", packet)
 	}
 
