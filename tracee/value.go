@@ -476,32 +476,57 @@ func (b valueParser) parseMapValue(typ *dwarf.TypedefType, val []byte, remaining
 	hmapVal := ptrVal.(ptrValue).pointedVal.(structValue)
 	numBuckets := 1 << hmapVal.fields["B"].(uint8Value).val
 	ptrToBuckets := hmapVal.fields["buckets"].(ptrValue)
+	ptrToOldBuckets := hmapVal.fields["oldbuckets"].(ptrValue)
+	if ptrToOldBuckets.addr != 0 {
+		log.Debugf("Map values may be insufficient")
+	}
 
-	// TODO: handle overflow case
-	kv := make(map[value]value)
+	mapValues := make(map[value]value)
 	for i := 0; ; i++ {
-		buckets := ptrToBuckets.pointedVal.(structValue)
-		tophash := buckets.fields["tophash"].(arrayValue)
-		keys := buckets.fields["keys"].(arrayValue)
-		values := buckets.fields["values"].(arrayValue)
-
-		for j, hash := range tophash.val {
-			if hash.(uint8Value).val == 0 {
-				continue
-			}
-			kv[keys.val[j]] = values.val[j]
+		mapValuesInBucket := b.parseBucket(ptrToBuckets, remainingDepth)
+		for k, v := range mapValuesInBucket {
+			mapValues[k] = v
 		}
-
 		if i+1 == numBuckets {
 			break
 		}
 
-		addr := ptrToBuckets.addr + uint64(i+1)*uint64(buckets.Size())
+		buckets := ptrToBuckets.pointedVal.(structValue)
+		nextBucketAddr := ptrToBuckets.addr + uint64(buckets.Size())
 		buff := make([]byte, 8)
-		binary.LittleEndian.PutUint64(buff, addr)
+		binary.LittleEndian.PutUint64(buff, nextBucketAddr)
 		// Actual keys and values are wrapped by struct buckets. So +1 here.
 		ptrToBuckets = b.parseValue(ptrToBuckets.PtrType, buff, remainingDepth+1).(ptrValue)
 	}
 
-	return mapValue{TypedefType: typ, val: kv}
+	return mapValue{TypedefType: typ, val: mapValues}
+}
+
+func (b valueParser) parseBucket(ptrToBucket ptrValue, remainingDepth int) map[value]value {
+	mapValues := make(map[value]value)
+	buckets := ptrToBucket.pointedVal.(structValue)
+	tophash := buckets.fields["tophash"].(arrayValue)
+	keys := buckets.fields["keys"].(arrayValue)
+	values := buckets.fields["values"].(arrayValue)
+
+	for j, hash := range tophash.val {
+		if hash.(uint8Value).val == 0 {
+			continue
+		}
+		mapValues[keys.val[j]] = values.val[j]
+	}
+
+	overflow := buckets.fields["overflow"].(ptrValue)
+	if overflow.addr == 0 {
+		return mapValues
+	}
+
+	buff := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buff, overflow.addr)
+	ptrToOverflowBucket := b.parseValue(ptrToBucket.PtrType, buff, remainingDepth).(ptrValue)
+	overflowedValues := b.parseBucket(ptrToOverflowBucket, remainingDepth)
+	for k, v := range overflowedValues {
+		mapValues[k] = v
+	}
+	return mapValues
 }

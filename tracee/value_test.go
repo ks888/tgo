@@ -128,9 +128,10 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 				t.Errorf("wrong val: %s", val)
 			}
 		}},
+
 		{funcAddr: testutils.TypePrintAddrPrintMap, testFunc: func(t *testing.T, val value) {
 			mapVal := val.(mapValue)
-			if len(mapVal.val) != 10 {
+			if len(mapVal.val) != 20 {
 				t.Errorf("wrong len: %d", len(mapVal.val))
 			}
 			for k, v := range mapVal.val {
