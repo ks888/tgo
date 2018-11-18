@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/log"
@@ -572,10 +573,25 @@ func (c *Client) continueAndWait(signalNumber int) (debugapi.Event, error) {
 }
 
 func (c *Client) wait() (debugapi.Event, error) {
-	// TODO: there may be two or more stop reply packets at once.
-	data, err := c.receive()
-	if err != nil {
-		return debugapi.Event{}, fmt.Errorf("receive error: %v", err)
+	var data string
+	var err error
+	for {
+		data, err = c.receiveWithTimeout(10 * time.Second)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			// debugserver sometimes does not send a reply packet even when a thread is stopped.
+			data, err = c.checkStopReply()
+			if err != nil {
+				return debugapi.Event{}, fmt.Errorf("failed to query stop reply: %v", err)
+			} else if data != "" {
+				log.Debugf("debugserver did not reply packets though there is the stopped thread.")
+				break
+			}
+		} else if err != nil {
+			return debugapi.Event{}, fmt.Errorf("receive error: %v", err)
+		}
+		if data != "" {
+			break
+		}
 	}
 
 	stopReplies := c.buildStopReplies(data)
@@ -588,6 +604,24 @@ func (c *Client) wait() (debugapi.Event, error) {
 		return c.wait()
 	}
 	return c.handleStopReply(stopReplies)
+}
+
+func (c *Client) checkStopReply() (string, error) {
+	tids, err := c.ThreadIDs()
+	if err != nil {
+		return "", err
+	}
+
+	for _, tid := range tids {
+		data, err := c.qThreadStopInfo(tid)
+		if err != nil {
+			return "", err
+		}
+		if !strings.HasPrefix(data, "T00") {
+			return data, nil
+		}
+	}
+	return "", nil
 }
 
 func (c *Client) buildStopReplies(data string) []string {
@@ -774,6 +808,13 @@ func (c *Client) receive() (string, error) {
 	}
 
 	return data, nil
+}
+
+func (c *Client) receiveWithTimeout(timeout time.Duration) (string, error) {
+	c.conn.SetReadDeadline(time.Now().Add(timeout))
+	defer c.conn.SetReadDeadline(time.Time{})
+
+	return c.receive()
 }
 
 func (c *Client) sendAck() error {
