@@ -482,7 +482,7 @@ func (b valueParser) parseMapValue(typ *dwarf.TypedefType, val []byte, remaining
 	ptrToBuckets := hmapVal.fields["buckets"].(ptrValue)
 	ptrToOldBuckets := hmapVal.fields["oldbuckets"].(ptrValue)
 	if ptrToOldBuckets.addr != 0 {
-		log.Debugf("Map values may be insufficient")
+		log.Debugf("Map values may be defective")
 	}
 
 	mapValues := make(map[value]value)
@@ -507,6 +507,10 @@ func (b valueParser) parseMapValue(typ *dwarf.TypedefType, val []byte, remaining
 }
 
 func (b valueParser) parseBucket(ptrToBucket ptrValue, remainingDepth int) map[value]value {
+	if ptrToBucket.addr == 0 {
+		return nil // initialized map may not have bucket
+	}
+
 	mapValues := make(map[value]value)
 	buckets := ptrToBucket.pointedVal.(structValue)
 	tophash := buckets.fields["tophash"].(arrayValue)
@@ -527,7 +531,8 @@ func (b valueParser) parseBucket(ptrToBucket ptrValue, remainingDepth int) map[v
 
 	buff := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buff, overflow.addr)
-	ptrToOverflowBucket := b.parseValue(ptrToBucket.PtrType, buff, remainingDepth).(ptrValue)
+	// Actual keys and values are wrapped by struct buckets. So +1 here.
+	ptrToOverflowBucket := b.parseValue(ptrToBucket.PtrType, buff, remainingDepth+1).(ptrValue)
 	overflowedValues := b.parseBucket(ptrToOverflowBucket, remainingDepth)
 	for k, v := range overflowedValues {
 		mapValues[k] = v
