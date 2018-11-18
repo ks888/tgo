@@ -68,6 +68,7 @@ var (
 	TypePrintAddrPrintEmptyInterface    uint64
 	TypePrintAddrPrintNilEmptyInterface uint64
 	TypePrintAddrPrintMap               uint64
+	TypePrintAddrPrintNilMap            uint64
 	TypePrintAddrPrintChan              uint64
 )
 
@@ -268,6 +269,8 @@ func buildProgramTypePrint(srcDirname string) error {
 			TypePrintAddrPrintNilEmptyInterface = value
 		case "main.printMap":
 			TypePrintAddrPrintMap = value
+		case "main.printNilMap":
+			TypePrintAddrPrintNilMap = value
 		case "main.printChan":
 			TypePrintAddrPrintChan = value
 		}

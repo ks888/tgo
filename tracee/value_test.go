@@ -128,7 +128,6 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 				t.Errorf("wrong val: %s", val)
 			}
 		}},
-
 		{funcAddr: testutils.TypePrintAddrPrintMap, testFunc: func(t *testing.T, val value) {
 			mapVal := val.(mapValue)
 			if len(mapVal.val) != 20 {
@@ -138,6 +137,12 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 				if k.(int64Value).val != v.(int64Value).val {
 					t.Errorf("wrong kv: %d, %d", k.(int64Value).val, v.(int64Value).val)
 				}
+			}
+		}},
+		{funcAddr: testutils.TypePrintAddrPrintNilMap, testFunc: func(t *testing.T, val value) {
+			mapVal := val.(mapValue)
+			if mapVal.val != nil {
+				t.Errorf("map not nil: %v", mapVal)
 			}
 		}},
 	} {
@@ -158,7 +163,6 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get CurrentThreadInfo: %v", err)
 		}
-
 		f, err := proc.Binary.FindFunction(testdata.funcAddr)
 		if err != nil {
 			t.Fatalf("failed to FindFunction: %v", err)

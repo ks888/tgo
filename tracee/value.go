@@ -473,6 +473,10 @@ func (b valueParser) parseStructValue(typ *dwarf.StructType, val []byte, remaini
 func (b valueParser) parseMapValue(typ *dwarf.TypedefType, val []byte, remainingDepth int) mapValue {
 	// Actual keys and values are wrapped by hmap struct and buckets struct. So +2 here.
 	ptrVal := b.parseValue(typ.Type, val, remainingDepth+2)
+	if ptrVal.(ptrValue).pointedVal == nil {
+		return mapValue{TypedefType: typ, val: nil}
+	}
+
 	hmapVal := ptrVal.(ptrValue).pointedVal.(structValue)
 	numBuckets := 1 << hmapVal.fields["B"].(uint8Value).val
 	ptrToBuckets := hmapVal.fields["buckets"].(ptrValue)
