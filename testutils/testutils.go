@@ -60,6 +60,7 @@ var (
 	TypePrintAddrPrintString            uint64
 	TypePrintAddrPrintArray             uint64
 	TypePrintAddrPrintSlice             uint64
+	TypePrintAddrPrintNilSlice          uint64
 	TypePrintAddrPrintStruct            uint64
 	TypePrintAddrPrintPtr               uint64
 	TypePrintAddrPrintFunc              uint64
@@ -253,6 +254,8 @@ func buildProgramTypePrint(srcDirname string) error {
 			TypePrintAddrPrintArray = value
 		case "main.printSlice":
 			TypePrintAddrPrintSlice = value
+		case "main.printNilSlice":
+			TypePrintAddrPrintNilSlice = value
 		case "main.printStruct":
 			TypePrintAddrPrintStruct = value
 		case "main.printPtr":

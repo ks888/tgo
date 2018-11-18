@@ -36,6 +36,7 @@ func TestParseValue(t *testing.T) {
 		{funcAddr: testutils.TypePrintAddrPrintString, expected: "\"hello\\n\""},
 		{funcAddr: testutils.TypePrintAddrPrintArray, expected: "[2]{1, 2}"},
 		{funcAddr: testutils.TypePrintAddrPrintSlice, expected: "[]{3, 4}"},
+		{funcAddr: testutils.TypePrintAddrPrintNilSlice, expected: "nil"},
 		{funcAddr: testutils.TypePrintAddrPrintPtr, expected: "&1"},
 	} {
 		if err := proc.SetBreakpoint(testdata.funcAddr); err != nil {

@@ -173,6 +173,9 @@ type sliceValue struct {
 }
 
 func (v sliceValue) String() string {
+	if len(v.val) == 0 {
+		return "nil"
+	}
 	var vals []string
 	for _, v := range v.val {
 		vals = append(vals, v.String())
@@ -384,11 +387,14 @@ func (b valueParser) parseStringValue(typ *dwarf.StructType, val []byte) stringV
 func (b valueParser) parseSliceValue(typ *dwarf.StructType, val []byte, remainingDepth int) sliceValue {
 	// Values are wrapped by slice struct. So +1 here.
 	structVal := b.parseStructValue(typ, val, remainingDepth+1)
-	len := int(structVal.fields["len"].(int64Value).val)
+	length := int(structVal.fields["len"].(int64Value).val)
+	if length == 0 {
+		return sliceValue{StructType: typ}
+	}
 	firstElem := structVal.fields["array"].(ptrValue)
 	sliceVal := sliceValue{StructType: typ, val: []value{firstElem.pointedVal}}
 
-	for i := 1; i < len; i++ {
+	for i := 1; i < length; i++ {
 		addr := firstElem.addr + uint64(firstElem.pointedVal.Size())*uint64(i)
 		buff := make([]byte, 8)
 		binary.LittleEndian.PutUint64(buff, addr)

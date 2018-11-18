@@ -64,6 +64,10 @@ func printArray(v [2]int) {
 func printSlice(v []int) {
 }
 
+//go:noinline
+func printNilSlice(v []int) {
+}
+
 type S struct {
 	a    int
 	b, c int
@@ -138,6 +142,7 @@ func main() {
 	printString("hello\n")
 	printArray([2]int{1, 2})
 	printSlice([]int{3, 4})
+	printNilSlice(nil)
 	printStruct(S{a: 1, b: 2, c: 3, T: T{d: 4}})
 	v := 1
 	printPtr(&v)
