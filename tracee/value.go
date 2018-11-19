@@ -366,6 +366,7 @@ func (b valueParser) parseValue(rawTyp dwarf.Type, val []byte, remainingDepth in
 		if strings.HasPrefix(typ.String(), "map[") {
 			return b.parseMapValue(typ, val, remainingDepth)
 		}
+
 		// In this case, virtually do nothing so far. So do not decrement `remainingDepth`.
 		return b.parseValue(typ.Type, val, remainingDepth)
 	}
@@ -391,6 +392,7 @@ func (b valueParser) parseSliceValue(typ *dwarf.StructType, val []byte, remainin
 	if length == 0 {
 		return sliceValue{StructType: typ}
 	}
+
 	firstElem := structVal.fields["array"].(ptrValue)
 	sliceVal := sliceValue{StructType: typ, val: []value{firstElem.pointedVal}}
 
@@ -426,12 +428,19 @@ func (b valueParser) parseInterfaceValue(typ *dwarf.StructType, val []byte, rema
 	}
 
 	data := structVal.fields["data"].(ptrValue)
+	if _, ok := implType.(*dwarf.PtrType); ok {
+		buff := make([]byte, 8)
+		binary.LittleEndian.PutUint64(buff, data.addr)
+		return interfaceValue{StructType: typ, implType: implType, implVal: b.parseValue(implType, buff, remainingDepth)}
+
+	}
+
+	// When the actual type is not pointer, we need the explicit dereference because data.addr is the pointer to the data.
 	dataBuff := make([]byte, implType.Size())
 	if err := b.reader.ReadMemory(data.addr, dataBuff); err != nil {
 		log.Debugf("failed to read memory (addr: %x): %v", data.addr, err)
 		return interfaceValue{StructType: typ}
 	}
-
 	return interfaceValue{StructType: typ, implType: implType, implVal: b.parseValue(implType, dataBuff, remainingDepth)}
 }
 

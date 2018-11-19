@@ -110,6 +110,15 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 				t.Errorf("wrong value: %s", implVal.fields)
 			}
 		}, testIfLaterThan: go1_11},
+		{funcAddr: testutils.TypePrintAddrPrintPtrInterface, testFunc: func(t *testing.T, val value) {
+			implVal, ok := val.(interfaceValue).implVal.(ptrValue).pointedVal.(structValue)
+			if !ok {
+				t.Fatalf("wrong type: %#v", implVal)
+			}
+			if implVal.fields["a"].(int64Value).val != 9 {
+				t.Errorf("wrong value: %s", implVal.fields)
+			}
+		}, testIfLaterThan: go1_11},
 		{funcAddr: testutils.TypePrintAddrPrintNilInterface, testFunc: func(t *testing.T, val value) {
 			if val.String() != "nil" {
 				t.Errorf("wrong val: %s", val)

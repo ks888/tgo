@@ -77,6 +77,11 @@ type S struct {
 func (s S) M() {
 }
 
+type S2 string
+
+func (s *S2) M() {
+}
+
 type T struct {
 	d int
 }
@@ -99,6 +104,10 @@ type I interface {
 
 //go:noinline
 func printInterface(v I) {
+}
+
+//go:noinline
+func printPtrInterface(v I) {
 }
 
 //go:noinline
@@ -148,6 +157,7 @@ func main() {
 	printPtr(&v)
 	printFunc(func(v int) {})
 	printInterface(S{a: 5, b: 6, c: 7, T: T{d: 8}})
+	printPtrInterface(&S{a: 9})
 	printNilInterface(nil)
 	printEmptyInterface(S{a: 9})
 	printNilEmptyInterface(nil)
