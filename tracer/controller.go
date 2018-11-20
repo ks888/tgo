@@ -158,9 +158,11 @@ func (c *Controller) SetParseLevel(level int) {
 
 // MainLoop repeatedly lets the tracee continue and then wait an event.
 func (c *Controller) MainLoop() error {
+	defer func() { _ = c.process.Detach() }() // the connection status is unknown at this point
+
 	event, err := c.process.ContinueAndWait()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to trace: %v", err)
 	}
 
 	for {
@@ -175,9 +177,12 @@ func (c *Controller) MainLoop() error {
 			trappedThreadIDs := event.Data.([]int)
 			event, err = c.handleTrapEvent(trappedThreadIDs)
 			if err == ErrInterrupted {
+				if err := c.process.Detach(); err != nil {
+					return err
+				}
 				return err
 			} else if err != nil {
-				return fmt.Errorf("failed to handle trap event: %v", err)
+				return fmt.Errorf("failed to trace: %v", err)
 			}
 		default:
 			return fmt.Errorf("unknown event: %v", event.Type)
@@ -195,9 +200,6 @@ func (c *Controller) handleTrapEvent(trappedThreadIDs []int) (debugapi.Event, er
 
 	select {
 	case <-c.interruptCh:
-		if err := c.process.Detach(); err != nil {
-			return debugapi.Event{}, err
-		}
 		return debugapi.Event{}, ErrInterrupted
 	default:
 		return c.process.ContinueAndWait()

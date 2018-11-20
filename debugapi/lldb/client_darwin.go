@@ -549,7 +549,7 @@ func (c *Client) StepAndWait(threadID int) (debugapi.Event, error) {
 
 	event, err := c.wait()
 	if err != nil {
-		return debugapi.Event{}, fmt.Errorf("wait error: %v", err)
+		return debugapi.Event{}, err
 	} else if event.Type != debugapi.EventTypeTrapped {
 		return debugapi.Event{}, fmt.Errorf("unexpected event: %#v", event)
 	} else if tids := event.Data.([]int); len(tids) != 1 || tids[0] != threadID {
@@ -668,7 +668,8 @@ func (c *Client) handleStopReply(stopReplies []string) (event debugapi.Event, er
 		err = fmt.Errorf("unknown packet type: %s", stopReplies[0])
 	}
 	if err != nil {
-		return debugapi.Event{}, fmt.Errorf("failed to handle stop reply (data: %v): %v", stopReplies[0], err)
+		log.Debugf("failed to handle the packet (data: %v): %v", stopReplies[0], err)
+		return debugapi.Event{}, err
 	}
 
 	if debugapi.IsExitEvent(event.Type) {
@@ -682,6 +683,9 @@ func (c *Client) handleTPacket(packet string) (debugapi.Event, error) {
 	signalNumber, err := hexToUint64(packet[1:3], false)
 	if err != nil {
 		return debugapi.Event{}, err
+	}
+	if syscall.Signal(signalNumber) == excBadAccess {
+		return debugapi.Event{}, fmt.Errorf("memory access error")
 	}
 
 	var threadIDs []int
@@ -722,11 +726,8 @@ func (c *Client) selectTrappedThreads(tids []int) ([]int, error) {
 			return nil, err
 		}
 
-		switch syscall.Signal(signalNumber) {
-		case unix.SIGTRAP:
+		if syscall.Signal(signalNumber) == unix.SIGTRAP {
 			trappedThreads = append(trappedThreads, tid)
-		case excBadAccess:
-			return nil, fmt.Errorf("bad access: %s", data)
 		}
 	}
 	return trappedThreads, nil
