@@ -219,7 +219,7 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 
 	status, _ := c.statusStore[int(goRoutineInfo.ID)]
 	if goRoutineInfo.UsedStackSize == status.usedStackSize() && breakpointAddr == status.lastFunctionAddr() {
-		// it's likely we are in the same stack frame as before (typical for the stack growth case).
+		// it's likely we are in the same stack frame as before (typical in the stack growth case).
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	} else if c.isFunctionCall(breakpointAddr) {
 		return c.handleTrapAtFunctionCall(threadID, goRoutineInfo)

@@ -122,28 +122,54 @@ func (b Binary) findGoVersion() GoVersion {
 const firstModuleDataName = "runtime.firstmoduledata"
 
 func (b Binary) findFirstModuleDataAddress() (uint64, error) {
+	entry, err := b.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
+		name, err := stringClassAttr(entry, dwarf.AttrName)
+		return name == firstModuleDataName && err == nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	loc, err := locationClassAttr(entry, dwarf.AttrLocation)
+	if err != nil {
+		return 0, err
+	}
+	if len(loc) == 0 || loc[0] != 0x3 {
+		return 0, fmt.Errorf("unexpected location format: %v", loc)
+	}
+	return binary.LittleEndian.Uint64(loc[1:]), nil
+}
+
+const gTypeName = "runtime.g"
+
+func (b Binary) findGType() (map[string]int64, error) {
+	_, err := b.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
+		if entry.Tag != dwarf.TagStructType {
+			return false
+		}
+		name, err := stringClassAttr(entry, dwarf.AttrName)
+		return name == gTypeName && err == nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return nil, nil
+}
+
+func (b Binary) findDWARFEntryByName(match func(*dwarf.Entry) bool) (*dwarf.Entry, error) {
 	reader := b.dwarf.Reader()
 	for {
 		entry, err := reader.Next()
 		if err != nil {
-			return 0, err
+			return nil, err
 		} else if entry == nil {
-			return 0, errors.New("failed to find firstmoduledata")
+			return nil, errors.New("failed to find firstmoduledata")
 		}
 
-		name, err := stringClassAttr(entry, dwarf.AttrName)
-		if err != nil || name != firstModuleDataName {
-			continue
+		if match(entry) {
+			return entry, nil
 		}
-
-		loc, err := locationClassAttr(entry, dwarf.AttrLocation)
-		if err != nil {
-			return 0, err
-		}
-		if len(loc) == 0 || loc[0] != 0x3 {
-			return 0, fmt.Errorf("unexpected location format: %v", loc)
-		}
-		return binary.LittleEndian.Uint64(loc[1:]), nil
 	}
 }
 

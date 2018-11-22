@@ -685,7 +685,7 @@ func (c *Client) handleTPacket(packet string) (debugapi.Event, error) {
 		return debugapi.Event{}, err
 	}
 	if syscall.Signal(signalNumber) == excBadAccess {
-		return debugapi.Event{}, fmt.Errorf("memory access error")
+		return debugapi.Event{}, fmt.Errorf("bad memory access")
 	}
 
 	var threadIDs []int
