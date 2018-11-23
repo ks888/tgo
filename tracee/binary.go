@@ -23,10 +23,11 @@ const (
 
 // Binary represents the program the tracee process executes
 type Binary struct {
-	dwarf     dwarfData
-	closer    io.Closer
-	goVersion GoVersion
-	types     map[uint64]dwarf.Offset
+	dwarf        dwarfData
+	closer       io.Closer
+	goVersion    GoVersion
+	types        map[uint64]dwarf.Offset
+	runtimeGType dwarf.Type
 }
 
 type dwarfData struct {
@@ -62,6 +63,10 @@ func NewBinary(pathToProgram string) (Binary, error) {
 
 	binary.goVersion = binary.findGoVersion()
 	binary.types, err = binary.buildTypes()
+	if err != nil {
+		return Binary{}, err
+	}
+	binary.runtimeGType, err = binary.findRuntimeGType()
 	if err != nil {
 		return Binary{}, err
 	}
@@ -142,8 +147,8 @@ func (b Binary) findFirstModuleDataAddress() (uint64, error) {
 
 const gTypeName = "runtime.g"
 
-func (b Binary) findGType() (map[string]int64, error) {
-	_, err := b.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
+func (b Binary) findRuntimeGType() (dwarf.Type, error) {
+	entry, err := b.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
 		if entry.Tag != dwarf.TagStructType {
 			return false
 		}
@@ -154,7 +159,7 @@ func (b Binary) findGType() (map[string]int64, error) {
 		return nil, err
 	}
 
-	return nil, nil
+	return b.dwarf.Type(entry.Offset)
 }
 
 func (b Binary) findDWARFEntryByName(match func(*dwarf.Entry) bool) (*dwarf.Entry, error) {
@@ -164,7 +169,7 @@ func (b Binary) findDWARFEntryByName(match func(*dwarf.Entry) bool) (*dwarf.Entr
 		if err != nil {
 			return nil, err
 		} else if entry == nil {
-			return nil, errors.New("failed to find firstmoduledata")
+			return nil, errors.New("failed to find a matched entry")
 		}
 
 		if match(entry) {

@@ -26,6 +26,9 @@ func TestNewBinary(t *testing.T) {
 	if binary.goVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) && len(binary.types) == 0 {
 		t.Errorf("empty types data")
 	}
+	if binary.runtimeGType == nil {
+		t.Errorf("empty runtime.g type")
+	}
 }
 
 func TestNewBinary_ProgramNotFound(t *testing.T) {
