@@ -1,6 +1,7 @@
 package tracee
 
 import (
+	"os"
 	"os/exec"
 	"testing"
 
@@ -433,5 +434,38 @@ func TestCurrentGoRoutineInfo_Panicking(t *testing.T) {
 	function, _ := proc.Binary.FindFunction(goRoutineInfo.PanicHandler.PCAtDefer)
 	if function.Name != "main.g" {
 		t.Errorf("wrong panic handler")
+	}
+}
+
+func TestCurrentGoRoutineInfo_HasAncestors(t *testing.T) {
+	os.Setenv("GODEBUG", "tracebackancestors=1")
+	defer os.Unsetenv("GODEBUG")
+
+	proc, err := LaunchProcess(testutils.ProgramGoRoutines)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	defer proc.Detach()
+
+	if !proc.Binary.goVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+		t.Skip("go 1.10 or earlier doesn't hold ancestors info")
+	}
+
+	if err := proc.SetBreakpoint(testutils.GoRoutinesAddrInc); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	event, err := proc.ContinueAndWait()
+	if err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+
+	tids := event.Data.([]int)
+	goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if goRoutineInfo.Ancestors == nil {
+		t.Errorf("nil ancestors")
 	}
 }

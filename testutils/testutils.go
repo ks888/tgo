@@ -33,6 +33,7 @@ var (
 
 	ProgramGoRoutines  string
 	GoRoutinesAddrMain uint64
+	GoRoutinesAddrInc  uint64
 
 	ProgramRecursive  string
 	RecursiveAddrMain uint64
@@ -165,6 +166,8 @@ func buildProgramGoRoutines(srcDirname string) error {
 		switch name {
 		case "main.main":
 			GoRoutinesAddrMain = value
+		case "main.inc":
+			GoRoutinesAddrInc = value
 		}
 		return nil
 	}

@@ -417,24 +417,9 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 		return GoRoutineInfo{}, err
 	}
 
-	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, Panicking: panicking, PanicHandler: panicHandler /*, Ancestors: ancestors */}, nil
+	ancestors, _ := p.findAncestorGoIDs(gAddr) // go1.10 or earlier doesn't hold ancestors.
 
-	// offsetToAncestors := uint64(p.Binary.runtimeGFields["ancestors"])
-	// if err = p.debugapiClient.ReadMemory(gAddr+offsetToAncestors, buff); err != nil {
-	// 	return GoRoutineInfo{}, err
-	// }
-	// ancestorsAddr := binary.LittleEndian.Uint64(buff)
-	// ancestors, err := p.findAncestors(ancestorsAddr)
-	// if err != nil {
-	// 	return GoRoutineInfo{}, err
-	// }
-
-	// size := p.Binary.runtimeGType.Size()
-	// buff := make([]byte, size)
-	// if err = p.debugapiClient.ReadMemory(gAddr, buff); err != nil {
-	// 	return fmt.Errorf("failed to read runtime.g value: %v", err)
-	// }
-	// return p.valueParser.parseValue(param.Typ, buff, 1)
+	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, Panicking: panicking, PanicHandler: panicHandler, Ancestors: ancestors}, nil
 }
 
 // TODO: depend on os
@@ -530,8 +515,21 @@ func (p *Process) findPanicHandler(gAddr, panicAddr, stackHi uint64) (*PanicHand
 	return &PanicHandler{UsedStackSizeAtDefer: usedStackSizeAtDefer, PCAtDefer: pc}, nil
 }
 
-func (p *Process) findAncestors(ancestorsAddr uint64) ([]int64, error) {
-	return nil, nil
+func (p *Process) findAncestorGoIDs(gAddr uint64) ([]int64, error) {
+	ptrToAncestorsType, rawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType, "ancestors")
+	if err != nil || binary.LittleEndian.Uint64(rawVal) == 0 {
+		return nil, err
+	}
+
+	ptrToAncestorsVal := p.valueParser.parseValue(ptrToAncestorsType, rawVal, 1)
+	ancestorsVal := ptrToAncestorsVal.(ptrValue).pointedVal.(sliceValue)
+
+	var ancestorGoIDs []int64
+	for _, ancestor := range ancestorsVal.val {
+		ancestorGoID := ancestor.(structValue).fields["goid"].(int64Value).val
+		ancestorGoIDs = append(ancestorGoIDs, ancestorGoID)
+	}
+	return ancestorGoIDs, nil
 }
 
 // ThreadInfo describes the various info of thread.
