@@ -453,7 +453,6 @@ func (b valueParser) parseInterfaceValue(typ *dwarf.StructType, val []byte, rema
 		buff := make([]byte, 8)
 		binary.LittleEndian.PutUint64(buff, data.addr)
 		return interfaceValue{StructType: typ, implType: implType, implVal: b.parseValue(implType, buff, remainingDepth)}
-
 	}
 
 	// When the actual type is not pointer, we need the explicit dereference because data.addr is the pointer to the data.
@@ -469,7 +468,6 @@ func (b valueParser) parseEmptyInterfaceValue(typ *dwarf.StructType, val []byte,
 	// Empty interface is represented by the eface struct. So remainingDepth needs to be at least 1.
 	structVal := b.parseStructValue(typ, val, 1)
 	data := structVal.fields["data"].(ptrValue)
-
 	if data.addr == 0 {
 		return interfaceValue{StructType: typ}
 	}
@@ -485,6 +483,13 @@ func (b valueParser) parseEmptyInterfaceValue(typ *dwarf.StructType, val []byte,
 		return interfaceValue{StructType: typ}
 	}
 
+	if _, ok := implType.(*dwarf.PtrType); ok {
+		buff := make([]byte, 8)
+		binary.LittleEndian.PutUint64(buff, data.addr)
+		return interfaceValue{StructType: typ, implType: implType, implVal: b.parseValue(implType, buff, remainingDepth)}
+	}
+
+	// When the actual type is not pointer, we need the explicit dereference because data.addr is the pointer to the data.
 	dataBuff := make([]byte, implType.Size())
 	if err := b.reader.ReadMemory(data.addr, dataBuff); err != nil {
 		log.Debugf("failed to read memory (addr: %x): %v", data.addr, err)
