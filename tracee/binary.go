@@ -25,7 +25,7 @@ const (
 type Binary struct {
 	dwarf        dwarfData
 	closer       io.Closer
-	goVersion    GoVersion
+	GoVersion    GoVersion
 	types        map[uint64]dwarf.Offset
 	runtimeGType dwarf.Type
 }
@@ -61,7 +61,7 @@ func NewBinary(pathToProgram string) (Binary, error) {
 	}
 	binary := Binary{dwarf: dwarfData, closer: closer}
 
-	binary.goVersion = binary.findGoVersion()
+	binary.GoVersion = binary.findGoVersion()
 	binary.types, err = binary.buildTypes()
 	if err != nil {
 		return Binary{}, err
@@ -74,7 +74,7 @@ func NewBinary(pathToProgram string) (Binary, error) {
 }
 
 func (b Binary) buildTypes() (map[uint64]dwarf.Offset, error) {
-	if !b.goVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+	if !b.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
 		// attrGoRuntimeType is not supported
 		return nil, nil
 	}

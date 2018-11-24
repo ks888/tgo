@@ -292,7 +292,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		c.tracingPoint.Enter(goRoutineInfo.ID, currStackDepth)
 	}
 
-	if c.canPrint(goRoutineInfo.ID, currStackDepth) {
+	if c.canPrint(goRoutineInfo.ID, goRoutineInfo.Ancestors, currStackDepth) {
 		if err := c.printFunctionInput(goRoutineInfo.ID, stackFrame, currStackDepth); err != nil {
 			return err
 		}
@@ -391,9 +391,18 @@ func (c *Controller) alterBreakpointsExceptTracingPoint(enable bool) error {
 	return nil
 }
 
-func (c *Controller) canPrint(goRoutineID int64, currStackDepth int) bool {
-	currRelativeDepth := c.tracingPoint.Depth(goRoutineID, currStackDepth)
-	return c.tracingPoint.Inside(goRoutineID) && currRelativeDepth <= c.traceLevel
+func (c *Controller) canPrint(goRoutineID int64, parentIDs []int64, currStackDepth int) bool {
+	if c.tracingPoint.Inside(goRoutineID) {
+		currRelativeDepth := c.tracingPoint.Depth(goRoutineID, currStackDepth)
+		return currRelativeDepth <= c.traceLevel
+	}
+
+	for _, parentID := range parentIDs {
+		if c.tracingPoint.Inside(parentID) {
+			return currStackDepth <= c.traceLevel
+		}
+	}
+	return false
 }
 
 func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
@@ -410,7 +419,7 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 		currStackDepth -= c.countSkippedFuncs(status.callingFunctions, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
 	}
 
-	if c.canPrint(goRoutineInfo.ID, currStackDepth) {
+	if c.canPrint(goRoutineInfo.ID, goRoutineInfo.Ancestors, currStackDepth) {
 		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, returnedFunc.Value)
 		if err != nil {
 			return err

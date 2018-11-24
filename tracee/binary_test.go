@@ -20,10 +20,10 @@ func TestNewBinary(t *testing.T) {
 	if binary.dwarf.Data == nil {
 		t.Errorf("empty dwarf data")
 	}
-	if binary.goVersion == (GoVersion{}) {
+	if binary.GoVersion == (GoVersion{}) {
 		t.Errorf("empty go version")
 	}
-	if binary.goVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) && len(binary.types) == 0 {
+	if binary.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) && len(binary.types) == 0 {
 		t.Errorf("empty types data")
 	}
 	if binary.runtimeGType == nil {

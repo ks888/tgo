@@ -417,14 +417,17 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 		return GoRoutineInfo{}, err
 	}
 
-	ancestors, _ := p.findAncestorGoIDs(gAddr) // go1.10 or earlier doesn't hold ancestors.
+	ancestors, err := p.findAncestorGoIDs(gAddr)
+	if err != nil {
+		return GoRoutineInfo{}, err
+	}
 
 	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, Panicking: panicking, PanicHandler: panicHandler, Ancestors: ancestors}, nil
 }
 
 // TODO: depend on os
 func (p *Process) offsetToG() uint32 {
-	if p.Binary.goVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
+	if p.Binary.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
 		return 0x30
 	}
 	return 0x8a0
@@ -516,6 +519,11 @@ func (p *Process) findPanicHandler(gAddr, panicAddr, stackHi uint64) (*PanicHand
 }
 
 func (p *Process) findAncestorGoIDs(gAddr uint64) ([]int64, error) {
+	if !p.Binary.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+		// ancestors field is not supported
+		return nil, nil
+	}
+
 	ptrToAncestorsType, rawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType, "ancestors")
 	if err != nil || binary.LittleEndian.Uint64(rawVal) == 0 {
 		return nil, err
