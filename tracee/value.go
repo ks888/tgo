@@ -11,6 +11,8 @@ import (
 	"github.com/ks888/tgo/log"
 )
 
+const maxContainerItemsToPrint = 8
+
 type value interface {
 	String() string
 	Size() int64
@@ -176,9 +178,19 @@ func (v sliceValue) String() string {
 	if len(v.val) == 0 {
 		return "nil"
 	}
+
 	var vals []string
-	for _, v := range v.val {
+	abbrev := false
+	for i, v := range v.val {
+		if i >= maxContainerItemsToPrint {
+			abbrev = true
+			break
+		}
 		vals = append(vals, v.String())
+	}
+
+	if abbrev {
+		return fmt.Sprintf("[]{%s, ...}", strings.Join(vals, ", "))
 	}
 	return fmt.Sprintf("[]{%s}", strings.Join(vals, ", "))
 }
@@ -224,8 +236,17 @@ type arrayValue struct {
 
 func (v arrayValue) String() string {
 	var vals []string
-	for _, v := range v.val {
+	abbrev := false
+	for i, v := range v.val {
+		if i >= maxContainerItemsToPrint {
+			abbrev = true
+			break
+		}
 		vals = append(vals, v.String())
+	}
+
+	if abbrev {
+		return fmt.Sprintf("[%d]{%s, ...}", len(vals), strings.Join(vals, ", "))
 	}
 	return fmt.Sprintf("[%d]{%s}", len(vals), strings.Join(vals, ", "))
 }
