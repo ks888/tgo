@@ -119,25 +119,7 @@ func (c *Controller) findFunction(functionName string) (*tracee.Function, error)
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
 	const runtimePrefix = "runtime."
 	if strings.HasPrefix(function.Name, runtimePrefix) {
-		if function.IsExported() {
-			return true
-		}
-
-		funcName := function.Name[len(runtimePrefix):len(function.Name)]
-		allowedFuncPrefixes := []string{
-			"deferproc", "gopanic", "gorecover", "deferreturn",
-			"make", "slice", "growslice", "memmove",
-			"map", "chan", "close",
-			"newobject", "conv", "malloc",
-			"print",
-		}
-		for _, allowed := range allowedFuncPrefixes {
-			if strings.HasPrefix(funcName, allowed) {
-				return true
-			}
-		}
-
-		return false
+		return function.IsExported() || function.Name == "runtime.gopanic" // need to trap gopanic function in order to calculate a stack depth correctly.
 	}
 
 	return true
