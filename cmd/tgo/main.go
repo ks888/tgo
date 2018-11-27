@@ -11,30 +11,48 @@ import (
 	"github.com/ks888/tgo/tracer"
 )
 
+const (
+	traceOptionDesc      = "The tracing is enabled when this `function` is called and then disabled when returned."
+	tracelevelOptionDesc = "Functions are traced if the stack depth is within this `tracelevel`. The stack depth here is based on the point the tracing is enabled."
+	parselevelOptionDesc = "The trace log includes the function's args. The `parselevel` option determines how detailed these values should be."
+	verboseOptionDesc    = "Show the debug-level message"
+)
+
 type options struct {
 	function               string
 	traceLevel, parseLevel int
 }
 
-func launch(opts options) error {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), `Usage:
+func launch(args []string) error {
+	commandLine := flag.NewFlagSet("", flag.ExitOnError)
+	commandLine.Usage = func() {
+		fmt.Fprintf(commandLine.Output(), `Usage:
 
-	%s launch [program] [program args]
+  %s launch [flags] [program name & args]
+
+Flags:
 `, os.Args[0])
+		commandLine.PrintDefaults()
 	}
 
-	if flag.NArg() < 2 {
-		flag.Usage()
+	function := commandLine.String("trace", "main.main", traceOptionDesc)
+	traceLevel := commandLine.Int("tracelevel", 1, tracelevelOptionDesc)
+	parseLevel := commandLine.Int("parselevel", 1, parselevelOptionDesc)
+	verbose := commandLine.Bool("verbose", false, verboseOptionDesc)
+
+	commandLine.Parse(args)
+	if commandLine.NArg() < 1 {
+		commandLine.Usage()
 		os.Exit(1)
 	}
-	args := flag.Args()
+	log.EnableDebugLog = *verbose
 
 	controller := tracer.NewController()
-	if err := controller.LaunchTracee(args[1], args[2:]...); err != nil {
+	if err := controller.LaunchTracee(commandLine.Args()[0], commandLine.Args()[1:]...); err != nil {
 		return fmt.Errorf("failed to launch tracee: %v", err)
 	}
 
+	opts := options{function: *function, traceLevel: *traceLevel, parseLevel: *parseLevel}
 	if err := setUpController(controller, opts); err != nil {
 		return fmt.Errorf("failed to set up the controller: %v", err)
 	}
@@ -42,19 +60,31 @@ func launch(opts options) error {
 	return controller.MainLoop()
 }
 
-func attach(opts options) error {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), `Usage:
+func attach(args []string) error {
+	commandLine := flag.NewFlagSet("", flag.ExitOnError)
+	commandLine.Usage = func() {
+		fmt.Fprintf(commandLine.Output(), `Usage:
 
-	%s attach [pid]
+  %s attach [flags] [pid]
+
+Flags:
 `, os.Args[0])
+		commandLine.PrintDefaults()
 	}
 
-	if flag.NArg() < 2 {
-		flag.Usage()
+	function := commandLine.String("trace", "main.main", traceOptionDesc)
+	traceLevel := commandLine.Int("tracelevel", 1, tracelevelOptionDesc)
+	parseLevel := commandLine.Int("parselevel", 1, parselevelOptionDesc)
+	verbose := commandLine.Bool("verbose", false, verboseOptionDesc)
+
+	commandLine.Parse(args)
+	if commandLine.NArg() < 1 {
+		commandLine.Usage()
 		os.Exit(1)
 	}
-	pid, err := strconv.Atoi(flag.Arg(1))
+	log.EnableDebugLog = *verbose
+
+	pid, err := strconv.Atoi(commandLine.Arg(0))
 	if err != nil {
 		return fmt.Errorf("invalid pid: %v", err)
 	}
@@ -64,6 +94,7 @@ func attach(opts options) error {
 		return fmt.Errorf("failed to attach tracee: %v", err)
 	}
 
+	opts := options{function: *function, traceLevel: *traceLevel, parseLevel: *parseLevel}
 	if err := setUpController(controller, opts); err != nil {
 		return fmt.Errorf("failed to set up the controller: %v", err)
 	}
@@ -88,41 +119,37 @@ func setUpController(controller *tracer.Controller, opts options) error {
 }
 
 func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), `tgo is the function tracer for Go programs.
+	commandLine := flag.NewFlagSet("", flag.ExitOnError)
+	commandLine.Usage = func() {
+		fmt.Fprintf(commandLine.Output(), `tgo is the function tracer for Go programs.
 
 Usage:
 
-	%s [flags] <command> [command arguments]
+  %s <command> [arguments]
 
 Commands:
 
-	launch   launches and traces a new process
-	attach   attaches to the exisiting process
+  launch   launches and traces a new process
+  attach   attaches to the exisiting process
 
-Flags:
+Use "tgo <command> --help" for more information about a command.
 `, os.Args[0])
-		flag.PrintDefaults()
+		commandLine.PrintDefaults()
 	}
 
-	function := flag.String("trace", "main.main", "The tracing is enabled when this `function` is called and then disabled when returned.")
-	traceLevel := flag.Int("tracelevel", 1, "Functions are traced if the stack depth is within this `tracelevel` when the function is called. The stack depth here is based on the point the tracing is enabled.")
-	parseLevel := flag.Int("parselevel", 1, "The trace log includes the function's args. The `parselevel` option determines how detailed these values should be.")
-	verbose := flag.Bool("verbose", false, "Show the logging message")
-	flag.Parse()
+	if len(os.Args) < 2 {
+		commandLine.Usage()
+		os.Exit(1)
+	}
 
-	log.EnableDebugLog = *verbose
-	opts := options{function: *function, traceLevel: *traceLevel, parseLevel: *parseLevel}
-
-	// TODO: use 3rd party package to manage subcommands.
 	var err error
-	switch flag.Arg(0) {
+	switch os.Args[1] {
 	case "launch":
-		err = launch(opts)
+		err = launch(os.Args[2:])
 	case "attach":
-		err = attach(opts)
+		err = attach(os.Args[2:])
 	default:
-		flag.Usage()
+		commandLine.Usage()
 		os.Exit(1)
 	}
 	if err != nil {
