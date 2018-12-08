@@ -73,12 +73,13 @@ var (
 	TypePrintAddrPrintMap               uint64
 	TypePrintAddrPrintNilMap            uint64
 	TypePrintAddrPrintChan              uint64
+
+	ProgramOnAndOff string
 )
 
 func init() {
 	_, srcFilename, _, _ := runtime.Caller(0)
 	srcDirname := path.Dir(srcFilename)
-	ProgramInfloop = srcDirname + "/testdata/infloop"
 
 	if err := buildProgramHelloworld(srcDirname); err != nil {
 		panic(err)
@@ -98,11 +99,15 @@ func init() {
 	if err := buildProgramTypePrint(srcDirname); err != nil {
 		panic(err)
 	}
+	if err := buildProgramOnAndOff(srcDirname); err != nil {
+		panic(err)
+	}
 
 	log.EnableDebugLog = true
 }
 
 func buildProgramHelloworld(srcDirname string) error {
+	// TODO: use filepath.Join
 	ProgramHelloworld = srcDirname + "/testdata/helloworld"
 	if err := buildProgram(ProgramHelloworld); err != nil {
 		return err
@@ -287,6 +292,11 @@ func buildProgramTypePrint(srcDirname string) error {
 	}
 
 	return walkSymbols(ProgramTypePrint, updateAddressIfMatched)
+}
+
+func buildProgramOnAndOff(srcDirname string) error {
+	ProgramOnAndOff = srcDirname + "/testdata/onAndOff"
+	return buildProgram(ProgramOnAndOff)
 }
 
 func buildProgram(programName string) error {
