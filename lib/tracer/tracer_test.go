@@ -25,7 +25,7 @@ func TestOn_NoTracerBinary(t *testing.T) {
 	tracerProgramName = "not-exist-tracer"
 	defer func() { tracerProgramName = origTracerName }()
 
-	if err := On(); err == nil {
+	if err := On(NewDefaultOption()); err == nil {
 		t.Fatalf("should return error")
 	}
 }

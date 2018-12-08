@@ -2,6 +2,7 @@ package tracer
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/rpc"
 	"os"
@@ -21,8 +22,26 @@ var (
 	tracerLock sync.Mutex
 )
 
+// Option is the options for tracer.
+type Option struct {
+	// Functions are traced if the stack depth is within this tracelevel. The stack depth here is based on the point the tracing is enabled.
+	TraceLevel int
+	// The trace log includes the function's args. The parselevel option determines how detailed these values should be.
+	ParseLevel int
+	// Show the debug-level message
+	Verbose bool
+	// Deliver tracer's stdout to this writer.
+	Stdout io.Writer
+	// Deliver tracer's stderr to this writer.
+	Stderr io.Writer
+}
+
+func NewDefaultOption() Option {
+	return Option{TraceLevel: 1, ParseLevel: 1, Stdout: os.Stdout, Stderr: os.Stderr}
+}
+
 // On enables the tracer. Ignored if the tracer is already enabled.
-func On() error {
+func On(option Option) error {
 	tracerLock.Lock()
 	defer tracerLock.Unlock()
 
@@ -31,7 +50,7 @@ func On() error {
 		return nil
 	}
 
-	addr, err := startServer()
+	addr, err := startServer(option)
 	if err != nil {
 		return err
 	}
@@ -44,7 +63,13 @@ func On() error {
 
 	// TODO: specify tracelevel and parselevel options
 	// TODO: Find proper function
-	attachArgs := &server.AttachArgs{Pid: os.Getpid(), Function: "fmt.Println", TraceLevel: 1, ParseLevel: 1}
+	attachArgs := &server.AttachArgs{
+		Pid:        os.Getpid(),
+		Function:   "fmt.Println",
+		TraceLevel: option.TraceLevel,
+		ParseLevel: option.ParseLevel,
+		Verbose:    option.Verbose,
+	}
 	if err := client.Call("Tracer.Attach", attachArgs, nil); err != nil {
 		_ = terminateServer()
 		return err
@@ -70,7 +95,7 @@ func Off() error {
 	return terminateServer()
 }
 
-func startServer() (string, error) {
+func startServer(option Option) (string, error) {
 	unusedPort, err := findUnusedPort()
 	if err != nil {
 		return "", fmt.Errorf("failed to find unused port: %v", err)
@@ -80,8 +105,8 @@ func startServer() (string, error) {
 	args := []string{"server", addr}
 	serverCmd = exec.Command(tracerProgramName, args...)
 	serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, tracer may receive the signal to this process.
-	serverCmd.Stdout = os.Stdout
-	serverCmd.Stderr = os.Stderr
+	serverCmd.Stdout = option.Stdout
+	serverCmd.Stderr = option.Stderr
 	if err := serverCmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start server: %v", err)
 	}

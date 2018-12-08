@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	if err := tracer.On(); err != nil {
+	if err := tracer.On(tracer.NewDefaultOption()); err != nil {
 		fmt.Fprintf(os.Stderr, "%v", err)
 		return
 	}
