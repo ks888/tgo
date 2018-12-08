@@ -6,6 +6,7 @@ import (
 	"net/rpc"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -14,39 +15,59 @@ import (
 
 var (
 	client            *rpc.Client
-	tracerCmd         *exec.Cmd
+	serverCmd         *exec.Cmd
 	tracerProgramName = "tgo"
+	// All exported functions must hold this lock.
+	tracerLock sync.Mutex
 )
 
-// TODO: use mutex to allow only one go routine to access these functions at a time.
-
-// On enables the tracer.
+// On enables the tracer. Ignored if the tracer is already enabled.
 func On() error {
+	tracerLock.Lock()
+	defer tracerLock.Unlock()
+
+	if serverCmd != nil {
+		// The tracer is already enabled
+		return nil
+	}
+
 	addr, err := startServer()
 	if err != nil {
 		return err
 	}
 
-	client, err := connectServer(addr)
+	client, err = connectServer(addr)
 	if err != nil {
+		_ = terminateServer()
 		return err
 	}
 
+	// TODO: specify tracelevel and parselevel options
+	// TODO: Find proper function
 	attachArgs := &server.AttachArgs{Pid: os.Getpid(), Function: "fmt.Println", TraceLevel: 1, ParseLevel: 1}
-	return client.Call("Tracer.Attach", attachArgs, nil)
+	if err := client.Call("Tracer.Attach", attachArgs, nil); err != nil {
+		_ = terminateServer()
+		return err
+	}
+	return nil
 }
 
-// Off disables the tracer.
+// Off disables the tracer. Ignored if the tracer is already disabled.
 func Off() error {
+	tracerLock.Lock()
+	defer tracerLock.Unlock()
+
+	if serverCmd == nil {
+		// The tracer is already disabled
+		return nil
+	}
+
 	if err := client.Call("Tracer.Detach", struct{}{}, nil); err != nil {
+		_ = terminateServer()
 		return err
 	}
 
-	if err := client.Close(); err != nil {
-		return err
-	}
-
-	return killServer()
+	return terminateServer()
 }
 
 func startServer() (string, error) {
@@ -57,11 +78,11 @@ func startServer() (string, error) {
 	addr := fmt.Sprintf(":%d", unusedPort)
 
 	args := []string{"server", addr}
-	tracerCmd = exec.Command(tracerProgramName, args...)
-	tracerCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, tracer may receive the signal to this process.
-	tracerCmd.Stdout = os.Stdout
-	tracerCmd.Stderr = os.Stderr
-	if err := tracerCmd.Start(); err != nil {
+	serverCmd = exec.Command(tracerProgramName, args...)
+	serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, tracer may receive the signal to this process.
+	serverCmd.Stdout = os.Stdout
+	serverCmd.Stderr = os.Stderr
+	if err := serverCmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start server: %v", err)
 	}
 	return addr, nil
@@ -93,12 +114,15 @@ func connectServer(addr string) (*rpc.Client, error) {
 	return nil, fmt.Errorf("can't connect to the server (addr: %s): %v", addr, err)
 }
 
-func killServer() error {
-	defer func() { tracerCmd = nil }()
+func terminateServer() error {
+	defer func() { serverCmd = nil }()
 
-	if err := tracerCmd.Process.Kill(); err != nil {
+	if err := client.Close(); err != nil {
 		return err
 	}
-	_, err := tracerCmd.Process.Wait()
+	if err := serverCmd.Process.Kill(); err != nil {
+		return err
+	}
+	_, err := serverCmd.Process.Wait()
 	return err
 }
