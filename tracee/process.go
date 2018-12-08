@@ -41,7 +41,11 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 		return nil, err
 	}
 
-	return newProcess(debugapiClient, name)
+	proc, err := newProcess(debugapiClient, name)
+	if err != nil {
+		debugapiClient.DetachProcess()
+	}
+	return proc, err
 }
 
 // AttachProcess attaches to the existing tracee process.
@@ -54,10 +58,15 @@ func AttachProcess(pid int) (*Process, error) {
 
 	programPath, err := findProgramPath(pid)
 	if err != nil {
+		debugapiClient.DetachProcess()
 		return nil, err
 	}
 
-	return newProcess(debugapiClient, programPath)
+	proc, err := newProcess(debugapiClient, programPath)
+	if err != nil {
+		debugapiClient.DetachProcess() // keep the attached process running
+	}
+	return proc, err
 }
 
 func newProcess(debugapiClient *lldb.Client, programPath string) (*Process, error) {

@@ -78,7 +78,7 @@ func findUnusedPort() (int, error) {
 }
 
 func connectServer(addr string) (*rpc.Client, error) {
-	const numRetries = 10
+	const numRetries = 5
 	interval := 100 * time.Millisecond
 	var err error
 	for i := 0; i < numRetries; i++ {

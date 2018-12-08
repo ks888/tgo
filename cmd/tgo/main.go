@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/ks888/tgo/log"
+	"github.com/ks888/tgo/server"
 	"github.com/ks888/tgo/tracer"
 )
 
@@ -23,7 +24,7 @@ type options struct {
 	traceLevel, parseLevel int
 }
 
-func launch(args []string) error {
+func launchCmd(args []string) error {
 	commandLine := flag.NewFlagSet("", flag.ExitOnError)
 	commandLine.Usage = func() {
 		fmt.Fprintf(commandLine.Output(), `Usage:
@@ -60,7 +61,7 @@ Flags:
 	return controller.MainLoop()
 }
 
-func attach(args []string) error {
+func attachCmd(args []string) error {
 	commandLine := flag.NewFlagSet("", flag.ExitOnError)
 	commandLine.Usage = func() {
 		fmt.Fprintf(commandLine.Output(), `Usage:
@@ -118,6 +119,27 @@ func setUpController(controller *tracer.Controller, opts options) error {
 	return nil
 }
 
+func serverCmd(args []string) error {
+	commandLine := flag.NewFlagSet("", flag.ExitOnError)
+	commandLine.Usage = func() {
+		fmt.Fprintf(commandLine.Output(), `Usage:
+
+  %s server [hostname:port]
+
+Flags:
+`, os.Args[0])
+		commandLine.PrintDefaults()
+	}
+
+	commandLine.Parse(args)
+	if commandLine.NArg() < 1 {
+		commandLine.Usage()
+		os.Exit(1)
+	}
+
+	return server.Serve(commandLine.Arg(0))
+}
+
 func main() {
 	commandLine := flag.NewFlagSet("", flag.ExitOnError)
 	commandLine.Usage = func() {
@@ -145,9 +167,11 @@ Use "tgo <command> --help" for more information about a command.
 	var err error
 	switch os.Args[1] {
 	case "launch":
-		err = launch(os.Args[2:])
+		err = launchCmd(os.Args[2:])
 	case "attach":
-		err = attach(os.Args[2:])
+		err = attachCmd(os.Args[2:])
+	case "server":
+		err = serverCmd(os.Args[2:])
 	default:
 		commandLine.Usage()
 		os.Exit(1)

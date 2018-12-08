@@ -57,7 +57,7 @@ type Parameter struct {
 func NewBinary(pathToProgram string) (Binary, error) {
 	closer, dwarfData, err := findDWARF(pathToProgram)
 	if err != nil {
-		return Binary{}, err
+		return Binary{}, fmt.Errorf("failed to find DWARF data: %v", err)
 	}
 	binary := Binary{dwarf: dwarfData, closer: closer}
 
