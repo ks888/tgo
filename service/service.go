@@ -24,6 +24,9 @@ type Tracer struct {
 type AttachArgs struct {
 	Pid                    int
 	TraceLevel, ParseLevel int
+	// This parameter is required because the tracer may not have a chance to set the new trace points
+	// after the attached tracee starts running without trace points.
+	InitialStartTracePoint uint64
 	Verbose                bool
 }
 
@@ -45,6 +48,7 @@ func (t *Tracer) Attach(args AttachArgs, reply *struct{}) error {
 	}
 	t.controller.SetTraceLevel(args.TraceLevel)
 	t.controller.SetParseLevel(args.ParseLevel)
+	t.controller.AddStartTracePoint(args.InitialStartTracePoint)
 
 	go func() { t.errCh <- t.controller.MainLoop() }()
 	return nil

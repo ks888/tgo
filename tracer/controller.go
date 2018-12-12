@@ -25,6 +25,10 @@ type Controller struct {
 	parseLevel    int
 
 	interruptCh chan bool
+	// Need the buffers because the tracer has to take the control to set the new trace point,
+	// but the tracer may not have one when the new trace point is requested.
+	pendingStartTracePoint chan uint64
+	pendingEndTracePoint   chan uint64
 	// The traced data is written to this writer.
 	outputWriter io.Writer
 }
@@ -57,7 +61,12 @@ type callingFunction struct {
 
 // NewController returns the new controller.
 func NewController() *Controller {
-	return &Controller{outputWriter: os.Stdout, interruptCh: make(chan bool)}
+	return &Controller{
+		outputWriter:           os.Stdout,
+		interruptCh:            make(chan bool),
+		pendingStartTracePoint: make(chan uint64, 64),
+		pendingEndTracePoint:   make(chan uint64, 64),
+	}
 }
 
 // LaunchTracee launches the new tracee process to be controlled.
@@ -78,28 +87,23 @@ func (c *Controller) AttachTracee(pid int) error {
 
 // AddStartTracePoint adds the starting point of the tracing. The go routines which executed one of these addresses start to be traced.
 func (c *Controller) AddStartTracePoint(startAddr uint64) error {
-	if c.tracingPoints.IsStartAddress(startAddr) {
-		return nil // set already
+	select {
+	case c.pendingStartTracePoint <- startAddr:
+	default:
+		// maybe buffer full
+		return errors.New("failed to add start trace point")
 	}
-
-	fmt.Println("set bp")
-	if err := c.process.SetBreakpoint(startAddr); err != nil {
-		return err
-	}
-	c.tracingPoints.startAddressList = append(c.tracingPoints.startAddressList, startAddr)
 	return nil
 }
 
 // AddEndTracePoint adds the ending point of the tracing. The tracing is disabled when any go routine executes any of these addresses.
 func (c *Controller) AddEndTracePoint(endAddr uint64) error {
-	if c.tracingPoints.IsEndAddress(endAddr) {
-		return nil // set already
+	select {
+	case c.pendingEndTracePoint <- endAddr:
+	default:
+		// maybe buffer full
+		return errors.New("failed to add end trace point")
 	}
-
-	if err := c.process.SetBreakpoint(endAddr); err != nil {
-		return err
-	}
-	c.tracingPoints.endAddressList = append(c.tracingPoints.endAddressList, endAddr)
 	return nil
 }
 
@@ -145,6 +149,10 @@ func (c *Controller) SetParseLevel(level int) {
 func (c *Controller) MainLoop() error {
 	defer func() { _ = c.process.Detach() }() // the connection status is unknown at this point
 
+	if err := c.setPendingTracePoints(); err != nil {
+		return err
+	}
+
 	event, err := c.process.ContinueAndWait()
 	if err != nil {
 		return fmt.Errorf("failed to trace: %v", err)
@@ -183,11 +191,44 @@ func (c *Controller) handleTrapEvent(trappedThreadIDs []int) (debugapi.Event, er
 		}
 	}
 
+	if err := c.setPendingTracePoints(); err != nil {
+		return debugapi.Event{}, err
+	}
+
 	select {
 	case <-c.interruptCh:
 		return debugapi.Event{}, ErrInterrupted
 	default:
 		return c.process.ContinueAndWait()
+	}
+}
+
+func (c *Controller) setPendingTracePoints() error {
+	for {
+		select {
+		case startAddr := <-c.pendingStartTracePoint:
+			if c.tracingPoints.IsStartAddress(startAddr) {
+				continue // set already
+			}
+
+			if err := c.process.SetBreakpoint(startAddr); err != nil {
+				return err
+			}
+			c.tracingPoints.startAddressList = append(c.tracingPoints.startAddressList, startAddr)
+
+		case endAddr := <-c.pendingEndTracePoint:
+			if c.tracingPoints.IsEndAddress(endAddr) {
+				continue // set already
+			}
+
+			if err := c.process.SetBreakpoint(endAddr); err != nil {
+				return err
+			}
+			c.tracingPoints.endAddressList = append(c.tracingPoints.endAddressList, endAddr)
+
+		default:
+			return nil // no data
+		}
 	}
 }
 

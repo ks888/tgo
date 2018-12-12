@@ -47,31 +47,21 @@ func On(option Option) error {
 	serverMtx.Lock()
 	defer serverMtx.Unlock()
 
-	if err := initialize(option); err != nil {
-		return err
-	}
-
 	pcs := make([]uintptr, 2)
 	_ = runtime.Callers(2, pcs)
-	for _, pc := range pcs {
-		fmt.Printf("pc: %x\n", pc)
-	}
-	if err := client.Call("Tracer.AddStartTracePoint", pcs[0], nil); err != nil {
-		return err
-	}
-	if err := client.Call("Tracer.AddEndTracePoint", pcs[1], nil); err != nil {
-		return err
-	}
-	fmt.Println("set successfully!")
+	startTracePoint, endTracePoint := uint64(pcs[0]), uint64(pcs[1])
 
-	return nil
+	if serverCmd == nil {
+		return initialize(option, startTracePoint, endTracePoint)
+	}
+
+	if err := client.Call("Tracer.AddStartTracePoint", startTracePoint, nil); err != nil {
+		return err
+	}
+	return client.Call("Tracer.AddEndTracePoint", endTracePoint, nil)
 }
 
-func initialize(option Option) error {
-	if serverCmd != nil {
-		return nil
-	}
-
+func initialize(option Option, startTracePoint, endTracePoint uint64) error {
 	addr, err := startServer(option)
 	if err != nil {
 		return err
@@ -84,15 +74,17 @@ func initialize(option Option) error {
 	}
 
 	attachArgs := &service.AttachArgs{
-		Pid:        os.Getpid(),
-		TraceLevel: option.TraceLevel,
-		ParseLevel: option.ParseLevel,
+		Pid:                    os.Getpid(),
+		TraceLevel:             option.TraceLevel,
+		ParseLevel:             option.ParseLevel,
+		InitialStartTracePoint: startTracePoint,
 	}
 	if err := client.Call("Tracer.Attach", attachArgs, nil); err != nil {
 		_ = terminateServer()
 		return err
 	}
-	return nil
+
+	return client.Call("Tracer.AddEndTracePoint", endTracePoint, nil)
 }
 
 // Off disables the tracer.
