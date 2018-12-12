@@ -35,58 +35,62 @@ func TestAttachProcess(t *testing.T) {
 	cmd.Process.Wait()
 }
 
-func TestSetTracePoint(t *testing.T) {
+func TestAddStartTracePoint(t *testing.T) {
 	controller := NewController()
-	err := controller.LaunchTracee(testutils.ProgramHelloworld)
+	err := controller.LaunchTracee(testutils.ProgramOnAndOff)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := controller.SetTracePoint("main.main"); err != nil {
+	if err := controller.AddStartTracePoint(testutils.OnAndOffAddrTracedFunc); err != nil {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
+	if !hasBreakpointAt(controller, "main.tracedFunc") {
+		t.Errorf("breakpoint is not set at main.tracedFunc")
+	}
 
-	if !hasBreakpointAt(controller, "main.main") {
-		t.Errorf("breakpoint is not set at main.main")
+	if err := controller.AddStartTracePoint(testutils.OnAndOffAddrTracedFunc); err != nil {
+		t.Errorf("failed to set tracing point: %v", err)
 	}
 }
 
-func TestSetTracePoint_SetTwice(t *testing.T) {
+func TestAddEndTracePoint(t *testing.T) {
 	controller := NewController()
-	err := controller.LaunchTracee(testutils.ProgramHelloworld)
+	err := controller.LaunchTracee(testutils.ProgramOnAndOff)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := controller.SetTracePoint("main.init"); err != nil {
+	if err := controller.AddEndTracePoint(testutils.OnAndOffAddrTracedFunc); err != nil {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
+	if !hasBreakpointAt(controller, "main.tracedFunc") {
+		t.Errorf("breakpoint is not set at main.tracedFunc")
+	}
 
-	if err := controller.SetTracePoint("main.main"); err == nil {
-		t.Errorf("error not returned")
+	if err := controller.AddEndTracePoint(testutils.OnAndOffAddrTracedFunc); err != nil {
+		t.Errorf("failed to set tracing point: %v", err)
 	}
 }
 
 func hasBreakpointAt(controller *Controller, functionName string) bool {
-	var addr uint64 = 0x0
-	functions, _ := controller.process.Binary.ListFunctions()
-	for _, function := range functions {
-		if function.Name == functionName {
-			addr = function.Value
-		}
+	f, err := controller.findFunction(functionName)
+	if err != nil {
+		return false
 	}
 
-	return controller.process.HasBreakpoint(addr)
+	return controller.process.HasBreakpoint(f.Value)
 }
 
 func TestMainLoop_MainMain(t *testing.T) {
 	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
+	controller.SetTraceLevel(1)
 	if err := controller.LaunchTracee(testutils.ProgramHelloworld); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracePoint("main.main"); err != nil {
+	if err := controller.AddStartTracePoint(testutils.HelloworldAddrMain); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 
@@ -95,7 +99,10 @@ func TestMainLoop_MainMain(t *testing.T) {
 	}
 
 	output := buff.String()
-	if strings.Count(output, "main.main") != 2 {
+	if strings.Count(output, "main.main") != 0 {
+		t.Errorf("unexpected output: %s", output)
+	}
+	if strings.Count(output, "main.noParameter") != 2 {
 		t.Errorf("unexpected output: %s", output)
 	}
 }
@@ -107,7 +114,11 @@ func TestMainLoop_MainNoParameter(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramHelloworld); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracePoint("main.noParameter"); err != nil {
+	controller.SetTraceLevel(1)
+	if err := controller.AddStartTracePoint(testutils.HelloworldAddrNoParameter); err != nil {
+		t.Fatalf("failed to set tracing point: %v", err)
+	}
+	if err := controller.AddEndTracePoint(testutils.HelloworldAddrOneParameter); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 
@@ -116,31 +127,13 @@ func TestMainLoop_MainNoParameter(t *testing.T) {
 	}
 
 	output := buff.String()
-	if strings.Count(output, "main.noParameter") != 2 {
-		t.Errorf("not contain 'main.noParameter':\n%s", output)
+	if strings.Count(output, "fmt.Println") != 2 {
+		t.Errorf("unexpected output: %s", output)
+	}
+	if strings.Count(output, "main.noParameter") != 0 {
+		t.Errorf("unexpected output: %s", output)
 	}
 	if strings.Count(output, "main.oneParameter") != 0 {
-		t.Errorf("contain 'main.oneParameter':\n%s", output)
-	}
-}
-
-func TestMainLoop_GoRoutines(t *testing.T) {
-	controller := NewController()
-	buff := &bytes.Buffer{}
-	controller.outputWriter = buff
-	if err := controller.LaunchTracee(testutils.ProgramGoRoutines); err != nil {
-		t.Fatalf("failed to launch process: %v", err)
-	}
-	if err := controller.SetTracePoint("main.inc"); err != nil {
-		t.Fatalf("failed to set tracing point: %v", err)
-	}
-
-	if err := controller.MainLoop(); err != nil {
-		t.Errorf("failed to run main loop: %v", err)
-	}
-
-	output := buff.String()
-	if strings.Count(output, "main.inc") != 40 {
 		t.Errorf("unexpected output: %s", output)
 	}
 }
@@ -156,7 +149,7 @@ func TestMainLoop_GoRoutines_FollowChildren(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramGoRoutines); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracePoint("main.main"); err != nil {
+	if err := controller.AddStartTracePoint(testutils.GoRoutinesAddrMain); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 	if !controller.process.Binary.GoVersion.LaterThan(tracee.GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
@@ -180,7 +173,7 @@ func TestMainLoop_Recursive(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramRecursive); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracePoint("main.main"); err != nil {
+	if err := controller.AddStartTracePoint(testutils.RecursiveAddrMain); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 	controller.SetTraceLevel(3)
@@ -202,7 +195,7 @@ func TestMainLoop_Panic(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramPanic); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracePoint("main.main"); err != nil {
+	if err := controller.AddStartTracePoint(testutils.PanicAddrMain); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 	controller.SetTraceLevel(2)
@@ -224,7 +217,7 @@ func TestInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.SetTracePoint("main.main"); err != nil {
+	if err := controller.AddStartTracePoint(testutils.InfloopAddrMain); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
 
@@ -236,23 +229,5 @@ func TestInterrupt(t *testing.T) {
 	controller.Interrupt()
 	if err := <-done; err != ErrInterrupted {
 		t.Errorf("not interrupted: %v", err)
-	}
-}
-
-func TestTracingPoint_EnterAndExit(t *testing.T) {
-	point := tracingPoint{}
-	point.Enter(1, 1)
-	if !point.Inside(1) {
-		t.Errorf("not inside")
-	}
-
-	point.Enter(1, 2)
-	point.Exit(1, 2)
-	if !point.Inside(1) {
-		t.Errorf("not inside")
-	}
-	point.Exit(1, 1)
-	if point.Inside(1) {
-		t.Errorf("still inside")
 	}
 }

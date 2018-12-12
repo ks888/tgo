@@ -7,19 +7,20 @@ import (
 	"net/rpc"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/ks888/tgo/server"
+	"github.com/ks888/tgo/service"
 )
 
 var (
 	client            *rpc.Client
 	serverCmd         *exec.Cmd
 	tracerProgramName = "tgo"
-	// All exported functions must hold this lock.
-	tracerLock sync.Mutex
+	// Protects the server command and its rpc client
+	serverMtx sync.Mutex
 )
 
 // Option is the options for tracer.
@@ -36,17 +37,38 @@ type Option struct {
 	Stderr io.Writer
 }
 
+// NewDefaultOption returns the Option with the default option enabled.
 func NewDefaultOption() Option {
 	return Option{TraceLevel: 1, ParseLevel: 1, Stdout: os.Stdout, Stderr: os.Stderr}
 }
 
-// On enables the tracer. Ignored if the tracer is already enabled.
+// On enables the tracer.
 func On(option Option) error {
-	tracerLock.Lock()
-	defer tracerLock.Unlock()
+	serverMtx.Lock()
+	defer serverMtx.Unlock()
 
+	if err := initialize(option); err != nil {
+		return err
+	}
+
+	pcs := make([]uintptr, 2)
+	_ = runtime.Callers(2, pcs)
+	for _, pc := range pcs {
+		fmt.Printf("pc: %x\n", pc)
+	}
+	if err := client.Call("Tracer.AddStartTracePoint", pcs[0], nil); err != nil {
+		return err
+	}
+	if err := client.Call("Tracer.AddEndTracePoint", pcs[1], nil); err != nil {
+		return err
+	}
+	fmt.Println("set successfully!")
+
+	return nil
+}
+
+func initialize(option Option) error {
 	if serverCmd != nil {
-		// The tracer is already enabled
 		return nil
 	}
 
@@ -61,14 +83,10 @@ func On(option Option) error {
 		return err
 	}
 
-	// TODO: specify tracelevel and parselevel options
-	// TODO: Find proper function
-	attachArgs := &server.AttachArgs{
+	attachArgs := &service.AttachArgs{
 		Pid:        os.Getpid(),
-		Function:   "fmt.Println",
 		TraceLevel: option.TraceLevel,
 		ParseLevel: option.ParseLevel,
-		Verbose:    option.Verbose,
 	}
 	if err := client.Call("Tracer.Attach", attachArgs, nil); err != nil {
 		_ = terminateServer()
@@ -77,10 +95,10 @@ func On(option Option) error {
 	return nil
 }
 
-// Off disables the tracer. Ignored if the tracer is already disabled.
+// Off disables the tracer.
 func Off() error {
-	tracerLock.Lock()
-	defer tracerLock.Unlock()
+	serverMtx.Lock()
+	defer serverMtx.Unlock()
 
 	if serverCmd == nil {
 		// The tracer is already disabled
@@ -102,7 +120,11 @@ func startServer(option Option) (string, error) {
 	}
 	addr := fmt.Sprintf(":%d", unusedPort)
 
-	args := []string{"server", addr}
+	args := []string{"server"}
+	if option.Verbose {
+		args = append(args, "-v")
+	}
+	args = append(args, addr)
 	serverCmd = exec.Command(tracerProgramName, args...)
 	serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, tracer may receive the signal to this process.
 	serverCmd.Stdout = option.Stdout
