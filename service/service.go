@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/rpc"
 
-	"github.com/ks888/tgo/log"
 	"github.com/ks888/tgo/tracer"
 )
 
@@ -17,7 +16,6 @@ const serviceVersion = 1 // increment when the backward compacibility of service
 // the rpc client uses.
 type Tracer struct {
 	controller *tracer.Controller
-	errCh      chan error
 }
 
 // AttachArgs is the input argument of the service method 'Tracer.Attach'
@@ -50,7 +48,7 @@ func (t *Tracer) Attach(args AttachArgs, reply *struct{}) error {
 	t.controller.SetParseLevel(args.ParseLevel)
 	t.controller.AddStartTracePoint(args.InitialStartTracePoint)
 
-	go func() { t.errCh <- t.controller.MainLoop() }()
+	go func() { t.controller.MainLoop() }()
 	return nil
 }
 
@@ -60,14 +58,9 @@ func (t *Tracer) Detach(args struct{}, reply *struct{}) error {
 		return nil
 	}
 
-	// TODO: the tracer may exit without clearing breakpoints. More rubust interrupt mechanism is necessary.
-	go func() {
-		t.controller.Interrupt()
-		if err := <-t.errCh; err != nil {
-			log.Printf("failed to detach: %v\n", err)
-		}
-	}()
-
+	// TODO: the tracer may be killed before detached (and clearing breakpoints). Implement the cancellation mechanism which can wait until the process is detached.
+	t.controller.Interrupt()
+	t.controller = nil
 	return nil
 }
 
@@ -83,23 +76,23 @@ func (t *Tracer) AddEndTracePoint(args uint64, reply *struct{}) error {
 
 // Serve serves the tracer service.
 func Serve(address string) error {
-	wrapper := &Tracer{errCh: make(chan error)}
+	wrapper := &Tracer{}
 	rpc.Register(wrapper)
 
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			return err
-		}
-
-		// Handle only one client at once
-		rpc.ServeConn(conn)
-		conn.Close()
+	// The server is running only for 1 client. So close the listener socket immediately and
+	// do not create a new go routine for a new connection.
+	conn, err := listener.Accept()
+	listener.Close()
+	if err != nil {
+		return err
 	}
+
+	rpc.ServeConn(conn)
+	conn.Close() // connection may be closed already
+	return nil
 }

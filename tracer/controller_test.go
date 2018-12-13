@@ -37,12 +37,12 @@ func TestAttachProcess(t *testing.T) {
 
 func TestAddStartTracePoint(t *testing.T) {
 	controller := NewController()
-	err := controller.LaunchTracee(testutils.ProgramOnAndOff)
+	err := controller.LaunchTracee(testutils.ProgramStartStop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := controller.AddStartTracePoint(testutils.OnAndOffAddrTracedFunc); err != nil {
+	if err := controller.AddStartTracePoint(testutils.StartStopAddrTracedFunc); err != nil {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
 	if err := controller.setPendingTracePoints(); err != nil {
@@ -52,19 +52,19 @@ func TestAddStartTracePoint(t *testing.T) {
 		t.Errorf("breakpoint is not set at main.tracedFunc")
 	}
 
-	if err := controller.AddStartTracePoint(testutils.OnAndOffAddrTracedFunc); err != nil {
+	if err := controller.AddStartTracePoint(testutils.StartStopAddrTracedFunc); err != nil {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
 }
 
 func TestAddEndTracePoint(t *testing.T) {
 	controller := NewController()
-	err := controller.LaunchTracee(testutils.ProgramOnAndOff)
+	err := controller.LaunchTracee(testutils.ProgramStartStop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 
-	if err := controller.AddEndTracePoint(testutils.OnAndOffAddrTracedFunc); err != nil {
+	if err := controller.AddEndTracePoint(testutils.StartStopAddrTracedFunc); err != nil {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
 	if err := controller.setPendingTracePoints(); err != nil {
@@ -74,7 +74,7 @@ func TestAddEndTracePoint(t *testing.T) {
 		t.Errorf("breakpoint is not set at main.tracedFunc")
 	}
 
-	if err := controller.AddEndTracePoint(testutils.OnAndOffAddrTracedFunc); err != nil {
+	if err := controller.AddEndTracePoint(testutils.StartStopAddrTracedFunc); err != nil {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
 }

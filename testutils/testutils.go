@@ -74,7 +74,9 @@ var (
 	TypePrintAddrPrintNilMap            uint64
 	TypePrintAddrPrintChan              uint64
 
-	ProgramOnAndOff string
+	ProgramStartStop        string
+	StartStopAddrTracedFunc uint64
+	StartStopAddrTracerOff  uint64
 )
 
 func init() {
@@ -99,7 +101,7 @@ func init() {
 	if err := buildProgramTypePrint(srcDirname); err != nil {
 		panic(err)
 	}
-	if err := buildProgramOnAndOff(srcDirname); err != nil {
+	if err := buildProgramStartStop(srcDirname); err != nil {
 		panic(err)
 	}
 
@@ -294,9 +296,24 @@ func buildProgramTypePrint(srcDirname string) error {
 	return walkSymbols(ProgramTypePrint, updateAddressIfMatched)
 }
 
-func buildProgramOnAndOff(srcDirname string) error {
-	ProgramOnAndOff = srcDirname + "/testdata/onAndOff"
-	return buildProgram(ProgramOnAndOff)
+func buildProgramStartStop(srcDirname string) error {
+	ProgramStartStop = srcDirname + "/testdata/startStop"
+
+	if err := buildProgram(ProgramStartStop); err != nil {
+		return err
+	}
+
+	updateAddressIfMatched := func(name string, value uint64) error {
+		switch name {
+		case "main.tracedFunc":
+			StartStopAddrTracedFunc = value
+		case "github.com/ks888/tgo/lib/tracer.Off":
+			StartStopAddrTracerOff = value
+		}
+		return nil
+	}
+
+	return walkSymbols(ProgramStartStop, updateAddressIfMatched)
 }
 
 func buildProgram(programName string) error {

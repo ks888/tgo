@@ -12,6 +12,8 @@ import (
 	"github.com/ks888/tgo/tracee"
 )
 
+const chanBufferSize = 64
+
 // ErrInterrupted indicates the tracer is interrupted due to the Interrupt() call.
 var ErrInterrupted = errors.New("interrupted")
 
@@ -24,9 +26,10 @@ type Controller struct {
 	traceLevel    int
 	parseLevel    int
 
-	interruptCh chan bool
-	// Need the buffers because the tracer has to take the control to set the new trace point,
-	// but the tracer may not have one when the new trace point is requested.
+	// Use the buffered channels to handle the requests to the controller asyncronously.
+	// It's because the tracee process must be trapped to handle these requests, but the process may not
+	// be trapped when the requests are sent.
+	interruptCh            chan bool
 	pendingStartTracePoint chan uint64
 	pendingEndTracePoint   chan uint64
 	// The traced data is written to this writer.
@@ -63,9 +66,9 @@ type callingFunction struct {
 func NewController() *Controller {
 	return &Controller{
 		outputWriter:           os.Stdout,
-		interruptCh:            make(chan bool),
-		pendingStartTracePoint: make(chan uint64, 64),
-		pendingEndTracePoint:   make(chan uint64, 64),
+		interruptCh:            make(chan bool, chanBufferSize),
+		pendingStartTracePoint: make(chan uint64, chanBufferSize),
+		pendingEndTracePoint:   make(chan uint64, chanBufferSize),
 	}
 }
 
@@ -145,16 +148,15 @@ func (c *Controller) SetParseLevel(level int) {
 	c.parseLevel = level
 }
 
-// MainLoop repeatedly lets the tracee continue and then wait an event.
+// MainLoop repeatedly lets the tracee continue and then wait an event. It returns ErrInterrupted error if
+// the trace ends due to the interrupt.
 func (c *Controller) MainLoop() error {
 	defer func() { _ = c.process.Detach() }() // the connection status is unknown at this point
 
-	if err := c.setPendingTracePoints(); err != nil {
+	event, err := c.continueAndWait()
+	if err == ErrInterrupted {
 		return err
-	}
-
-	event, err := c.process.ContinueAndWait()
-	if err != nil {
+	} else if err != nil {
 		return fmt.Errorf("failed to trace: %v", err)
 	}
 
@@ -170,9 +172,6 @@ func (c *Controller) MainLoop() error {
 			trappedThreadIDs := event.Data.([]int)
 			event, err = c.handleTrapEvent(trappedThreadIDs)
 			if err == ErrInterrupted {
-				if err := c.process.Detach(); err != nil {
-					return err
-				}
 				return err
 			} else if err != nil {
 				return fmt.Errorf("failed to trace: %v", err)
@@ -183,22 +182,20 @@ func (c *Controller) MainLoop() error {
 	}
 }
 
-func (c *Controller) handleTrapEvent(trappedThreadIDs []int) (debugapi.Event, error) {
-	for i := 0; i < len(trappedThreadIDs); i++ {
-		threadID := trappedThreadIDs[i]
-		if err := c.handleTrapEventOfThread(threadID); err != nil {
-			return debugapi.Event{}, err
-		}
-	}
-
-	if err := c.setPendingTracePoints(); err != nil {
-		return debugapi.Event{}, err
-	}
-
+// continueAndWait resumes the traced process and waits the process trapped again.
+// It handles requests via channels before resuming.
+func (c *Controller) continueAndWait() (debugapi.Event, error) {
 	select {
 	case <-c.interruptCh:
+		if err := c.process.Detach(); err != nil {
+			return debugapi.Event{}, err
+		}
 		return debugapi.Event{}, ErrInterrupted
 	default:
+		if err := c.setPendingTracePoints(); err != nil {
+			return debugapi.Event{}, err
+		}
+
 		return c.process.ContinueAndWait()
 	}
 }
@@ -230,6 +227,17 @@ func (c *Controller) setPendingTracePoints() error {
 			return nil // no data
 		}
 	}
+}
+
+func (c *Controller) handleTrapEvent(trappedThreadIDs []int) (debugapi.Event, error) {
+	for i := 0; i < len(trappedThreadIDs); i++ {
+		threadID := trappedThreadIDs[i]
+		if err := c.handleTrapEventOfThread(threadID); err != nil {
+			return debugapi.Event{}, err
+		}
+	}
+
+	return c.continueAndWait()
 }
 
 func (c *Controller) handleTrapEventOfThread(threadID int) error {

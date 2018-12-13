@@ -1,6 +1,7 @@
 package tracer
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -8,14 +9,18 @@ import (
 	"github.com/ks888/tgo/testutils"
 )
 
-func TestOnAndOff(t *testing.T) {
-	cmd := exec.Command(testutils.ProgramOnAndOff)
+func TestStartStop(t *testing.T) {
+	cmd := exec.Command(testutils.ProgramStartStop)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("failed to execute command: %v", err)
 	}
+	fmt.Println(string(out))
 
-	if strings.Count(string(out), "fmt.Println") != 2 {
+	if strings.Count(string(out), "main.tracedFunc") != 2 {
+		t.Errorf("unexpected output: %s", string(out))
+	}
+	if strings.Count(string(out), "fmt.Println") != 0 {
 		t.Errorf("unexpected output: %s", string(out))
 	}
 }
@@ -25,7 +30,7 @@ func TestOn_NoTracerBinary(t *testing.T) {
 	tracerProgramName = "not-exist-tracer"
 	defer func() { tracerProgramName = origTracerName }()
 
-	if err := On(NewDefaultOption()); err == nil {
+	if err := Start(); err == nil {
 		t.Fatalf("should return error")
 	}
 }

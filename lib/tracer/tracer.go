@@ -7,6 +7,7 @@ import (
 	"net/rpc"
 	"os"
 	"os/exec"
+	"reflect"
 	"runtime"
 	"sync"
 	"syscall"
@@ -19,6 +20,7 @@ var (
 	client            *rpc.Client
 	serverCmd         *exec.Cmd
 	tracerProgramName = "tgo"
+	option            = NewDefaultOption()
 	// Protects the server command and its rpc client
 	serverMtx sync.Mutex
 )
@@ -37,13 +39,18 @@ type Option struct {
 	Stderr io.Writer
 }
 
-// NewDefaultOption returns the Option with the default option enabled.
+// NewDefaultOption returns a new default option.
 func NewDefaultOption() Option {
 	return Option{TraceLevel: 1, ParseLevel: 1, Stdout: os.Stdout, Stderr: os.Stderr}
 }
 
-// On enables the tracer.
-func On(option Option) error {
+// SetOption sets the tracer option. It must be set before tracing starts.
+func SetOption(o Option) {
+	option = o
+}
+
+// Start enables tracing.
+func Start() error {
 	serverMtx.Lock()
 	defer serverMtx.Unlock()
 
@@ -52,7 +59,7 @@ func On(option Option) error {
 	startTracePoint, endTracePoint := uint64(pcs[0]), uint64(pcs[1])
 
 	if serverCmd == nil {
-		return initialize(option, startTracePoint, endTracePoint)
+		return initialize(startTracePoint, endTracePoint)
 	}
 
 	if err := client.Call("Tracer.AddStartTracePoint", startTracePoint, nil); err != nil {
@@ -61,8 +68,8 @@ func On(option Option) error {
 	return client.Call("Tracer.AddEndTracePoint", endTracePoint, nil)
 }
 
-func initialize(option Option, startTracePoint, endTracePoint uint64) error {
-	addr, err := startServer(option)
+func initialize(startTracePoint, endTracePoint uint64) error {
+	addr, err := startServer()
 	if err != nil {
 		return err
 	}
@@ -84,28 +91,26 @@ func initialize(option Option, startTracePoint, endTracePoint uint64) error {
 		return err
 	}
 
-	return client.Call("Tracer.AddEndTracePoint", endTracePoint, nil)
-}
-
-// Off disables the tracer.
-func Off() error {
-	serverMtx.Lock()
-	defer serverMtx.Unlock()
-
-	if serverCmd == nil {
-		// The tracer is already disabled
-		return nil
-	}
-
-	if err := client.Call("Tracer.Detach", struct{}{}, nil); err != nil {
+	if err := client.Call("Tracer.AddEndTracePoint", endTracePoint, nil); err != nil {
 		_ = terminateServer()
 		return err
 	}
 
-	return terminateServer()
+	stopFuncAddr := reflect.ValueOf(Stop).Pointer()
+	if err := client.Call("Tracer.AddEndTracePoint", stopFuncAddr, nil); err != nil {
+		_ = terminateServer()
+		return err
+	}
+	return nil
 }
 
-func startServer(option Option) (string, error) {
+// Stop stops tracing.
+//go:noinline
+func Stop() {
+	return
+}
+
+func startServer() (string, error) {
 	unusedPort, err := findUnusedPort()
 	if err != nil {
 		return "", fmt.Errorf("failed to find unused port: %v", err)
