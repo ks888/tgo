@@ -77,6 +77,8 @@ var (
 	ProgramStartStop        string
 	StartStopAddrTracedFunc uint64
 	StartStopAddrTracerOff  uint64
+
+	ProgramStartOnly string
 )
 
 func init() {
@@ -102,6 +104,9 @@ func init() {
 		panic(err)
 	}
 	if err := buildProgramStartStop(srcDirname); err != nil {
+		panic(err)
+	}
+	if err := buildProgramStartOnly(srcDirname); err != nil {
 		panic(err)
 	}
 
@@ -314,6 +319,12 @@ func buildProgramStartStop(srcDirname string) error {
 	}
 
 	return walkSymbols(ProgramStartStop, updateAddressIfMatched)
+}
+
+func buildProgramStartOnly(srcDirname string) error {
+	ProgramStartOnly = srcDirname + "/testdata/startOnly"
+
+	return buildProgram(ProgramStartOnly)
 }
 
 func buildProgram(programName string) error {

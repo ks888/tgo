@@ -19,34 +19,39 @@ import (
 var (
 	client            *rpc.Client
 	serverCmd         *exec.Cmd
-	tracerProgramName = "tgo"
-	option            = NewDefaultOption()
+	tracerProgramName           = "tgo"
+	traceLevel                  = 1
+	parseLevel                  = 1
+	verbose                     = false
+	writer            io.Writer = os.Stdout
+	errorWriter       io.Writer = os.Stderr
 	// Protects the server command and its rpc client
 	serverMtx sync.Mutex
 )
 
-// Option is the options for tracer.
-type Option struct {
-	// Functions are traced if the stack depth is within this tracelevel. The stack depth here is based on the point the tracing is enabled.
-	TraceLevel int
-	// The trace log includes the function's args. The parselevel option determines how detailed these values should be.
-	ParseLevel int
-	// Show the debug-level message
-	Verbose bool
-	// Deliver tracer's stdout to this writer.
-	Stdout io.Writer
-	// Deliver tracer's stderr to this writer.
-	Stderr io.Writer
+// SetTraceLevel sets the trace level. Functions are traced if the stack depth is within this trace level. The stack depth here is based on the point tracing is enabled. The default is 1.
+func SetTraceLevel(option int) {
+	traceLevel = option
 }
 
-// NewDefaultOption returns a new default option.
-func NewDefaultOption() Option {
-	return Option{TraceLevel: 1, ParseLevel: 1, Stdout: os.Stdout, Stderr: os.Stderr}
+// SetParseLevel sets the parse level. The trace log includes the function's args. The parselevel option determines how detailed these values should be. The default is 1.
+func SetParseLevel(option int) {
+	parseLevel = option
 }
 
-// SetOption sets the tracer option. It must be set before tracing starts.
-func SetOption(o Option) {
-	option = o
+// SetVerboseOption sets the verbose option. It true, the debug-level messages are written as well as the normal tracing log. The default is false.
+func SetVerboseOption(option bool) {
+	verbose = option
+}
+
+// SetWriter sets the writer for the tracing log. The default is os.Stdout.
+func SetWriter(option io.Writer) {
+	writer = option
+}
+
+// SetErrorWriter sets the writer for the error log. The default is os.Stderrr.
+func SetErrorWriter(option io.Writer) {
+	errorWriter = option
 }
 
 // Start enables tracing.
@@ -82,8 +87,8 @@ func initialize(startTracePoint, endTracePoint uint64) error {
 
 	attachArgs := &service.AttachArgs{
 		Pid:                    os.Getpid(),
-		TraceLevel:             option.TraceLevel,
-		ParseLevel:             option.ParseLevel,
+		TraceLevel:             traceLevel,
+		ParseLevel:             parseLevel,
 		InitialStartTracePoint: startTracePoint,
 	}
 	if err := client.Call("Tracer.Attach", attachArgs, nil); err != nil {
@@ -105,6 +110,7 @@ func initialize(startTracePoint, endTracePoint uint64) error {
 }
 
 // Stop stops tracing.
+//
 //go:noinline
 func Stop() {
 	return
@@ -118,14 +124,14 @@ func startServer() (string, error) {
 	addr := fmt.Sprintf(":%d", unusedPort)
 
 	args := []string{"server"}
-	if option.Verbose {
+	if verbose {
 		args = append(args, "-v")
 	}
 	args = append(args, addr)
 	serverCmd = exec.Command(tracerProgramName, args...)
 	serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, tracer may receive the signal to this process.
-	serverCmd.Stdout = option.Stdout
-	serverCmd.Stderr = option.Stderr
+	serverCmd.Stdout = writer
+	serverCmd.Stderr = errorWriter
 	if err := serverCmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start server: %v", err)
 	}

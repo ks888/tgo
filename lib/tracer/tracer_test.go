@@ -1,7 +1,6 @@
 package tracer
 
 import (
-	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -13,14 +12,25 @@ func TestStartStop(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramStartStop)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("failed to execute command: %v", err)
+		t.Fatalf("failed to execute command: %v, %s", err, string(out))
 	}
-	fmt.Println(string(out))
 
 	if strings.Count(string(out), "main.tracedFunc") != 2 {
 		t.Errorf("unexpected output: %s", string(out))
 	}
 	if strings.Count(string(out), "fmt.Println") != 0 {
+		t.Errorf("unexpected output: %s", string(out))
+	}
+}
+
+func TestStart(t *testing.T) {
+	cmd := exec.Command(testutils.ProgramStartOnly)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to execute command: %v, %s", err, string(out))
+	}
+
+	if strings.Count(string(out), "fmt.Println") != 2 {
 		t.Errorf("unexpected output: %s", string(out))
 	}
 }
