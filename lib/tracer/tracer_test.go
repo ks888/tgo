@@ -1,7 +1,10 @@
 package tracer
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -43,4 +46,25 @@ func TestOn_NoTracerBinary(t *testing.T) {
 	if err := Start(); err == nil {
 		t.Fatalf("should return error")
 	}
+}
+
+func TestMain(m *testing.M) {
+	_, srcFilename, _, _ := runtime.Caller(0)
+	srcDirname := filepath.Dir(srcFilename)
+	buildDirname := filepath.Join(srcDirname, "build")
+	_ = os.Mkdir(buildDirname, os.FileMode(0700)) // the directory may exist already
+
+	testBinaryName := filepath.Join(buildDirname, "tgo")
+	args := []string{"build", "-o", testBinaryName, filepath.Join(srcDirname, "..", "..", "cmd", "tgo")}
+	if err := exec.Command("go", args...).Run(); err != nil {
+		panic(err)
+	}
+	orgPath := os.Getenv("PATH")
+	os.Setenv("PATH", buildDirname+string(os.PathListSeparator)+orgPath)
+
+	exitStatus := m.Run()
+	// the deferred function is not called when os.Exit()
+	_ = os.RemoveAll(buildDirname)
+	os.Setenv("PATH", orgPath)
+	os.Exit(exitStatus)
 }

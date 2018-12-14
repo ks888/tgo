@@ -167,12 +167,18 @@ func connectServer(addr string) (*rpc.Client, error) {
 func terminateServer() error {
 	defer func() { serverCmd = nil }()
 
-	if err := client.Close(); err != nil {
+	if client != nil {
+		if err := client.Close(); err != nil {
+			return err
+		}
+	}
+
+	if serverCmd != nil {
+		if err := serverCmd.Process.Kill(); err != nil {
+			return err
+		}
+		_, err := serverCmd.Process.Wait()
 		return err
 	}
-	if err := serverCmd.Process.Kill(); err != nil {
-		return err
-	}
-	_, err := serverCmd.Process.Wait()
-	return err
+	return nil
 }

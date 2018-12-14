@@ -5,7 +5,6 @@ import (
 	"debug/macho"
 	"fmt"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -83,7 +82,7 @@ var (
 
 func init() {
 	_, srcFilename, _, _ := runtime.Caller(0)
-	srcDirname := path.Dir(srcFilename)
+	srcDirname := filepath.Dir(srcFilename)
 
 	if err := buildProgramHelloworld(srcDirname); err != nil {
 		panic(err)
