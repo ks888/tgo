@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"log"
 	"net"
 	"net/rpc"
 
@@ -16,6 +17,7 @@ const serviceVersion = 1 // increment whenever any changes are aded to service m
 // the rpc client uses.
 type Tracer struct {
 	controller *tracer.Controller
+	errCh      chan error
 }
 
 // AttachArgs is the input argument of the service method 'Tracer.Attach'
@@ -48,7 +50,7 @@ func (t *Tracer) Attach(args AttachArgs, reply *struct{}) error {
 	t.controller.SetParseLevel(args.ParseLevel)
 	t.controller.AddStartTracePoint(args.InitialStartTracePoint)
 
-	go func() { t.controller.MainLoop() }()
+	go func() { t.errCh <- t.controller.MainLoop() }()
 	return nil
 }
 
@@ -58,9 +60,14 @@ func (t *Tracer) Detach(args struct{}, reply *struct{}) error {
 		return nil
 	}
 
-	// TODO: the tracer may be killed before detached (and clearing breakpoints). Implement the cancellation mechanism which can wait until the process is detached.
+	// TODO: the tracer may be killed before detached (and before breakpoints cleared). Implement the cancellation mechanism which can wait until the process is detached.
 	t.controller.Interrupt()
-	t.controller = nil
+	go func() {
+		if err := <-t.errCh; err != nil {
+			log.Printf("%v", err)
+		}
+		t.controller = nil
+	}()
 	return nil
 }
 
@@ -76,7 +83,7 @@ func (t *Tracer) AddEndTracePoint(args uint64, reply *struct{}) error {
 
 // Serve serves the tracer service.
 func Serve(address string) error {
-	wrapper := &Tracer{}
+	wrapper := &Tracer{errCh: make(chan error)}
 	rpc.Register(wrapper)
 
 	listener, err := net.Listen("tcp", address)
