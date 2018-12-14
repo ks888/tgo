@@ -13,6 +13,7 @@ func tracedFunc() {
 }
 
 func main() {
+	tracer.SetTraceLevel(2)
 	if err := tracer.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v", err)
 		return

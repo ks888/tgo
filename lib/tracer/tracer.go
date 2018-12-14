@@ -16,6 +16,8 @@ import (
 	"github.com/ks888/tgo/service"
 )
 
+const expectedVersion = 1
+
 var (
 	client            *rpc.Client
 	serverCmd         *exec.Cmd
@@ -76,11 +78,16 @@ func Start() error {
 func initialize(startTracePoint, endTracePoint uint64) error {
 	addr, err := startServer()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to enable tracer: %v", err)
 	}
 
 	client, err = connectServer(addr)
 	if err != nil {
+		_ = terminateServer()
+		return err
+	}
+
+	if err := checkVersion(); err != nil {
 		_ = terminateServer()
 		return err
 	}
@@ -105,6 +112,17 @@ func initialize(startTracePoint, endTracePoint uint64) error {
 	if err := client.Call("Tracer.AddEndTracePoint", stopFuncAddr, nil); err != nil {
 		_ = terminateServer()
 		return err
+	}
+	return nil
+}
+
+func checkVersion() error {
+	var serverVersion int
+	if err := client.Call("Tracer.Version", struct{}{}, &serverVersion); err != nil {
+		return err
+	}
+	if expectedVersion != serverVersion {
+		return fmt.Errorf("the expected API version (%d) is not same as the actual API version (%d)", expectedVersion, serverVersion)
 	}
 	return nil
 }

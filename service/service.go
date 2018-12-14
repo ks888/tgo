@@ -8,7 +8,7 @@ import (
 	"github.com/ks888/tgo/tracer"
 )
 
-const serviceVersion = 1 // increment when the backward compacibility of service methods is broken.
+const serviceVersion = 1 // increment whenever any changes are aded to service methods.
 
 // Tracer is the wrapper of the actual tracer in tgo/tracer package.
 //

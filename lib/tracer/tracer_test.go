@@ -21,7 +21,7 @@ func TestStartStop(t *testing.T) {
 	if strings.Count(string(out), "main.tracedFunc") != 2 {
 		t.Errorf("unexpected output: %s", string(out))
 	}
-	if strings.Count(string(out), "fmt.Println") != 0 {
+	if strings.Count(string(out), "fmt.Println") != 2 {
 		t.Errorf("unexpected output: %s", string(out))
 	}
 }
