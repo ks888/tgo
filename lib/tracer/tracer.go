@@ -66,7 +66,11 @@ func Start() error {
 	startTracePoint, endTracePoint := uint64(pcs[0]), uint64(pcs[1])
 
 	if serverCmd == nil {
-		return initialize(startTracePoint, endTracePoint)
+		err := initialize(startTracePoint, endTracePoint)
+		if err != nil {
+			_ = terminateServer()
+		}
+		return err
 	}
 
 	if err := client.Call("Tracer.AddStartTracePoint", startTracePoint, nil); err != nil {
@@ -83,12 +87,10 @@ func initialize(startTracePoint, endTracePoint uint64) error {
 
 	client, err = connectServer(addr)
 	if err != nil {
-		_ = terminateServer()
 		return err
 	}
 
 	if err := checkVersion(); err != nil {
-		_ = terminateServer()
 		return err
 	}
 
@@ -99,21 +101,15 @@ func initialize(startTracePoint, endTracePoint uint64) error {
 		InitialStartTracePoint: startTracePoint,
 	}
 	if err := client.Call("Tracer.Attach", attachArgs, nil); err != nil {
-		_ = terminateServer()
 		return err
 	}
 
 	if err := client.Call("Tracer.AddEndTracePoint", endTracePoint, nil); err != nil {
-		_ = terminateServer()
 		return err
 	}
 
 	stopFuncAddr := reflect.ValueOf(Stop).Pointer()
-	if err := client.Call("Tracer.AddEndTracePoint", stopFuncAddr, nil); err != nil {
-		_ = terminateServer()
-		return err
-	}
-	return nil
+	return client.Call("Tracer.AddEndTracePoint", stopFuncAddr, nil)
 }
 
 func checkVersion() error {
@@ -191,7 +187,7 @@ func terminateServer() error {
 		}
 	}
 
-	if serverCmd != nil {
+	if serverCmd != nil && serverCmd.Process != nil {
 		if err := serverCmd.Process.Kill(); err != nil {
 			return err
 		}
