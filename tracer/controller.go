@@ -124,14 +124,38 @@ func (c *Controller) findFunction(functionName string) (*tracee.Function, error)
 	return nil, fmt.Errorf("failed to find function %s", functionName)
 }
 
+// The list of functions which should not set the breakpoint for some reason.
+// Always write a comment to describe the reason blacklisted.
+var blacklist = []string{
+	"gosave", // used when libc function is called. e.g. when runtime.lock() fails to acquire the lock immediately, it may wait a little more using libc's usleep(). The tracing log of this function appears suddenly and suprises an user.
+}
+
+// The list of runtime and unexported functions which can set the breakpoint.
+// Always write a comment to describe the reason whitelisted.
+var whitelist = []string{
+	"runtime.gopanic",   // need to trap gopanic function in order to calculate a stack depth correctly.
+	"runtime.chansend1", // builtin function: ch <- x
+	"runtime.chanrecv1", // builtin function: x <- ch
+}
+
 // canSetBreakpoint returns true if it's safe to set the breakpoint at the given function.
 // Most unexported runtime functions are not supported, because these functions make the tracer unstable (especially in the case the system stack is used).
 func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
 	const runtimePrefix = "runtime."
 	if strings.HasPrefix(function.Name, runtimePrefix) {
-		return function.IsExported() || function.Name == "runtime.gopanic" // need to trap gopanic function in order to calculate a stack depth correctly.
+		for _, f := range whitelist {
+			if f == function.Name {
+				return true
+			}
+		}
+		return function.IsExported()
 	}
 
+	for _, f := range blacklist {
+		if f == function.Name {
+			return false
+		}
+	}
 	return true
 }
 
