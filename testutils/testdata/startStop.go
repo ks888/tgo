@@ -12,6 +12,7 @@ func tracedFunc() {
 }
 
 func main() {
+	tracer.SetVerboseOption(true)
 	tracer.SetTraceLevel(2)
 	if err := tracer.Start(); err != nil {
 		panic(err)

@@ -83,8 +83,8 @@ func (t *Tracer) AddEndTracePoint(args uint64, reply *struct{}) error {
 
 // Serve serves the tracer service.
 func Serve(address string) error {
-	wrapper := &Tracer{errCh: make(chan error)}
-	rpc.Register(wrapper)
+	tracer := &Tracer{errCh: make(chan error)}
+	rpc.Register(tracer)
 
 	listener, err := net.Listen("tcp", address)
 	if err != nil {

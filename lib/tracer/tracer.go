@@ -139,7 +139,7 @@ func startServer() (string, error) {
 
 	args := []string{"server"}
 	if verbose {
-		args = append(args, "-v")
+		args = append(args, "-verbose")
 	}
 	args = append(args, addr)
 	serverCmd = exec.Command(tracerProgramName, args...)
