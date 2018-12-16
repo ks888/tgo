@@ -41,6 +41,7 @@ type Client struct {
 
 	readTLSFuncAddr  uint64
 	currentTLSOffset uint32
+	pendingSignal    int
 }
 
 // NewClient returns the new debug api client which depends on OS API.
@@ -535,14 +536,20 @@ func (c *Client) buildReadTLSFunction(offset uint32) []byte {
 // ContinueAndWait resumes processes and waits until an event happens.
 // The exited event is reported when the main process exits (and not when its threads exit).
 func (c *Client) ContinueAndWait() (debugapi.Event, error) {
-	return c.continueAndWait(0)
+	return c.continueAndWait(c.pendingSignal)
 }
 
 // StepAndWait executes the one instruction of the specified thread and waits until an event happens.
 // The returned event may not be the trapped event.
 // If unspecified thread is stopped, debugapi.UnspecifiedThreadError is returned.
 func (c *Client) StepAndWait(threadID int) (debugapi.Event, error) {
-	command := fmt.Sprintf("vCont;s:%x", threadID)
+	var command string
+	if c.pendingSignal == 0 {
+		command = fmt.Sprintf("vCont;s:%x", threadID)
+	} else {
+		command = fmt.Sprintf("vCont;S%02x:%x", c.pendingSignal, threadID)
+	}
+
 	if err := c.send(command); err != nil {
 		return debugapi.Event{}, fmt.Errorf("send error: %v", err)
 	}
@@ -563,6 +570,8 @@ func (c *Client) continueAndWait(signalNumber int) (debugapi.Event, error) {
 	if signalNumber == 0 {
 		command = "vCont;c"
 	} else {
+		// Though the signal number is specified, it's like the debugserver does not pass the signals like SIGTERM and SIGINT to the debugee.
+		// QPassSignals can change this setting, but debugserver (900.0.64) doesn't support the query.
 		command = fmt.Sprintf("vCont;C%02x", signalNumber)
 	}
 	if err := c.send(command); err != nil {
@@ -708,6 +717,11 @@ func (c *Client) handleTPacket(packet string) (debugapi.Event, error) {
 		return debugapi.Event{}, err
 	} else if len(trappedThreadIDs) == 0 {
 		return c.continueAndWait(int(signalNumber))
+	}
+	if syscall.Signal(signalNumber) != unix.SIGTRAP {
+		c.pendingSignal = int(signalNumber)
+	} else {
+		c.pendingSignal = 0
 	}
 
 	return debugapi.Event{Type: debugapi.EventTypeTrapped, Data: trappedThreadIDs}, nil

@@ -318,38 +318,13 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 	defer client.DetachProcess()
 
 	pid, _ := findProcessID(path.Base(testutils.ProgramInfloop), client.pid)
-	// Note that the debugserver does not pass the signals like SIGTERM and SIGINT to the debugee.
-	_ = sendSignal(pid, unix.SIGKILL)
+	_ = sendSignal(pid, unix.SIGKILL) // SIGTERM is not passed to the debugee
 
 	event, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 	if event != (debugapi.Event{Type: debugapi.EventTypeTerminated, Data: 0}) {
-		t.Fatalf("wrong event: %v", event)
-	}
-}
-
-func TestContinueAndWait_Stopped(t *testing.T) {
-	client := NewClient()
-	err := client.LaunchProcess(testutils.ProgramHelloworld)
-	if err != nil {
-		t.Fatalf("failed to launch process: %v", err)
-	}
-	defer client.DetachProcess()
-
-	pid, err := findProcessID(path.Base(testutils.ProgramHelloworld), client.pid)
-	if err != nil {
-		t.Fatalf("failed to find process id: %v", err)
-	}
-	_ = sendSignal(pid, unix.SIGUSR1)
-
-	// non-SIGTRAP signal is handled internally.
-	event, err := client.ContinueAndWait()
-	if err != nil {
-		t.Fatalf("failed to continue and wait: %v", err)
-	}
-	if event != (debugapi.Event{Type: debugapi.EventTypeExited, Data: 0}) {
 		t.Fatalf("wrong event: %v", event)
 	}
 }
