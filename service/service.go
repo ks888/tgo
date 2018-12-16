@@ -7,6 +7,7 @@ import (
 	"net/rpc"
 	"os"
 	"os/signal"
+	"sync"
 
 	"github.com/ks888/tgo/tracer"
 )
@@ -20,6 +21,7 @@ const serviceVersion = 1 // increment whenever any changes are aded to service m
 type Tracer struct {
 	controller *tracer.Controller
 	errCh      chan error
+	mtx        sync.Mutex // protects controller
 }
 
 // AttachArgs is the input argument of the service method 'Tracer.Attach'
@@ -40,6 +42,8 @@ func (t *Tracer) Version(args struct{}, reply *int) error {
 
 // Attach lets the server attach to the specified process. It does nothing if the server is already attached.
 func (t *Tracer) Attach(args AttachArgs, reply *struct{}) error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
 	if t.controller != nil {
 		return errors.New("already attached")
 	}
@@ -52,21 +56,28 @@ func (t *Tracer) Attach(args AttachArgs, reply *struct{}) error {
 	t.controller.SetParseLevel(args.ParseLevel)
 	t.controller.AddStartTracePoint(args.InitialStartTracePoint)
 
-	go func() { t.errCh <- t.controller.MainLoop() }()
+	go func() {
+		t.errCh <- t.controller.MainLoop()
+	}()
 	return nil
 }
 
 // Detach lets the server detach from the attached process.
 func (t *Tracer) Detach(args struct{}, reply *struct{}) error {
+	t.mtx.Lock()
 	if t.controller == nil {
+		t.mtx.Unlock()
 		return nil
 	}
 
 	// TODO: the tracer may be killed before detached (and before breakpoints cleared). Implement the cancellation mechanism which can wait until the process is detached.
 	t.controller.Interrupt()
 	go func() {
-		if err := <-t.errCh; err != nil {
+		defer t.mtx.Unlock()
+		if err := <-t.errCh; err != nil && err != tracer.ErrInterrupted {
 			log.Printf("%v", err)
+		} else {
+			log.Printf("detached")
 		}
 		t.controller = nil
 	}()
@@ -75,11 +86,23 @@ func (t *Tracer) Detach(args struct{}, reply *struct{}) error {
 
 // AddStartTracePoint adds a new start trace point.
 func (t *Tracer) AddStartTracePoint(args uint64, reply *struct{}) error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	if t.controller == nil {
+		return nil
+	}
 	return t.controller.AddStartTracePoint(args)
 }
 
 // AddEndTracePoint adds a new end trace point.
 func (t *Tracer) AddEndTracePoint(args uint64, reply *struct{}) error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	if t.controller == nil {
+		return nil
+	}
 	return t.controller.AddEndTracePoint(args)
 }
 
@@ -91,11 +114,11 @@ func Serve(address string) error {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch)
 	go func() {
-		sig := <-ch
-		switch sig {
-		case os.Interrupt:
-			if tracer.controller != nil {
-				tracer.controller.Interrupt()
+		for {
+			sig := <-ch
+			switch sig {
+			case os.Interrupt:
+				_ = tracer.Detach(struct{}{}, nil)
 			}
 		}
 	}()

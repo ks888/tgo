@@ -58,6 +58,7 @@ func SetErrorWriter(option io.Writer) {
 // Start enables tracing.
 func Start() error {
 	serverMtx.Lock()
+
 	defer serverMtx.Unlock()
 
 	pcs := make([]uintptr, 2)
@@ -72,10 +73,11 @@ func Start() error {
 		return err
 	}
 
-	if err := client.Call("Tracer.AddStartTracePoint", startTracePoint, nil); err != nil {
+	reply := &struct{}{} // sometimes the nil reply value causes panic even if the reply is not written.
+	if err := client.Call("Tracer.AddStartTracePoint", startTracePoint, reply); err != nil {
 		return err
 	}
-	return client.Call("Tracer.AddEndTracePoint", endTracePoint, nil)
+	return client.Call("Tracer.AddEndTracePoint", endTracePoint, reply)
 }
 
 func initialize(startTracePoint, endTracePoint uint64) error {
@@ -99,16 +101,17 @@ func initialize(startTracePoint, endTracePoint uint64) error {
 		ParseLevel:             parseLevel,
 		InitialStartTracePoint: startTracePoint,
 	}
-	if err := client.Call("Tracer.Attach", attachArgs, nil); err != nil {
+	reply := &struct{}{}
+	if err := client.Call("Tracer.Attach", attachArgs, reply); err != nil {
 		return err
 	}
 
-	if err := client.Call("Tracer.AddEndTracePoint", endTracePoint, nil); err != nil {
+	if err := client.Call("Tracer.AddEndTracePoint", endTracePoint, reply); err != nil {
 		return err
 	}
 
 	stopFuncAddr := reflect.ValueOf(Stop).Pointer()
-	return client.Call("Tracer.AddEndTracePoint", stopFuncAddr, nil)
+	return client.Call("Tracer.AddEndTracePoint", stopFuncAddr, reply)
 }
 
 func checkVersion() error {
