@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ks888/tgo/service"
@@ -58,7 +59,6 @@ func SetErrorWriter(option io.Writer) {
 // Start enables tracing.
 func Start() error {
 	serverMtx.Lock()
-
 	defer serverMtx.Unlock()
 
 	pcs := make([]uintptr, 2)
@@ -145,7 +145,7 @@ func startServer() (string, error) {
 	}
 	args = append(args, addr)
 	serverCmd = exec.Command(tracerProgramName, args...)
-	// Place the new process to the same process group in order to detect the signals delivered to the parent process.
+	serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, tracer may receive the signal to this process.
 	serverCmd.Stdout = writer
 	serverCmd.Stderr = errorWriter
 	if err := serverCmd.Start(); err != nil {

@@ -5,8 +5,6 @@ import (
 	"log"
 	"net"
 	"net/rpc"
-	"os"
-	"os/signal"
 	"sync"
 
 	"github.com/ks888/tgo/tracer"
@@ -56,9 +54,7 @@ func (t *Tracer) Attach(args AttachArgs, reply *struct{}) error {
 	t.controller.SetParseLevel(args.ParseLevel)
 	t.controller.AddStartTracePoint(args.InitialStartTracePoint)
 
-	go func() {
-		t.errCh <- t.controller.MainLoop()
-	}()
+	go func() { t.errCh <- t.controller.MainLoop() }()
 	return nil
 }
 
@@ -110,18 +106,6 @@ func (t *Tracer) AddEndTracePoint(args uint64, reply *struct{}) error {
 func Serve(address string) error {
 	tracer := &Tracer{errCh: make(chan error)}
 	rpc.Register(tracer)
-
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch)
-	go func() {
-		for {
-			sig := <-ch
-			switch sig {
-			case os.Interrupt:
-				_ = tracer.Detach(struct{}{}, nil)
-			}
-		}
-	}()
 
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
