@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/ks888/tgo/service"
@@ -143,7 +142,7 @@ func startServer() (string, error) {
 	}
 	args = append(args, addr)
 	serverCmd = exec.Command(tracerProgramName, args...)
-	serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, tracer may receive the signal to this process.
+	// Place the new process to the same process group in order to detect the signals delivered to the parent process.
 	serverCmd.Stdout = writer
 	serverCmd.Stderr = errorWriter
 	if err := serverCmd.Start(); err != nil {

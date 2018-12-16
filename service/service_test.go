@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 
@@ -49,6 +50,30 @@ func TestServe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to serve: %v", err)
 	}
+}
+
+func TestServe_Interrupt(t *testing.T) {
+	unusedPort, err := findUnusedPort()
+	if err != nil {
+		t.Fatalf("failed to find unused port: %v", err)
+	}
+	addr := fmt.Sprintf(":%d", unusedPort)
+
+	errCh := make(chan error)
+	go func() {
+		errCh <- Serve(addr)
+	}()
+
+	// expect the signal is just ignored, because the tracer is not attached.
+	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+
+	conn, err := connect(addr)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	conn.Close()
+
+	_ = <-errCh
 }
 
 func findUnusedPort() (int, error) {
