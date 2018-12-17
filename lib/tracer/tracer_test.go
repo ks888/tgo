@@ -46,20 +46,32 @@ func TestStart_NoTracerBinary(t *testing.T) {
 func TestMain(m *testing.M) {
 	_, srcFilename, _, _ := runtime.Caller(0)
 	srcDirname := filepath.Dir(srcFilename)
-	buildDirname := filepath.Join(srcDirname, "build")
-	_ = os.Mkdir(buildDirname, os.FileMode(0700)) // the directory may exist already
+	outDirname := filepath.Join(srcDirname, "build")
+	_ = os.Mkdir(outDirname, os.FileMode(0700)) // the directory may exist already
 
-	testBinaryName := filepath.Join(buildDirname, "tgo")
-	args := []string{"build", "-o", testBinaryName, filepath.Join(srcDirname, "..", "..", "cmd", "tgo")}
-	if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
-		panic(fmt.Errorf("failed to build: %v\n%s", err, string(out)))
+	if err := build(filepath.Join(srcDirname, "..", "..", "cmd", "tgo"), filepath.Join(outDirname, "tgo")); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to build: %v", err)
 	}
+
 	orgPath := os.Getenv("PATH")
-	os.Setenv("PATH", buildDirname+string(os.PathListSeparator)+orgPath)
+	os.Setenv("PATH", outDirname+string(os.PathListSeparator)+orgPath)
 
 	exitStatus := m.Run()
 	// the deferred function is not called when os.Exit()
-	_ = os.RemoveAll(buildDirname)
+	_ = os.RemoveAll(outDirname)
 	os.Setenv("PATH", orgPath)
 	os.Exit(exitStatus)
+}
+
+func build(mainPkgDirname, pathToBinary string) error {
+	pkgPath, err := filepath.Rel(filepath.Join(os.Getenv("GOPATH"), "src"), mainPkgDirname)
+	if err != nil {
+		return err
+	}
+
+	args := []string{"build", "-o", pathToBinary, pkgPath}
+	if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("%v\n%s", err, string(out))
+	}
+	return nil
 }
