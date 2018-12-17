@@ -1,6 +1,7 @@
 package tracer
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +33,7 @@ func TestStart(t *testing.T) {
 	}
 }
 
-func TestOn_NoTracerBinary(t *testing.T) {
+func TestStart_NoTracerBinary(t *testing.T) {
 	origTracerName := tracerProgramName
 	tracerProgramName = "not-exist-tracer"
 	defer func() { tracerProgramName = origTracerName }()
@@ -50,8 +51,8 @@ func TestMain(m *testing.M) {
 
 	testBinaryName := filepath.Join(buildDirname, "tgo")
 	args := []string{"build", "-o", testBinaryName, filepath.Join(srcDirname, "..", "..", "cmd", "tgo")}
-	if err := exec.Command("go", args...).Run(); err != nil {
-		panic(err)
+	if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
+		panic(fmt.Errorf("failed to build: %v\n%s", err, string(out)))
 	}
 	orgPath := os.Getenv("PATH")
 	os.Setenv("PATH", buildDirname+string(os.PathListSeparator)+orgPath)

@@ -1,6 +1,6 @@
 # tgo: the function tracer for Go programs.
 
-[![GoDoc](https://godoc.org/github.com/ks888/tgo?status.svg)](https://godoc.org/github.com/ks888/tgo/lib)
+[![GoDoc](https://godoc.org/github.com/ks888/tgo?status.svg)](https://godoc.org/github.com/ks888/tgo/lib/tracer)
 [![Build Status](https://travis-ci.com/ks888/tgo.svg?branch=master)](https://travis-ci.com/ks888/tgo)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ks888/tgo)](https://goreportcard.com/report/github.com/ks888/tgo)
 
@@ -73,6 +73,6 @@ go get -u github.com/ks888/tgo/cmd/tgo
 
 ### Usage
 
-Call `tracer.Start()` to start tracing and call `tracer.Stop()` to stop tracing. That's it!
+Call `tracer.Start()` to start tracing and call `tracer.Stop()` (or just return from the caller of `tracer.Start()`) to stop tracing. That's it!
 
-There are some options which change how detailed the traced logs are and the output writer of these logs. See the [godoc]((https://godoc.org/github.com/ks888/tgo/lib)) for more info.
+There are some options which change how detailed the traced logs are and the output writer of these logs. See the [godoc](https://godoc.org/github.com/ks888/tgo/lib/tracer) for more info.
