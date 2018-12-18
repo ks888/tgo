@@ -136,6 +136,7 @@ var whitelist = []string{
 	"runtime.gopanic",   // need to trap gopanic function in order to calculate a stack depth correctly.
 	"runtime.chansend1", // builtin function: ch <- x
 	"runtime.chanrecv1", // builtin function: x <- ch
+	"runtime.makeslice", // builtin function: make([]...)
 }
 
 // canSetBreakpoint returns true if it's safe to set the breakpoint at the given function.
@@ -297,7 +298,7 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 }
 
 func (c *Controller) enterTracepoint(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	if c.tracingPoints.Empty() {
+	if !c.tracingPoints.InsideAny() {
 		if err := c.setBreakpointsExceptTracingPoint(); err != nil {
 			return err
 		}
@@ -309,13 +310,13 @@ func (c *Controller) enterTracepoint(threadID int, goRoutineInfo tracee.GoRoutin
 }
 
 func (c *Controller) exitTracepoint(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	if !c.tracingPoints.Empty() {
+	if c.tracingPoints.InsideAny() {
 		if err := c.clearBreakpointsExceptTracingPoint(); err != nil {
 			return err
 		}
+		c.tracingPoints.Exit()
 	}
 
-	c.tracingPoints.Exit()
 	breakpointAddr := goRoutineInfo.CurrentPC - 1
 	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 }
@@ -586,8 +587,8 @@ func (p *tracingPoints) IsEndAddress(addr uint64) bool {
 }
 
 // Empty returns true if no go routines are inside the tracing point
-func (p *tracingPoints) Empty() bool {
-	return len(p.goRoutinesInside) == 0
+func (p *tracingPoints) InsideAny() bool {
+	return len(p.goRoutinesInside) != 0
 }
 
 // Enter updates the list of the go routines which are inside the tracing point.
@@ -599,14 +600,14 @@ func (p *tracingPoints) Enter(goRoutineID int64) {
 		}
 	}
 
-	log.Debugf("Start tracing")
+	log.Debugf("Start tracing of go routine #%d", goRoutineID)
 	p.goRoutinesInside = append(p.goRoutinesInside, goRoutineID)
 	return
 }
 
 // Exit clears the inside go routines list.
 func (p *tracingPoints) Exit() {
-	log.Debugf("End tracing")
+	log.Debugf("End tracing of all go routines")
 	p.goRoutinesInside = nil
 }
 
