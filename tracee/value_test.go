@@ -156,7 +156,7 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 			}
 		}},
 	} {
-		if !proc.Binary.GoVersion.LaterThan(testdata.testIfLaterThan) {
+		if !proc.Binary.CompiledGoVersion().LaterThan(testdata.testIfLaterThan) {
 			continue
 		}
 

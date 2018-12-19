@@ -21,13 +21,35 @@ const (
 	dwarfOpFbreg          = 0x91   // DW_OP_fbreg
 )
 
-// Binary represents the program the tracee process executes
-type Binary struct {
-	dwarf        dwarfData
-	closer       io.Closer
-	GoVersion    GoVersion
-	types        map[uint64]dwarf.Offset
-	runtimeGType dwarf.Type
+// BinaryFile represents the program the tracee process is executing.
+type BinaryFile interface {
+	// FindFunction returns the function info to which the given pc specifies.
+	FindFunction(pc uint64) (*Function, error)
+	// Functions returns all the functions defined in the binary.
+	Functions() []*Function
+	// CompiledGoVersion returns the go version used to compile this binary.
+	CompiledGoVersion() GoVersion
+	// Close closes the binary file.
+	Close() error
+	// findDwarfTypeByAddr finds the dwarf.Type to which the given address specifies.
+	// The given address must be the address of the type (not value) and need to be adjusted
+	// using the moduledata.
+	findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error)
+	// firstModuleDataAddress returns the address of runtime.firstmoduledata.
+	firstModuleDataAddress() uint64
+	// runtimeGType returns the dwarf.Type of runtime.g struct type.
+	runtimeGType() dwarf.Type
+}
+
+// debuggableBinaryFile represents the binary file with DWARF sections.
+type debuggableBinaryFile struct {
+	functions                    []*Function
+	dwarf                        dwarfData
+	closer                       io.Closer
+	GoVersion                    GoVersion
+	types                        map[uint64]dwarf.Offset
+	cachedRuntimeGType           dwarf.Type
+	cachedFirstModuleDataAddress uint64
 }
 
 type dwarfData struct {
@@ -53,27 +75,51 @@ type Parameter struct {
 	IsOutput bool
 }
 
-// NewBinary returns the new binary object associated to the program.
-func NewBinary(pathToProgram string) (Binary, error) {
+// OpenBinaryFile opens the specified program file.
+func OpenBinaryFile(pathToProgram string) (BinaryFile, error) {
 	closer, dwarfData, err := findDWARF(pathToProgram)
 	if err != nil {
-		return Binary{}, fmt.Errorf("failed to find DWARF data: %v", err)
+		return debuggableBinaryFile{}, fmt.Errorf("failed to find DWARF data: %v", err)
 	}
-	binary := Binary{dwarf: dwarfData, closer: closer}
 
+	binary := debuggableBinaryFile{dwarf: dwarfData, closer: closer}
+	binary.functions, err = binary.listFunctions()
+	if err != nil {
+		return debuggableBinaryFile{}, err
+	}
 	binary.GoVersion = binary.findGoVersion()
 	binary.types, err = binary.buildTypes()
 	if err != nil {
-		return Binary{}, err
+		return debuggableBinaryFile{}, err
 	}
-	binary.runtimeGType, err = binary.findRuntimeGType()
+	binary.cachedRuntimeGType, err = binary.findRuntimeGType()
 	if err != nil {
-		return Binary{}, err
+		return debuggableBinaryFile{}, err
+	}
+	binary.cachedFirstModuleDataAddress, err = binary.findFirstModuleDataAddress()
+	if err != nil {
+		return debuggableBinaryFile{}, err
 	}
 	return binary, nil
 }
 
-func (b Binary) buildTypes() (map[uint64]dwarf.Offset, error) {
+func (b debuggableBinaryFile) listFunctions() ([]*Function, error) {
+	reader := subprogramReader{raw: b.dwarf.Reader(), dwarfData: b.dwarf}
+
+	var funcs []*Function
+	for {
+		function, err := reader.Next(false)
+		if err != nil {
+			return nil, err
+		}
+		if function == nil {
+			return funcs, nil
+		}
+		funcs = append(funcs, function)
+	}
+}
+
+func (b debuggableBinaryFile) buildTypes() (map[uint64]dwarf.Offset, error) {
 	if !b.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
 		// attrGoRuntimeType is not supported
 		return nil, nil
@@ -98,7 +144,7 @@ func (b Binary) buildTypes() (map[uint64]dwarf.Offset, error) {
 	}
 }
 
-func (b Binary) findGoVersion() GoVersion {
+func (b debuggableBinaryFile) findGoVersion() GoVersion {
 	const producerPrefix = "Go cmd/compile "
 
 	reader := b.dwarf.Reader()
@@ -126,7 +172,7 @@ func (b Binary) findGoVersion() GoVersion {
 
 const firstModuleDataName = "runtime.firstmoduledata"
 
-func (b Binary) findFirstModuleDataAddress() (uint64, error) {
+func (b debuggableBinaryFile) findFirstModuleDataAddress() (uint64, error) {
 	entry, err := b.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
 		name, err := stringClassAttr(entry, dwarf.AttrName)
 		return name == firstModuleDataName && err == nil
@@ -147,7 +193,7 @@ func (b Binary) findFirstModuleDataAddress() (uint64, error) {
 
 const gTypeName = "runtime.g"
 
-func (b Binary) findRuntimeGType() (dwarf.Type, error) {
+func (b debuggableBinaryFile) findRuntimeGType() (dwarf.Type, error) {
 	entry, err := b.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
 		if entry.Tag != dwarf.TagStructType {
 			return false
@@ -162,7 +208,7 @@ func (b Binary) findRuntimeGType() (dwarf.Type, error) {
 	return b.dwarf.Type(entry.Offset)
 }
 
-func (b Binary) findDWARFEntryByName(match func(*dwarf.Entry) bool) (*dwarf.Entry, error) {
+func (b debuggableBinaryFile) findDWARFEntryByName(match func(*dwarf.Entry) bool) (*dwarf.Entry, error) {
 	reader := b.dwarf.Reader()
 	for {
 		entry, err := reader.Next()
@@ -178,32 +224,39 @@ func (b Binary) findDWARFEntryByName(match func(*dwarf.Entry) bool) (*dwarf.Entr
 	}
 }
 
-// Close releases the resources associated with the binary.
-func (b Binary) Close() error {
-	return b.closer.Close()
-}
-
 // FindFunction looks up the function info described in the debug info section.
-func (b Binary) FindFunction(pc uint64) (*Function, error) {
+func (b debuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
 	reader := subprogramReader{raw: b.dwarf.Reader(), dwarfData: b.dwarf}
 	return reader.Seek(pc)
 }
 
-// ListFunctions lists the subprograms in the debug info section. They don't include parameters info.
-func (b Binary) ListFunctions() ([]*Function, error) {
-	reader := subprogramReader{raw: b.dwarf.Reader(), dwarfData: b.dwarf}
+// Functions lists the subprograms in the debug info section. They don't include parameters info.
+func (b debuggableBinaryFile) Functions() []*Function {
+	return b.functions
+}
 
-	var funcs []*Function
-	for {
-		function, err := reader.Next(false)
-		if err != nil {
-			return nil, err
-		}
-		if function == nil {
-			return funcs, nil
-		}
-		funcs = append(funcs, function)
-	}
+// CompiledGoVersion returns the go version used to compile this binary. If the multiple go versions
+// are used for compiling, the version found first is returned.
+func (b debuggableBinaryFile) CompiledGoVersion() GoVersion {
+	return b.GoVersion
+}
+
+// Close releases the resources associated with the binary.
+func (b debuggableBinaryFile) Close() error {
+	return b.closer.Close()
+}
+
+func (b debuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error) {
+	implTypOffset := b.types[typeAddr]
+	return b.dwarf.Type(implTypOffset)
+}
+
+func (b debuggableBinaryFile) runtimeGType() dwarf.Type {
+	return b.cachedRuntimeGType
+}
+
+func (b debuggableBinaryFile) firstModuleDataAddress() uint64 {
+	return b.cachedFirstModuleDataAddress
 }
 
 // IsExported returns true if the function is exported.

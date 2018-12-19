@@ -158,7 +158,7 @@ func TestMainLoop_GoRoutines_FollowChildren(t *testing.T) {
 	if err := controller.AddStartTracePoint(testutils.GoRoutinesAddrMain); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
-	if !controller.process.Binary.GoVersion.LaterThan(tracee.GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+	if !controller.process.Binary.CompiledGoVersion().LaterThan(tracee.GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
 		t.Skip("go 1.10 or earlier doesn't hold ancestors info")
 	}
 

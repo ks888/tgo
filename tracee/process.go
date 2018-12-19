@@ -16,7 +16,7 @@ var breakpointInsts = []byte{0xcc}
 type Process struct {
 	debugapiClient *lldb.Client
 	breakpoints    map[uint64]*breakpoint
-	Binary         Binary
+	Binary         BinaryFile
 	valueParser    valueParser
 }
 
@@ -70,7 +70,7 @@ func AttachProcess(pid int) (*Process, error) {
 }
 
 func newProcess(debugapiClient *lldb.Client, programPath string) (*Process, error) {
-	binary, err := NewBinary(programPath)
+	binary, err := OpenBinaryFile(programPath)
 	if err != nil {
 		return nil, err
 	}
@@ -88,13 +88,8 @@ func newProcess(debugapiClient *lldb.Client, programPath string) (*Process, erro
 	}, nil
 }
 
-func buildMapRuntimeTypeFunc(binary Binary, debugapiClient *lldb.Client) (func(runtimeTypeAddr uint64) (dwarf.Type, error), error) {
-	firstModuleDataAddr, err := binary.findFirstModuleDataAddress()
-	if err != nil {
-		return nil, err
-	}
-
-	moduleDataList, err := parseModuleDataList(firstModuleDataAddr, debugapiClient)
+func buildMapRuntimeTypeFunc(binary BinaryFile, debugapiClient *lldb.Client) (func(runtimeTypeAddr uint64) (dwarf.Type, error), error) {
+	moduleDataList, err := parseModuleDataList(binary.firstModuleDataAddress(), debugapiClient)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +103,7 @@ func buildMapRuntimeTypeFunc(binary Binary, debugapiClient *lldb.Client) (func(r
 			}
 		}
 
-		implTypOffset := binary.types[runtimeTypeAddr-md.types]
-		return binary.dwarf.Type(implTypOffset)
+		return binary.findDwarfTypeByAddr(runtimeTypeAddr - md.types)
 	}, nil
 }
 
@@ -395,13 +389,13 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 		return p.CurrentGoRoutineInfo(threadID)
 	}
 
-	_, idRawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType, "goid")
+	_, idRawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType(), "goid")
 	if err != nil {
 		return GoRoutineInfo{}, err
 	}
 	id := int64(binary.LittleEndian.Uint64(idRawVal))
 
-	stackType, stackRawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType, "stack")
+	stackType, stackRawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType(), "stack")
 	if err != nil {
 		return GoRoutineInfo{}, err
 	}
@@ -414,7 +408,7 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 	}
 	usedStackSize := stackHi - regs.Rsp
 
-	_, panicRawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType, "_panic")
+	_, panicRawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType(), "_panic")
 	if err != nil {
 		return GoRoutineInfo{}, err
 	}
@@ -436,7 +430,7 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 
 // TODO: depend on os
 func (p *Process) offsetToG() uint32 {
-	if p.Binary.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
+	if p.Binary.CompiledGoVersion().LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
 		return 0x30
 	}
 	return 0x8a0
@@ -483,7 +477,7 @@ func (p *Process) findFieldInStruct(structAddr uint64, structType dwarf.Type, fi
 }
 
 func (p *Process) findPanicHandler(gAddr, panicAddr, stackHi uint64) (*PanicHandler, error) {
-	ptrToDeferType, rawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType, "_defer")
+	ptrToDeferType, rawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType(), "_defer")
 	if err != nil {
 		return nil, err
 	}
@@ -528,12 +522,12 @@ func (p *Process) findPanicHandler(gAddr, panicAddr, stackHi uint64) (*PanicHand
 }
 
 func (p *Process) findAncestorGoIDs(gAddr uint64) ([]int64, error) {
-	if !p.Binary.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+	if !p.Binary.CompiledGoVersion().LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
 		// ancestors field is not supported
 		return nil, nil
 	}
 
-	ptrToAncestorsType, rawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType, "ancestors")
+	ptrToAncestorsType, rawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType(), "ancestors")
 	if err != nil || binary.LittleEndian.Uint64(rawVal) == 0 {
 		return nil, err
 	}

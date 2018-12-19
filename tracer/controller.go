@@ -111,12 +111,7 @@ func (c *Controller) AddEndTracePoint(endAddr uint64) error {
 }
 
 func (c *Controller) findFunction(functionName string) (*tracee.Function, error) {
-	functions, err := c.process.Binary.ListFunctions()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, function := range functions {
+	for _, function := range c.process.Binary.Functions() {
 		if function.Name == functionName {
 			return function, nil
 		}
@@ -462,15 +457,12 @@ func (c *Controller) clearBreakpointsExceptTracingPoint() error {
 }
 
 func (c *Controller) alterBreakpointsExceptTracingPoint(enable bool) error {
-	functions, err := c.process.Binary.ListFunctions()
-	if err != nil {
-		return err
-	}
-	for _, function := range functions {
+	for _, function := range c.process.Binary.Functions() {
 		if !c.canSetBreakpoint(function) || c.tracingPoints.IsStartAddress(function.Value) || c.tracingPoints.IsEndAddress(function.Value) {
 			continue
 		}
 
+		var err error
 		if enable {
 			err = c.process.SetBreakpoint(function.Value)
 		} else {

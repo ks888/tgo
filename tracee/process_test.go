@@ -447,7 +447,7 @@ func TestCurrentGoRoutineInfo_HasAncestors(t *testing.T) {
 	}
 	defer proc.Detach()
 
-	if !proc.Binary.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+	if !proc.Binary.CompiledGoVersion().LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
 		t.Skip("go 1.10 or earlier doesn't hold ancestors info")
 	}
 
