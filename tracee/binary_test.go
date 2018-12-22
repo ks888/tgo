@@ -21,7 +21,7 @@ func TestOpenBinaryFile(t *testing.T) {
 		t.Errorf("empty go version")
 	}
 	if binary.firstModuleDataAddress() == 0 {
-		t.Errorf("empty runtime.firstmoduledata type")
+		t.Errorf("runtime.firstmoduledata address is 0")
 	}
 	if binary.runtimeGType() == nil {
 		t.Errorf("empty runtime.g type")
@@ -32,13 +32,6 @@ func TestOpenBinaryFile_ProgramNotFound(t *testing.T) {
 	_, err := OpenBinaryFile("./notexist")
 	if err == nil {
 		t.Fatal("error not returned when the path is invalid")
-	}
-}
-
-func TestOpenBinaryFile_NoDwarfProgram(t *testing.T) {
-	_, err := OpenBinaryFile(testutils.ProgramHelloworldNoDwarf)
-	if err == nil {
-		t.Fatal("error not returned when the binary has no DWARF sections")
 	}
 }
 
@@ -263,34 +256,53 @@ func TestModuleDataOffsets(t *testing.T) {
 			}
 		}
 	}
+
+	// for _, field := range expectedModuleDataType.(*dwarf.StructType).Field {
+	// 	fmt.Printf("  %#v\n", field)
+	// 	fmt.Printf("    %#v\n", field.Type)
+	// 	if field.Name == "ftab" {
+	// 		for _, innerField := range field.Type.(*dwarf.StructType).Field {
+	// 			fmt.Printf("      %#v\n", innerField)
+	// 			fmt.Printf("        %#v\n", innerField.Type)
+	// 			if innerField.Name == "array" {
+	// 				fmt.Printf("          %#v\n", innerField.Type.(*dwarf.PtrType).Type)
+	// 				for _, mostInnerField := range innerField.Type.(*dwarf.PtrType).Type.(*dwarf.StructType).Field {
+	// 					fmt.Printf("            %#v\n", mostInnerField)
+	// 					fmt.Printf("            %#v\n", mostInnerField.Type)
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
 }
 
-func TestParseModuleData(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramTypePrint)
-	if err != nil {
-		t.Fatalf("failed to launch process: %v", err)
-	}
-	defer proc.Detach()
+// TODO: parse faster
+// func TestParseModuleData(t *testing.T) {
+// 	proc, err := LaunchProcess(testutils.ProgramTypePrint)
+// 	if err != nil {
+// 		t.Fatalf("failed to launch process: %v", err)
+// 	}
+// 	defer proc.Detach()
 
-	buff := make([]byte, moduleDataType.Size())
-	if err := proc.debugapiClient.ReadMemory(proc.Binary.firstModuleDataAddress(), buff); err != nil {
-		t.Fatalf("failed to ReadMemory: %v", err)
-	}
+// 	buff := make([]byte, moduleDataType.Size())
+// 	if err := proc.debugapiClient.ReadMemory(proc.Binary.firstModuleDataAddress(), buff); err != nil {
+// 		t.Fatalf("failed to ReadMemory: %v", err)
+// 	}
 
-	val := (valueParser{reader: proc.debugapiClient}).parseValue(moduleDataType, buff, 1)
-	for fieldName, fieldValue := range val.(structValue).fields {
-		switch fieldName {
-		case "pclntable", "ftab":
-			if len(fieldValue.(sliceValue).val) == 0 {
-				t.Errorf("empty slice: %s", fieldName)
-			}
-		case "findfunctab", "minpc", "types", "etypes":
-			if fieldValue.(uint64Value).val == 0 {
-				t.Errorf("zero value: %s", fieldName)
-			}
-		}
-	}
-}
+// 	val := (valueParser{reader: proc.debugapiClient}).parseValue(moduleDataType, buff, 1)
+// 	for fieldName, fieldValue := range val.(structValue).fields {
+// 		switch fieldName {
+// 		case "pclntable", "ftab":
+// 			if len(fieldValue.(sliceValue).val) == 0 {
+// 				t.Errorf("empty slice: %s", fieldName)
+// 			}
+// 		case "findfunctab", "minpc", "types", "etypes":
+// 			if fieldValue.(uint64Value).val == 0 {
+// 				t.Errorf("zero value: %s", fieldName)
+// 			}
+// 		}
+// 	}
+// }
 
 func TestAddressClassAttr(t *testing.T) {
 	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
@@ -458,10 +470,33 @@ func TestDebugFrameSection(t *testing.T) {
 	}
 }
 
+func TestOpenNonDwarfBinaryFile(t *testing.T) {
+	binary, err := OpenBinaryFile(testutils.ProgramHelloworldNoDwarf)
+	if err != nil {
+		t.Fatalf("failed to create new binary: %v", err)
+	}
+	if _, err := binary.FindFunction(0); err == nil {
+		t.Errorf("FindFunction doesn't return error")
+	}
+	if funcs := binary.Functions(); len(funcs) == 0 {
+		t.Errorf("Functions return empty list")
+	}
+	if binary.CompiledGoVersion() == (GoVersion{}) {
+		t.Errorf("empty go version")
+	}
+	if binary.firstModuleDataAddress() == 0 {
+		t.Errorf("runtime.firstmoduledata address is 0")
+	}
+	// binary.findDwarfTypeByAddr()
+	// if binary.runtimeGType() == nil {
+	// 	t.Errorf("empty runtime.g type")
+	// }
+}
+
 func findDwarfData(t *testing.T, pathToProgram string) dwarfData {
 	binaryFile, err := openBinaryFile(pathToProgram)
 	if err != nil {
-		t.Fatalf("failed to open '%s': %v", binaryFile, err)
+		t.Fatalf("failed to open: %v", err)
 	}
 
 	if debuggableBinary, ok := binaryFile.(debuggableBinaryFile); ok {

@@ -23,9 +23,11 @@ func openBinaryFile(pathToProgram string) (BinaryFile, error) {
 
 	data, locList, err := findDWARF(machoFile)
 	if err != nil {
-		// TODO: try non dwarf version
-		closer.Close()
-		return nil, err
+		binaryFile, err := newNonDebuggableBinaryFile(findSymbols(machoFile), closer)
+		if err != nil {
+			closer.Close()
+		}
+		return binaryFile, err
 	}
 
 	binaryFile, err := newDebuggableBinaryFile(dwarfData{Data: data, locationList: locList}, closer)
@@ -79,4 +81,15 @@ func buildLocationListData(locListSection *macho.Section) ([]byte, error) {
 
 	_, err = io.ReadFull(r, uncompressedData)
 	return uncompressedData, err
+}
+
+func findSymbols(machoFile *macho.File) (symbols []symbol) {
+	if machoFile.Symtab == nil {
+		return
+	}
+
+	for _, sym := range machoFile.Symtab.Syms {
+		symbols = append(symbols, symbol{Name: sym.Name, Value: sym.Value})
+	}
+	return symbols
 }

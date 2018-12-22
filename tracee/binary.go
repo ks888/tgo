@@ -787,17 +787,55 @@ var moduleDataType = &dwarf.StructType{
 	},
 }
 
+type symbol struct {
+	Name  string
+	Value uint64
+}
+
 // nonDebuggableBinaryFile represents the binary file WITHOUT DWARF sections.
 type nonDebuggableBinaryFile struct {
-	closer       io.Closer
-	memoryReader memoryReader
+	closer  io.Closer
+	symbols []symbol
 }
 
-func newNonDebuggableBinaryFile(reader memoryReader, closer io.Closer) (nonDebuggableBinaryFile, error) {
-	return nonDebuggableBinaryFile{closer: closer, memoryReader: reader}, nil
+func newNonDebuggableBinaryFile(symbols []symbol, closer io.Closer) (nonDebuggableBinaryFile, error) {
+	return nonDebuggableBinaryFile{closer: closer, symbols: symbols}, nil
 }
 
-// FindFunction looks up the function info described in the debug info section.
+// FindFunction always returns error because it's difficult to get function info using non-DWARF binary.
 func (b nonDebuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
+	return nil, errors.New("DWARF is not available")
+}
+
+func (b nonDebuggableBinaryFile) Functions() (funcs []*Function) {
+	for _, sym := range b.symbols {
+		funcs = append(funcs, &Function{Name: sym.Name, Value: sym.Value})
+	}
+	return funcs
+}
+
+// CompiledGoVersion always returns empty value because the version info is not available (FYI: .note.go.buildid is just the hash value).
+func (b nonDebuggableBinaryFile) CompiledGoVersion() GoVersion {
+	return GoVersion{}
+}
+
+func (b nonDebuggableBinaryFile) Close() error {
+	return b.closer.Close()
+}
+
+func (b nonDebuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error) {
 	return nil, nil
+}
+
+func (b nonDebuggableBinaryFile) firstModuleDataAddress() uint64 {
+	for _, sym := range b.symbols {
+		if sym.Name == firstModuleDataName {
+			return sym.Value
+		}
+	}
+	return 0
+}
+
+func (b nonDebuggableBinaryFile) runtimeGType() dwarf.Type {
+	return nil
 }
