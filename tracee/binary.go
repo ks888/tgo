@@ -77,29 +77,35 @@ type Parameter struct {
 
 // OpenBinaryFile opens the specified program file.
 func OpenBinaryFile(pathToProgram string) (BinaryFile, error) {
-	closer, dwarfData, err := findDWARF(pathToProgram)
-	if err != nil {
-		return debuggableBinaryFile{}, fmt.Errorf("failed to find DWARF data: %v", err)
-	}
+	return openBinaryFile(pathToProgram)
+}
 
-	binary := debuggableBinaryFile{dwarf: dwarfData, closer: closer}
+func newDebuggableBinaryFile(data dwarfData, closer io.Closer) (debuggableBinaryFile, error) {
+	binary := debuggableBinaryFile{dwarf: data, closer: closer}
+
+	var err error
 	binary.functions, err = binary.listFunctions()
 	if err != nil {
 		return debuggableBinaryFile{}, err
 	}
+
 	binary.GoVersion = binary.findGoVersion()
+
 	binary.types, err = binary.buildTypes()
 	if err != nil {
 		return debuggableBinaryFile{}, err
 	}
+
 	binary.cachedRuntimeGType, err = binary.findRuntimeGType()
 	if err != nil {
 		return debuggableBinaryFile{}, err
 	}
+
 	binary.cachedFirstModuleDataAddress, err = binary.findFirstModuleDataAddress()
 	if err != nil {
 		return debuggableBinaryFile{}, err
 	}
+
 	return binary, nil
 }
 
@@ -684,4 +690,114 @@ func decodeSignedLEB128(input []byte) (val int) {
 		return (^0)<<((uint(i)+1)*7) + val
 	}
 	return val
+}
+
+// Assume this dwarf.Type represents a subset of the module data type in the case DWARF is not available.
+var moduleDataType = &dwarf.StructType{
+	StructName: "runtime.moduledata",
+	CommonType: dwarf.CommonType{ByteSize: 456},
+	Field: []*dwarf.StructField{
+		&dwarf.StructField{
+			Name: "pclntable",
+			Type: &dwarf.StructType{
+				CommonType: dwarf.CommonType{ByteSize: 24},
+				StructName: "[]uint8",
+				Field: []*dwarf.StructField{
+					&dwarf.StructField{
+						Name: "array",
+						Type: &dwarf.PtrType{
+							CommonType: dwarf.CommonType{ByteSize: 8},
+							// Not sure ByteSize 1 here is correct, but this is what the actual type is anyway.
+							Type: &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 1}}},
+						},
+						ByteOffset: 0,
+					},
+					&dwarf.StructField{
+						Name:       "len",
+						Type:       &dwarf.IntType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+						ByteOffset: 8,
+					},
+				},
+			},
+			ByteOffset: 0,
+		},
+		&dwarf.StructField{
+			Name: "ftab",
+			Type: &dwarf.StructType{
+				CommonType: dwarf.CommonType{ByteSize: 24},
+				StructName: "[]runtime.functab",
+				Field: []*dwarf.StructField{
+					&dwarf.StructField{
+						Name: "array",
+						Type: &dwarf.PtrType{
+							CommonType: dwarf.CommonType{ByteSize: 8},
+							Type: &dwarf.StructType{
+								CommonType: dwarf.CommonType{ByteSize: 16},
+								StructName: "runtime.functab",
+								Field: []*dwarf.StructField{
+									&dwarf.StructField{
+										Name:       "entry",
+										Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+										ByteOffset: 0,
+									},
+									&dwarf.StructField{
+										Name:       "funcoff",
+										Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+										ByteOffset: 8,
+									},
+								},
+							},
+						},
+						ByteOffset: 0,
+					},
+					&dwarf.StructField{
+						Name:       "len",
+						Type:       &dwarf.IntType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+						ByteOffset: 8,
+					},
+				},
+			},
+			ByteOffset: 24,
+		},
+		&dwarf.StructField{
+			Name:       "findfunctab",
+			Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+			ByteOffset: 72,
+		},
+		&dwarf.StructField{
+			Name:       "minpc",
+			Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+			ByteOffset: 80,
+		},
+		&dwarf.StructField{
+			Name:       "types",
+			Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+			ByteOffset: 200,
+		},
+		&dwarf.StructField{
+			Name:       "etypes",
+			Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+			ByteOffset: 208,
+		},
+		&dwarf.StructField{
+			Name:       "next",
+			Type:       &dwarf.PtrType{CommonType: dwarf.CommonType{ByteSize: 8}},
+			ByteOffset: 448,
+		},
+	},
+}
+
+// nonDebuggableBinaryFile represents the binary file WITHOUT DWARF sections.
+type nonDebuggableBinaryFile struct {
+	closer       io.Closer
+	memoryReader memoryReader
+}
+
+func newNonDebuggableBinaryFile(reader memoryReader, closer io.Closer) (nonDebuggableBinaryFile, error) {
+	return nonDebuggableBinaryFile{closer: closer, memoryReader: reader}, nil
+}
+
+// FindFunction looks up the function info described in the debug info section.
+func (b nonDebuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
+	return nil, nil
 }

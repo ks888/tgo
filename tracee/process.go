@@ -127,7 +127,7 @@ func parseModuleDataList(firstModuleDataAddr uint64, debugapiClient *lldb.Client
 
 		moduleDataList = append(moduleDataList, moduleData{types: types, etypes: etypes})
 
-		var offsetToNext uint64 = 24*3 + 8*18 + 24*4 + 16 + 24 + 16 + 24 + 8 + (4+8)*2 + 8 + 1
+		var offsetToNext uint64 = 24*3 + 8*18 + 24*4 + 16 + 24 + 16 + 24 + 8 + 16*2 + 8 + 8
 		if err := debugapiClient.ReadMemory(moduleDataAddr+offsetToNext, buff); err != nil {
 			return nil, err
 		}

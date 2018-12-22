@@ -97,7 +97,7 @@ func TestIsExported(t *testing.T) {
 }
 
 func TestNext(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 
 	function, err := reader.Next(true)
@@ -113,7 +113,7 @@ func TestNext(t *testing.T) {
 }
 
 func TestSeek(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 
 	function, err := reader.Seek(testutils.HelloworldAddrOneParameterAndVariable)
@@ -138,7 +138,7 @@ func TestSeek(t *testing.T) {
 }
 
 func TestSeek_InvalidPC(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 
 	_, err := reader.Seek(0x0)
@@ -148,7 +148,7 @@ func TestSeek_InvalidPC(t *testing.T) {
 }
 
 func TestSeek_DIEHasAbstractOrigin(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 
 	function, _ := reader.Seek(testutils.HelloworldAddrFuncWithAbstractOrigin)
@@ -170,7 +170,7 @@ func TestSeek_DIEHasAbstractOrigin(t *testing.T) {
 }
 
 func TestSeek_OneParameter(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 
 	function, err := reader.Seek(testutils.HelloworldAddrOneParameterAndVariable)
@@ -198,7 +198,7 @@ func TestSeek_OneParameter(t *testing.T) {
 }
 
 func TestSeek_HasVariableBeforeParameter(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 
 	function, err := reader.Seek(testutils.HelloworldAddrOneParameterAndVariable)
@@ -214,7 +214,7 @@ func TestSeek_HasVariableBeforeParameter(t *testing.T) {
 }
 
 func TestSeek_HasTwoParameters(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 
 	function, err := reader.Seek(testutils.HelloworldAddrTwoParameters)
@@ -229,8 +229,71 @@ func TestSeek_HasTwoParameters(t *testing.T) {
 	}
 }
 
+func TestModuleDataOffsets(t *testing.T) {
+	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld)
+	debuggableBinary, _ := binary.(debuggableBinaryFile)
+
+	entry, err := debuggableBinary.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
+		if entry.Tag != dwarf.TagStructType {
+			return false
+		}
+		name, err := stringClassAttr(entry, dwarf.AttrName)
+		return name == "runtime.moduledata" && err == nil
+	})
+	if err != nil {
+		t.Fatalf("no moduledata type entry: %v", err)
+	}
+
+	expectedModuleDataType, err := debuggableBinary.dwarf.Type(entry.Offset)
+	if err != nil {
+		t.Fatalf("no moduledata type: %v", err)
+	}
+
+	expectedFields := expectedModuleDataType.(*dwarf.StructType).Field
+	for _, actualField := range moduleDataType.Field {
+		for _, expectedField := range expectedFields {
+			if actualField.Name == expectedField.Name {
+				if actualField.ByteOffset != expectedField.ByteOffset {
+					t.Errorf("wrong byte offset. expect: %d, actual: %d", expectedField.ByteOffset, actualField.ByteOffset)
+				}
+				if actualField.Type.Size() != expectedField.Type.Size() {
+					t.Errorf("wrong size. expect: %d, actual: %d", expectedField.Type.Size(), actualField.Type.Size())
+				}
+				break
+			}
+		}
+	}
+}
+
+func TestParseModuleData(t *testing.T) {
+	proc, err := LaunchProcess(testutils.ProgramTypePrint)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	defer proc.Detach()
+
+	buff := make([]byte, moduleDataType.Size())
+	if err := proc.debugapiClient.ReadMemory(proc.Binary.firstModuleDataAddress(), buff); err != nil {
+		t.Fatalf("failed to ReadMemory: %v", err)
+	}
+
+	val := (valueParser{reader: proc.debugapiClient}).parseValue(moduleDataType, buff, 1)
+	for fieldName, fieldValue := range val.(structValue).fields {
+		switch fieldName {
+		case "pclntable", "ftab":
+			if len(fieldValue.(sliceValue).val) == 0 {
+				t.Errorf("empty slice: %s", fieldName)
+			}
+		case "findfunctab", "minpc", "types", "etypes":
+			if fieldValue.(uint64Value).val == 0 {
+				t.Errorf("zero value: %s", fieldName)
+			}
+		}
+	}
+}
+
 func TestAddressClassAttr(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 	subprogram, _ := reader.raw.Next()
@@ -245,7 +308,7 @@ func TestAddressClassAttr(t *testing.T) {
 }
 
 func TestAddressClassAttr_InvalidAttr(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 	subprogram, _ := reader.raw.Next()
@@ -257,7 +320,7 @@ func TestAddressClassAttr_InvalidAttr(t *testing.T) {
 }
 
 func TestAddressClassAttr_InvalidClass(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 	subprogram, _ := reader.raw.Next()
@@ -269,7 +332,7 @@ func TestAddressClassAttr_InvalidClass(t *testing.T) {
 }
 
 func TestStringClassAttr(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 	subprogram, _ := reader.raw.Next()
@@ -284,7 +347,7 @@ func TestStringClassAttr(t *testing.T) {
 }
 
 func TestReferenceClassAttr(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 	_, _ = reader.Next(false)
 	param, _ := reader.raw.Next()
@@ -299,7 +362,7 @@ func TestReferenceClassAttr(t *testing.T) {
 }
 
 func TestLocClassAttr(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 	_, _ = reader.Next(false)
 	param, _ := reader.raw.Next()
@@ -314,7 +377,7 @@ func TestLocClassAttr(t *testing.T) {
 }
 
 func TestFlagClassAttr(t *testing.T) {
-	_, dwarfData, _ := findDWARF(testutils.ProgramHelloworld)
+	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 	_, _ = reader.Next(false)
 	param, _ := reader.raw.Next()
@@ -393,4 +456,16 @@ func TestDebugFrameSection(t *testing.T) {
 	if !reflect.DeepEqual(expectedCIE, actual) {
 		t.Errorf("CIE changed: %v", actual)
 	}
+}
+
+func findDwarfData(t *testing.T, pathToProgram string) dwarfData {
+	binaryFile, err := openBinaryFile(pathToProgram)
+	if err != nil {
+		t.Fatalf("failed to open '%s': %v", binaryFile, err)
+	}
+
+	if debuggableBinary, ok := binaryFile.(debuggableBinaryFile); ok {
+		return debuggableBinary.dwarf
+	}
+	return dwarfData{}
 }

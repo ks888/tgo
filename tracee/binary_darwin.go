@@ -3,6 +3,7 @@ package tracee
 import (
 	"bytes"
 	"compress/zlib"
+	"debug/dwarf"
 	"debug/macho"
 	"encoding/binary"
 	"io"
@@ -13,12 +14,28 @@ var locationListSectionNames = []string{
 	"__debug_loc",
 }
 
-func findDWARF(pathToProgram string) (io.Closer, dwarfData, error) {
+func openBinaryFile(pathToProgram string) (BinaryFile, error) {
 	machoFile, err := macho.Open(pathToProgram)
 	if err != nil {
-		return nil, dwarfData{}, err
+		return nil, err
+	}
+	var closer io.Closer = machoFile
+
+	data, locList, err := findDWARF(machoFile)
+	if err != nil {
+		// TODO: try non dwarf version
+		closer.Close()
+		return nil, err
 	}
 
+	binaryFile, err := newDebuggableBinaryFile(dwarfData{Data: data, locationList: locList}, closer)
+	if err != nil {
+		closer.Close()
+	}
+	return binaryFile, err
+}
+
+func findDWARF(machoFile *macho.File) (data *dwarf.Data, locList []byte, err error) {
 	var locListSection *macho.Section
 	for _, locListSectionName := range locationListSectionNames {
 		locListSection = machoFile.Section(locListSectionName)
@@ -28,13 +45,13 @@ func findDWARF(pathToProgram string) (io.Closer, dwarfData, error) {
 	}
 	// older go version doesn't create a location list section.
 
-	locList, err := buildLocationListData(locListSection)
+	locList, err = buildLocationListData(locListSection)
 	if err != nil {
-		return nil, dwarfData{}, err
+		return nil, nil, err
 	}
 
-	data, err := machoFile.DWARF()
-	return machoFile, dwarfData{Data: data, locationList: locList}, err
+	data, err = machoFile.DWARF()
+	return data, locList, err
 }
 
 func buildLocationListData(locListSection *macho.Section) ([]byte, error) {

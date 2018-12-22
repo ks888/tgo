@@ -467,6 +467,9 @@ func (c *Client) ReadMemory(addr uint64, out []byte) error {
 	if err != nil {
 		return err
 	}
+	if len(byteArrary) != len(out) {
+		log.Debugf("The data size read from the memory is smaller than the requested size. actual: %d, expected: %d", len(byteArrary), len(out))
+	}
 	copy(out, byteArrary)
 	return nil
 }

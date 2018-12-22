@@ -1,8 +1,8 @@
 package tracee
 
 import (
+	"debug/dwarf"
 	"debug/elf"
-	"io"
 
 	"github.com/ks888/tgo/log"
 )
@@ -12,12 +12,27 @@ var locationListSectionNames = []string{
 	".debug_loc",
 }
 
-func findDWARF(pathToProgram string) (io.Closer, dwarfData, error) {
+func openBinaryFile(pathToProgram string) (BinaryFile, error) {
 	elfFile, err := elf.Open(pathToProgram)
 	if err != nil {
 		return nil, dwarfData{}, err
 	}
 
+	data, locList, err := findDWARF(elfFile)
+	if err != nil {
+		// TODO: try non dwarf version
+		closer.Close()
+		return nil, err
+	}
+
+	binaryFile, err := newDebuggableBinaryFile(dwarfData{Data: data, locationList: locList}, closer)
+	if err != nil {
+		closer.Close()
+	}
+	return binaryFile, err
+}
+
+func findDWARF(elfFile *elf.File) (data *dwarf.Data, locList []byte, err error) {
 	var locListSection *elf.Section
 	for _, locListSectionName := range locationListSectionNames {
 		locListSection = elfFile.Section(locListSectionName)
