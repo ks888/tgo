@@ -20,8 +20,36 @@ func TestOpenBinaryFile(t *testing.T) {
 	if binary.firstModuleDataAddress() == 0 {
 		t.Errorf("runtime.firstmoduledata address is 0")
 	}
+	if binary.moduleDataType() == nil {
+		t.Errorf("runtime.moduledata type is nil")
+	}
 	if binary.runtimeGType() == nil {
-		t.Errorf("empty runtime.g type")
+		t.Errorf("runtime.g type is nil")
+	}
+}
+
+func TestOpenNonDwarfBinaryFile(t *testing.T) {
+	binary, err := OpenBinaryFile(testutils.ProgramHelloworldNoDwarf, GoVersion{})
+	if err != nil {
+		t.Fatalf("failed to create new binary: %v", err)
+	}
+	if _, err := binary.FindFunction(0); err == nil {
+		t.Errorf("FindFunction doesn't return error")
+	}
+	if funcs := binary.Functions(); len(funcs) == 0 {
+		t.Errorf("Functions return empty list")
+	}
+	if binary.firstModuleDataAddress() == 0 {
+		t.Errorf("runtime.firstmoduledata address is 0")
+	}
+	if _, err := binary.findDwarfTypeByAddr(0); err == nil {
+		t.Errorf("findDwarfTypeByAddr doesn't return error")
+	}
+	if binary.moduleDataType() == nil {
+		t.Errorf("runtime.moduledata type is nil")
+	}
+	if binary.runtimeGType() == nil {
+		t.Errorf("runtime.g type is nil")
 	}
 }
 
@@ -522,28 +550,6 @@ func TestRuntimeGOffsets(t *testing.T) {
 	// 		}
 	// 	}
 	// }
-}
-
-func TestOpenNonDwarfBinaryFile(t *testing.T) {
-	binary, err := OpenBinaryFile(testutils.ProgramHelloworldNoDwarf, GoVersion{})
-	if err != nil {
-		t.Fatalf("failed to create new binary: %v", err)
-	}
-	if _, err := binary.FindFunction(0); err == nil {
-		t.Errorf("FindFunction doesn't return error")
-	}
-	if funcs := binary.Functions(); len(funcs) == 0 {
-		t.Errorf("Functions return empty list")
-	}
-	if binary.firstModuleDataAddress() == 0 {
-		t.Errorf("runtime.firstmoduledata address is 0")
-	}
-	if _, err := binary.findDwarfTypeByAddr(0); err == nil {
-		t.Errorf("findDwarfTypeByAddr doesn't return error")
-	}
-	if binary.runtimeGType() == nil {
-		t.Errorf("empty runtime.g type")
-	}
 }
 
 func findDwarfData(t *testing.T, pathToProgram string) dwarfData {

@@ -366,75 +366,78 @@ func TestStackFrameAt(t *testing.T) {
 }
 
 func TestCurrentGoRoutineInfo(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworld)
-	if err != nil {
-		t.Fatalf("failed to launch process: %v", err)
-	}
-	defer proc.Detach()
+	for _, testProgram := range []string{testutils.ProgramHelloworld, testutils.ProgramHelloworldNoDwarf} {
+		proc, err := LaunchProcess(testProgram)
+		if err != nil {
+			t.Fatalf("failed to launch process: %v", err)
+		}
+		defer proc.Detach()
 
-	if err := proc.SetBreakpoint(testutils.HelloworldAddrMain); err != nil {
-		t.Fatalf("failed to set breakpoint: %v", err)
-	}
+		if err := proc.SetBreakpoint(testutils.HelloworldAddrMain); err != nil {
+			t.Fatalf("failed to set breakpoint: %v", err)
+		}
 
-	event, err := proc.ContinueAndWait()
-	if err != nil {
-		t.Fatalf("failed to continue and wait: %v", err)
-	}
+		event, err := proc.ContinueAndWait()
+		if err != nil {
+			t.Fatalf("failed to continue and wait: %v", err)
+		}
 
-	tids := event.Data.([]int)
-	goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	if goRoutineInfo.ID != 1 {
-		t.Errorf("wrong id: %d", goRoutineInfo.ID)
-	}
-	if goRoutineInfo.UsedStackSize == 0 {
-		t.Errorf("wrong stack size: %d", goRoutineInfo.UsedStackSize)
-	}
-	if goRoutineInfo.CurrentPC != testutils.HelloworldAddrMain+1 {
-		t.Errorf("empty return address: %d", goRoutineInfo.CurrentPC)
-	}
-	if goRoutineInfo.CurrentStackAddr == 0 {
-		t.Errorf("empty stack address: %d", goRoutineInfo.CurrentStackAddr)
-	}
-	if goRoutineInfo.Panicking {
-		t.Errorf("panicking")
-	}
-	// main go routine always has 'defer' setting. See runtime.main() for the detail.
-	if goRoutineInfo.PanicHandler == nil || goRoutineInfo.PanicHandler.PCAtDefer == 0 || goRoutineInfo.PanicHandler.UsedStackSizeAtDefer == 0 {
-		t.Errorf("deferedBy is nil or its value is 0")
+		tids := event.Data.([]int)
+		goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if goRoutineInfo.ID != 1 {
+			t.Errorf("wrong id: %d", goRoutineInfo.ID)
+		}
+		if goRoutineInfo.UsedStackSize == 0 {
+			t.Errorf("wrong stack size: %d", goRoutineInfo.UsedStackSize)
+		}
+		if goRoutineInfo.CurrentPC != testutils.HelloworldAddrMain+1 {
+			t.Errorf("empty return address: %d", goRoutineInfo.CurrentPC)
+		}
+		if goRoutineInfo.CurrentStackAddr == 0 {
+			t.Errorf("empty stack address: %d", goRoutineInfo.CurrentStackAddr)
+		}
+		if goRoutineInfo.Panicking {
+			t.Errorf("panicking")
+		}
+		// main go routine always has 'defer' setting. See runtime.main() for the detail.
+		if goRoutineInfo.PanicHandler == nil || goRoutineInfo.PanicHandler.PCAtDefer == 0 || goRoutineInfo.PanicHandler.UsedStackSizeAtDefer == 0 {
+			t.Errorf("deferedBy is nil or its value is 0")
+		}
 	}
 }
 
 func TestCurrentGoRoutineInfo_Panicking(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramPanic)
-	if err != nil {
-		t.Fatalf("failed to launch process: %v", err)
-	}
-	defer proc.Detach()
+	for _, testProgram := range []string{testutils.ProgramPanic, testutils.ProgramPanicNoDwarf} {
+		proc, err := LaunchProcess(testProgram)
+		if err != nil {
+			t.Fatalf("failed to launch process: %v", err)
+		}
+		defer proc.Detach()
 
-	if err := proc.SetBreakpoint(testutils.PanicAddrInsideThrough); err != nil {
-		t.Fatalf("failed to set breakpoint: %v", err)
-	}
+		if err := proc.SetBreakpoint(testutils.PanicAddrInsideThrough); err != nil {
+			t.Fatalf("failed to set breakpoint: %v", err)
+		}
 
-	event, err := proc.ContinueAndWait()
-	if err != nil {
-		t.Fatalf("failed to continue and wait: %v", err)
-	}
+		event, err := proc.ContinueAndWait()
+		if err != nil {
+			t.Fatalf("failed to continue and wait: %v", err)
+		}
 
-	tids := event.Data.([]int)
-	goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	if !goRoutineInfo.Panicking {
-		t.Errorf("not panicking")
-	}
+		tids := event.Data.([]int)
+		goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if !goRoutineInfo.Panicking {
+			t.Errorf("not panicking")
+		}
 
-	function, _ := proc.Binary.FindFunction(goRoutineInfo.PanicHandler.PCAtDefer)
-	if function.Name != "main.g" {
-		t.Errorf("wrong panic handler")
+		if goRoutineInfo.PanicHandler.PCAtDefer == 0 {
+			t.Errorf("invalid panic handler")
+		}
 	}
 }
 
@@ -442,31 +445,33 @@ func TestCurrentGoRoutineInfo_HasAncestors(t *testing.T) {
 	os.Setenv("GODEBUG", "tracebackancestors=1")
 	defer os.Unsetenv("GODEBUG")
 
-	proc, err := LaunchProcess(testutils.ProgramGoRoutines)
-	if err != nil {
-		t.Fatalf("failed to launch process: %v", err)
-	}
-	defer proc.Detach()
+	for _, testProgram := range []string{testutils.ProgramGoRoutines, testutils.ProgramGoRoutinesNoDwarf} {
+		proc, err := LaunchProcess(testProgram)
+		if err != nil {
+			t.Fatalf("failed to launch process: %v", err)
+		}
+		defer proc.Detach()
 
-	if !proc.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
-		t.Skip("go 1.10 or earlier doesn't hold ancestors info")
-	}
+		if !proc.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+			t.Skip("go 1.10 or earlier doesn't hold ancestors info")
+		}
 
-	if err := proc.SetBreakpoint(testutils.GoRoutinesAddrInc); err != nil {
-		t.Fatalf("failed to set breakpoint: %v", err)
-	}
+		if err := proc.SetBreakpoint(testutils.GoRoutinesAddrInc); err != nil {
+			t.Fatalf("failed to set breakpoint: %v", err)
+		}
 
-	event, err := proc.ContinueAndWait()
-	if err != nil {
-		t.Fatalf("failed to continue and wait: %v", err)
-	}
+		event, err := proc.ContinueAndWait()
+		if err != nil {
+			t.Fatalf("failed to continue and wait: %v", err)
+		}
 
-	tids := event.Data.([]int)
-	goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	if goRoutineInfo.Ancestors == nil {
-		t.Errorf("nil ancestors")
+		tids := event.Data.([]int)
+		goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if goRoutineInfo.Ancestors == nil {
+			t.Errorf("nil ancestors")
+		}
 	}
 }

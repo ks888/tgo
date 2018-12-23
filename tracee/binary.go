@@ -35,6 +35,8 @@ type BinaryFile interface {
 	findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error)
 	// firstModuleDataAddress returns the address of runtime.firstmoduledata.
 	firstModuleDataAddress() uint64
+	// moduleDataType returns the dwarf.Type of runtime.moduledata struct type.
+	moduleDataType() dwarf.Type
 	// runtimeGType returns the dwarf.Type of runtime.g struct type.
 	runtimeGType() dwarf.Type
 }
@@ -47,6 +49,7 @@ type debuggableBinaryFile struct {
 	types                        map[uint64]dwarf.Offset
 	cachedRuntimeGType           dwarf.Type
 	cachedFirstModuleDataAddress uint64
+	cachedModuleDataType         dwarf.Type
 }
 
 type dwarfData struct {
@@ -91,12 +94,17 @@ func newDebuggableBinaryFile(data dwarfData, goVersion GoVersion, closer io.Clos
 		return debuggableBinaryFile{}, err
 	}
 
-	binary.cachedRuntimeGType, err = binary.findRuntimeGType()
+	binary.cachedFirstModuleDataAddress, err = binary.findFirstModuleDataAddress()
 	if err != nil {
 		return debuggableBinaryFile{}, err
 	}
 
-	binary.cachedFirstModuleDataAddress, err = binary.findFirstModuleDataAddress()
+	binary.cachedModuleDataType, err = binary.findModuleDataType()
+	if err != nil {
+		return debuggableBinaryFile{}, err
+	}
+
+	binary.cachedRuntimeGType, err = binary.findRuntimeGType()
 	if err != nil {
 		return debuggableBinaryFile{}, err
 	}
@@ -166,15 +174,25 @@ func (b debuggableBinaryFile) findFirstModuleDataAddress() (uint64, error) {
 	return binary.LittleEndian.Uint64(loc[1:]), nil
 }
 
+const moduleDataTypeName = "runtime.moduledata"
+
+func (b debuggableBinaryFile) findModuleDataType() (dwarf.Type, error) {
+	return b.findType(dwarf.TagStructType, moduleDataTypeName)
+}
+
 const gTypeName = "runtime.g"
 
 func (b debuggableBinaryFile) findRuntimeGType() (dwarf.Type, error) {
+	return b.findType(dwarf.TagStructType, gTypeName)
+}
+
+func (b debuggableBinaryFile) findType(targetTag dwarf.Tag, targetName string) (dwarf.Type, error) {
 	entry, err := b.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
-		if entry.Tag != dwarf.TagStructType {
+		if entry.Tag != targetTag {
 			return false
 		}
 		name, err := stringClassAttr(entry, dwarf.AttrName)
-		return name == gTypeName && err == nil
+		return name == targetName && err == nil
 	})
 	if err != nil {
 		return nil, err
@@ -220,12 +238,16 @@ func (b debuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, 
 	return b.dwarf.Type(implTypOffset)
 }
 
-func (b debuggableBinaryFile) runtimeGType() dwarf.Type {
-	return b.cachedRuntimeGType
-}
-
 func (b debuggableBinaryFile) firstModuleDataAddress() uint64 {
 	return b.cachedFirstModuleDataAddress
+}
+
+func (b debuggableBinaryFile) moduleDataType() dwarf.Type {
+	return b.cachedModuleDataType
+}
+
+func (b debuggableBinaryFile) runtimeGType() dwarf.Type {
+	return b.cachedRuntimeGType
 }
 
 // IsExported returns true if the function is exported.
@@ -655,6 +677,50 @@ func decodeSignedLEB128(input []byte) (val int) {
 	return val
 }
 
+type symbol struct {
+	Name  string
+	Value uint64
+}
+
+// nonDebuggableBinaryFile represents the binary file WITHOUT DWARF sections.
+type nonDebuggableBinaryFile struct {
+	closer  io.Closer
+	symbols []symbol
+}
+
+func newNonDebuggableBinaryFile(symbols []symbol, closer io.Closer) (nonDebuggableBinaryFile, error) {
+	return nonDebuggableBinaryFile{closer: closer, symbols: symbols}, nil
+}
+
+// FindFunction always returns error because it's difficult to get function info using non-DWARF binary.
+func (b nonDebuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
+	return nil, errors.New("no DWARF info")
+}
+
+func (b nonDebuggableBinaryFile) Functions() (funcs []*Function) {
+	for _, sym := range b.symbols {
+		funcs = append(funcs, &Function{Name: sym.Name, Value: sym.Value})
+	}
+	return funcs
+}
+
+func (b nonDebuggableBinaryFile) Close() error {
+	return b.closer.Close()
+}
+
+func (b nonDebuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error) {
+	return nil, errors.New("no DWARF info")
+}
+
+func (b nonDebuggableBinaryFile) firstModuleDataAddress() uint64 {
+	for _, sym := range b.symbols {
+		if sym.Name == firstModuleDataName {
+			return sym.Value
+		}
+	}
+	return 0
+}
+
 // Assume this dwarf.Type represents a subset of the module data type in the case DWARF is not available.
 var moduleDataType = &dwarf.StructType{
 	StructName: "runtime.moduledata",
@@ -750,48 +816,8 @@ var moduleDataType = &dwarf.StructType{
 	},
 }
 
-type symbol struct {
-	Name  string
-	Value uint64
-}
-
-// nonDebuggableBinaryFile represents the binary file WITHOUT DWARF sections.
-type nonDebuggableBinaryFile struct {
-	closer  io.Closer
-	symbols []symbol
-}
-
-func newNonDebuggableBinaryFile(symbols []symbol, closer io.Closer) (nonDebuggableBinaryFile, error) {
-	return nonDebuggableBinaryFile{closer: closer, symbols: symbols}, nil
-}
-
-// FindFunction always returns error because it's difficult to get function info using non-DWARF binary.
-func (b nonDebuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
-	return nil, errors.New("no DWARF info")
-}
-
-func (b nonDebuggableBinaryFile) Functions() (funcs []*Function) {
-	for _, sym := range b.symbols {
-		funcs = append(funcs, &Function{Name: sym.Name, Value: sym.Value})
-	}
-	return funcs
-}
-
-func (b nonDebuggableBinaryFile) Close() error {
-	return b.closer.Close()
-}
-
-func (b nonDebuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error) {
-	return nil, errors.New("no DWARF info")
-}
-
-func (b nonDebuggableBinaryFile) firstModuleDataAddress() uint64 {
-	for _, sym := range b.symbols {
-		if sym.Name == firstModuleDataName {
-			return sym.Value
-		}
-	}
-	return 0
+func (b nonDebuggableBinaryFile) moduleDataType() dwarf.Type {
+	return moduleDataType
 }
 
 // Assume this dwarf.Type represents a subset of the runtime.g type in the case DWARF is not available.
@@ -875,7 +901,7 @@ var runtimeGType = &dwarf.StructType{
 							Type: &dwarf.PtrType{
 								CommonType: dwarf.CommonType{ByteSize: 8},
 								Type: &dwarf.StructType{
-									CommonType: dwarf.CommonType{ByteSize: 16},
+									CommonType: dwarf.CommonType{ByteSize: 40},
 									StructName: "runtime.ancestorInfo",
 									Field: []*dwarf.StructField{
 										&dwarf.StructField{

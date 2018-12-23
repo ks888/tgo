@@ -17,8 +17,9 @@ var (
 	// This go binary is used to build the testdata.
 	goBinaryPath string = filepath.Join(runtime.GOROOT(), "bin", "go")
 
-	ProgramHelloworld                     string
-	ProgramHelloworldNoDwarf              string
+	ProgramHelloworld        string
+	ProgramHelloworldNoDwarf string
+	// These addresses are retrieved from the dwarf version. Assume they are same as non-dwarf version.
 	HelloworldAddrMain                    uint64
 	HelloworldAddrNoParameter             uint64
 	HelloworldAddrOneParameter            uint64
@@ -30,14 +31,16 @@ var (
 	ProgramInfloop  string
 	InfloopAddrMain uint64
 
-	ProgramGoRoutines  string
-	GoRoutinesAddrMain uint64
-	GoRoutinesAddrInc  uint64
+	ProgramGoRoutines        string
+	ProgramGoRoutinesNoDwarf string
+	GoRoutinesAddrMain       uint64
+	GoRoutinesAddrInc        uint64
 
 	ProgramRecursive  string
 	RecursiveAddrMain uint64
 
 	ProgramPanic           string
+	ProgramPanicNoDwarf    string
 	PanicAddrMain          uint64
 	PanicAddrThrow         uint64
 	PanicAddrInsideThrough uint64
@@ -119,10 +122,9 @@ func buildProgramHelloworld(srcDirname string) error {
 		return err
 	}
 
-	src := ProgramHelloworld + ".go"
 	ProgramHelloworldNoDwarf = ProgramHelloworld + ".nodwarf"
-	if out, err := exec.Command(goBinaryPath, "build", "-ldflags", "-w", "-o", ProgramHelloworldNoDwarf, src).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	if err := buildProgramWithoutDWARF(ProgramHelloworld+".go", ProgramHelloworldNoDwarf); err != nil {
+		return err
 	}
 
 	updateAddressIfMatched := func(name string, value uint64) error {
@@ -168,8 +170,12 @@ func buildProgramInfloop(srcDirname string) error {
 
 func buildProgramGoRoutines(srcDirname string) error {
 	ProgramGoRoutines = srcDirname + "/testdata/goroutines"
-
 	if err := buildProgram(ProgramGoRoutines); err != nil {
+		return err
+	}
+
+	ProgramGoRoutinesNoDwarf = ProgramGoRoutines + ".nodwarf"
+	if err := buildProgramWithoutDWARF(ProgramGoRoutines+".go", ProgramGoRoutinesNoDwarf); err != nil {
 		return err
 	}
 
@@ -206,8 +212,12 @@ func buildProgramRecursive(srcDirname string) error {
 
 func buildProgramPanic(srcDirname string) error {
 	ProgramPanic = srcDirname + "/testdata/panic"
-
 	if err := buildProgram(ProgramPanic); err != nil {
+		return err
+	}
+
+	ProgramPanicNoDwarf = ProgramPanic + ".nodwarf"
+	if err := buildProgramWithoutDWARF(ProgramPanic+".go", ProgramPanicNoDwarf); err != nil {
 		return err
 	}
 
@@ -335,6 +345,13 @@ func buildProgram(programName string) error {
 	src := programName + ".go"
 	if out, err := exec.Command(goBinaryPath, "build", "-ldflags", linkOptions, "-o", programName, src).CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to build %s: %v\n%v", src, err, string(out))
+	}
+	return nil
+}
+
+func buildProgramWithoutDWARF(srcName, programName string) error {
+	if out, err := exec.Command(goBinaryPath, "build", "-ldflags", "-w", "-o", programName, srcName).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to build %s: %v\n%v", srcName, err, string(out))
 	}
 	return nil
 }

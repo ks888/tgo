@@ -86,8 +86,8 @@ func newProcess(debugapiClient *lldb.Client, programPath, rawGoVersion string) (
 	}, nil
 }
 
-func buildMapRuntimeTypeFunc(binary BinaryFile, debugapiClient *lldb.Client) (func(runtimeTypeAddr uint64) (dwarf.Type, error), error) {
-	moduleDataList, err := parseModuleDataList(binary.firstModuleDataAddress(), debugapiClient)
+func buildMapRuntimeTypeFunc(binary BinaryFile, reader memoryReader) (func(runtimeTypeAddr uint64) (dwarf.Type, error), error) {
+	moduleDataList, err := parseModuleDataList(binary.firstModuleDataAddress(), binary.moduleDataType(), reader)
 	if err != nil {
 		return nil, err
 	}
@@ -105,28 +105,42 @@ func buildMapRuntimeTypeFunc(binary BinaryFile, debugapiClient *lldb.Client) (fu
 	}, nil
 }
 
-func parseModuleDataList(firstModuleDataAddr uint64, debugapiClient *lldb.Client) ([]moduleData, error) {
+func parseModuleDataList(firstModuleDataAddr uint64, moduleDataType dwarf.Type, reader memoryReader) ([]moduleData, error) {
+	var typesOffset, etypesOffset, nextOffset uint64
+	var typesSize, etypesSize, nextSize uint64
+	for _, field := range moduleDataType.(*dwarf.StructType).Field {
+		switch field.Name {
+		case "types":
+			typesOffset = uint64(field.ByteOffset)
+			typesSize = uint64(field.Type.Size())
+		case "etypes":
+			etypesOffset = uint64(field.ByteOffset)
+			etypesSize = uint64(field.Type.Size())
+		case "next":
+			nextOffset = uint64(field.ByteOffset)
+			nextSize = uint64(field.Type.Size())
+		}
+	}
+
 	var moduleDataList []moduleData
-	buff := make([]byte, 8)
 	moduleDataAddr := firstModuleDataAddr
+
 	for {
-		// TODO: use the DIE of the moduleData type
-		var offsetToTypes uint64 = 24*3 + 8*16
-		if err := debugapiClient.ReadMemory(moduleDataAddr+offsetToTypes, buff); err != nil {
+		buff := make([]byte, typesSize)
+		if err := reader.ReadMemory(moduleDataAddr+typesOffset, buff); err != nil {
 			return nil, err
 		}
 		types := binary.LittleEndian.Uint64(buff)
 
-		var offsetToEtypes uint64 = 24*3 + 8*17
-		if err := debugapiClient.ReadMemory(moduleDataAddr+offsetToEtypes, buff); err != nil {
+		buff = make([]byte, etypesSize)
+		if err := reader.ReadMemory(moduleDataAddr+etypesOffset, buff); err != nil {
 			return nil, err
 		}
 		etypes := binary.LittleEndian.Uint64(buff)
-
 		moduleDataList = append(moduleDataList, moduleData{types: types, etypes: etypes})
 
-		var offsetToNext uint64 = 24*3 + 8*18 + 24*4 + 16 + 24 + 16 + 24 + 8 + 16*2 + 8 + 8
-		if err := debugapiClient.ReadMemory(moduleDataAddr+offsetToNext, buff); err != nil {
+		buff = make([]byte, nextSize)
+		if err := reader.ReadMemory(moduleDataAddr+nextOffset, buff); err != nil {
 			return nil, err
 		}
 		next := binary.LittleEndian.Uint64(buff)
@@ -303,7 +317,7 @@ func (p *Process) HasBreakpoint(addr uint64) bool {
 // To be accurate, we need to check the .debug_frame section to find the CFA and return address.
 // But we omit the check here because this function is called at only the beginning or end of the tracee's function call.
 func (p *Process) StackFrameAt(rsp, rip uint64) (*StackFrame, error) {
-	function, err := p.Binary.FindFunction(rip)
+	function, err := p.FindFunction(rip)
 	if err != nil {
 		return nil, err
 	}
@@ -325,6 +339,11 @@ func (p *Process) StackFrameAt(rsp, rip uint64) (*StackFrame, error) {
 		InputArguments:  inputArgs,
 		OutputArguments: outputArgs,
 	}, nil
+}
+
+func (p *Process) FindFunction(pc uint64) (*Function, error) {
+	// TODO: impl pc -> func if error
+	return p.Binary.FindFunction(pc)
 }
 
 func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (inputArgs []Argument, outputArgs []Argument, err error) {
