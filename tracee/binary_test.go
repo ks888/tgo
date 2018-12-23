@@ -219,88 +219,6 @@ func TestSeek_HasTwoParameters(t *testing.T) {
 	}
 }
 
-func TestModuleDataOffsets(t *testing.T) {
-	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
-	debuggableBinary, _ := binary.(debuggableBinaryFile)
-
-	entry, err := debuggableBinary.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
-		if entry.Tag != dwarf.TagStructType {
-			return false
-		}
-		name, err := stringClassAttr(entry, dwarf.AttrName)
-		return name == "runtime.moduledata" && err == nil
-	})
-	if err != nil {
-		t.Fatalf("no moduledata type entry: %v", err)
-	}
-
-	expectedModuleDataType, err := debuggableBinary.dwarf.Type(entry.Offset)
-	if err != nil {
-		t.Fatalf("no moduledata type: %v", err)
-	}
-
-	expectedFields := expectedModuleDataType.(*dwarf.StructType).Field
-	for _, actualField := range moduleDataType.Field {
-		for _, expectedField := range expectedFields {
-			if actualField.Name == expectedField.Name {
-				if actualField.ByteOffset != expectedField.ByteOffset {
-					t.Errorf("wrong byte offset. expect: %d, actual: %d", expectedField.ByteOffset, actualField.ByteOffset)
-				}
-				if actualField.Type.Size() != expectedField.Type.Size() {
-					t.Errorf("wrong size. expect: %d, actual: %d", expectedField.Type.Size(), actualField.Type.Size())
-				}
-				break
-			}
-		}
-	}
-
-	// for _, field := range expectedModuleDataType.(*dwarf.StructType).Field {
-	// 	fmt.Printf("  %#v\n", field)
-	// 	fmt.Printf("    %#v\n", field.Type)
-	// 	if field.Name == "ftab" {
-	// 		for _, innerField := range field.Type.(*dwarf.StructType).Field {
-	// 			fmt.Printf("      %#v\n", innerField)
-	// 			fmt.Printf("        %#v\n", innerField.Type)
-	// 			if innerField.Name == "array" {
-	// 				fmt.Printf("          %#v\n", innerField.Type.(*dwarf.PtrType).Type)
-	// 				for _, mostInnerField := range innerField.Type.(*dwarf.PtrType).Type.(*dwarf.StructType).Field {
-	// 					fmt.Printf("            %#v\n", mostInnerField)
-	// 					fmt.Printf("            %#v\n", mostInnerField.Type)
-	// 				}
-	// 			}
-	// 		}
-	// 	}
-	// }
-}
-
-// TODO: parse faster
-// func TestParseModuleData(t *testing.T) {
-// 	proc, err := LaunchProcess(testutils.ProgramTypePrint)
-// 	if err != nil {
-// 		t.Fatalf("failed to launch process: %v", err)
-// 	}
-// 	defer proc.Detach()
-
-// 	buff := make([]byte, moduleDataType.Size())
-// 	if err := proc.debugapiClient.ReadMemory(proc.Binary.firstModuleDataAddress(), buff); err != nil {
-// 		t.Fatalf("failed to ReadMemory: %v", err)
-// 	}
-
-// 	val := (valueParser{reader: proc.debugapiClient}).parseValue(moduleDataType, buff, 1)
-// 	for fieldName, fieldValue := range val.(structValue).fields {
-// 		switch fieldName {
-// 		case "pclntable", "ftab":
-// 			if len(fieldValue.(sliceValue).val) == 0 {
-// 				t.Errorf("empty slice: %s", fieldName)
-// 			}
-// 		case "findfunctab", "minpc", "types", "etypes":
-// 			if fieldValue.(uint64Value).val == 0 {
-// 				t.Errorf("zero value: %s", fieldName)
-// 			}
-// 		}
-// 	}
-// }
-
 func TestAddressClassAttr(t *testing.T) {
 	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
@@ -467,6 +385,145 @@ func TestDebugFrameSection(t *testing.T) {
 	}
 }
 
+func TestModuleDataOffsets(t *testing.T) {
+	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
+	debuggableBinary, _ := binary.(debuggableBinaryFile)
+
+	entry, err := debuggableBinary.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
+		if entry.Tag != dwarf.TagStructType {
+			return false
+		}
+		name, err := stringClassAttr(entry, dwarf.AttrName)
+		return name == "runtime.moduledata" && err == nil
+	})
+	if err != nil {
+		t.Fatalf("no moduledata type entry: %v", err)
+	}
+
+	expectedModuleDataType, err := debuggableBinary.dwarf.Type(entry.Offset)
+	if err != nil {
+		t.Fatalf("no moduledata type: %v", err)
+	}
+
+	expectedFields := expectedModuleDataType.(*dwarf.StructType).Field
+	for _, actualField := range moduleDataType.Field {
+		for _, expectedField := range expectedFields {
+			if actualField.Name == expectedField.Name {
+				if actualField.ByteOffset != expectedField.ByteOffset {
+					t.Errorf("wrong byte offset. expect: %d, actual: %d", expectedField.ByteOffset, actualField.ByteOffset)
+				}
+				if actualField.Type.Size() != expectedField.Type.Size() {
+					t.Errorf("wrong size. expect: %d, actual: %d", expectedField.Type.Size(), actualField.Type.Size())
+				}
+				break
+			}
+		}
+	}
+
+	// for _, field := range expectedModuleDataType.(*dwarf.StructType).Field {
+	// 	fmt.Printf("  %#v\n", field)
+	// 	fmt.Printf("    %#v\n", field.Type)
+	// 	if field.Name == "ftab" {
+	// 		for _, innerField := range field.Type.(*dwarf.StructType).Field {
+	// 			fmt.Printf("      %#v\n", innerField)
+	// 			fmt.Printf("        %#v\n", innerField.Type)
+	// 			if innerField.Name == "array" {
+	// 				fmt.Printf("          %#v\n", innerField.Type.(*dwarf.PtrType).Type)
+	// 				for _, mostInnerField := range innerField.Type.(*dwarf.PtrType).Type.(*dwarf.StructType).Field {
+	// 					fmt.Printf("            %#v\n", mostInnerField)
+	// 					fmt.Printf("            %#v\n", mostInnerField.Type)
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
+}
+
+// TODO: parse faster
+// func TestParseModuleData(t *testing.T) {
+// 	proc, err := LaunchProcess(testutils.ProgramTypePrint)
+// 	if err != nil {
+// 		t.Fatalf("failed to launch process: %v", err)
+// 	}
+// 	defer proc.Detach()
+
+// 	buff := make([]byte, moduleDataType.Size())
+// 	if err := proc.debugapiClient.ReadMemory(proc.Binary.firstModuleDataAddress(), buff); err != nil {
+// 		t.Fatalf("failed to ReadMemory: %v", err)
+// 	}
+
+// 	val := (valueParser{reader: proc.debugapiClient}).parseValue(moduleDataType, buff, 1)
+// 	for fieldName, fieldValue := range val.(structValue).fields {
+// 		switch fieldName {
+// 		case "pclntable", "ftab":
+// 			if len(fieldValue.(sliceValue).val) == 0 {
+// 				t.Errorf("empty slice: %s", fieldName)
+// 			}
+// 		case "findfunctab", "minpc", "types", "etypes":
+// 			if fieldValue.(uint64Value).val == 0 {
+// 				t.Errorf("zero value: %s", fieldName)
+// 			}
+// 		}
+// 	}
+// }
+
+func TestRuntimeGOffsets(t *testing.T) {
+	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
+	debuggableBinary, _ := binary.(debuggableBinaryFile)
+
+	entry, err := debuggableBinary.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
+		if entry.Tag != dwarf.TagStructType {
+			return false
+		}
+		name, err := stringClassAttr(entry, dwarf.AttrName)
+		return name == "runtime.g" && err == nil
+	})
+	if err != nil {
+		t.Fatalf("no moduledata type entry: %v", err)
+	}
+
+	expectedRuntimeG, err := debuggableBinary.dwarf.Type(entry.Offset)
+	if err != nil {
+		t.Fatalf("no runtime.g type: %v", err)
+	}
+
+	expectedFields := expectedRuntimeG.(*dwarf.StructType).Field
+	for _, actualField := range runtimeGType.Field {
+		for _, expectedField := range expectedFields {
+			if actualField.Name == expectedField.Name {
+				if actualField.ByteOffset != expectedField.ByteOffset {
+					t.Errorf("wrong byte offset. expect: %d, actual: %d", expectedField.ByteOffset, actualField.ByteOffset)
+				}
+				if actualField.Type.Size() != expectedField.Type.Size() {
+					t.Errorf("wrong size. expect: %d, actual: %d", expectedField.Type.Size(), actualField.Type.Size())
+				}
+				break
+			}
+		}
+	}
+
+	// for _, field := range expectedRuntimeG.(*dwarf.StructType).Field {
+	// 	if field.Name == "ancestors" {
+	// 		fmt.Printf("  %#v\n", field)
+	// 		fmt.Printf("    %#v\n", field.Type)
+	// 		fmt.Printf("      %#v\n", field.Type.(*dwarf.PtrType).Type)
+	// 		for _, innerField := range field.Type.(*dwarf.PtrType).Type.(*dwarf.StructType).Field {
+	// 			fmt.Printf("        %#v\n", innerField)
+	// 			fmt.Printf("          %#v\n", innerField.Type)
+	// 			if innerField.Name == "array" {
+	// 				fmt.Printf("          %#v\n", innerField.Type.(*dwarf.PtrType).Type)
+	// 				fmt.Printf("          %#v\n", innerField.Type.(*dwarf.PtrType).Type.(*dwarf.TypedefType).Type)
+	// 				for _, mostInnerField := range innerField.Type.(*dwarf.PtrType).Type.(*dwarf.TypedefType).Type.(*dwarf.StructType).Field {
+	// 					fmt.Printf("            %#v\n", mostInnerField)
+	// 					fmt.Printf("            %#v\n", mostInnerField.Type)
+	// 				}
+	// 			}
+
+	// 		}
+	// 	}
+	// }
+}
+
 func TestOpenNonDwarfBinaryFile(t *testing.T) {
 	binary, err := OpenBinaryFile(testutils.ProgramHelloworldNoDwarf, GoVersion{})
 	if err != nil {
@@ -481,10 +538,12 @@ func TestOpenNonDwarfBinaryFile(t *testing.T) {
 	if binary.firstModuleDataAddress() == 0 {
 		t.Errorf("runtime.firstmoduledata address is 0")
 	}
-	// binary.findDwarfTypeByAddr()
-	// if binary.runtimeGType() == nil {
-	// 	t.Errorf("empty runtime.g type")
-	// }
+	if _, err := binary.findDwarfTypeByAddr(0); err == nil {
+		t.Errorf("findDwarfTypeByAddr doesn't return error")
+	}
+	if binary.runtimeGType() == nil {
+		t.Errorf("empty runtime.g type")
+	}
 }
 
 func findDwarfData(t *testing.T, pathToProgram string) dwarfData {

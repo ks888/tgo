@@ -767,7 +767,7 @@ func newNonDebuggableBinaryFile(symbols []symbol, closer io.Closer) (nonDebuggab
 
 // FindFunction always returns error because it's difficult to get function info using non-DWARF binary.
 func (b nonDebuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
-	return nil, errors.New("DWARF is not available")
+	return nil, errors.New("no DWARF info")
 }
 
 func (b nonDebuggableBinaryFile) Functions() (funcs []*Function) {
@@ -777,17 +777,12 @@ func (b nonDebuggableBinaryFile) Functions() (funcs []*Function) {
 	return funcs
 }
 
-// CompiledGoVersion always returns empty value because the version info is not available (FYI: .note.go.buildid is just the hash value).
-func (b nonDebuggableBinaryFile) CompiledGoVersion() GoVersion {
-	return GoVersion{}
-}
-
 func (b nonDebuggableBinaryFile) Close() error {
 	return b.closer.Close()
 }
 
 func (b nonDebuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error) {
-	return nil, nil
+	return nil, errors.New("no DWARF info")
 }
 
 func (b nonDebuggableBinaryFile) firstModuleDataAddress() uint64 {
@@ -799,6 +794,113 @@ func (b nonDebuggableBinaryFile) firstModuleDataAddress() uint64 {
 	return 0
 }
 
+// Assume this dwarf.Type represents a subset of the runtime.g type in the case DWARF is not available.
+var runtimeGType = &dwarf.StructType{
+	StructName: "runtime.moduledata",
+	CommonType: dwarf.CommonType{ByteSize: 456},
+	Field: []*dwarf.StructField{
+		&dwarf.StructField{
+			Name: "stack",
+			Type: &dwarf.StructType{
+				CommonType: dwarf.CommonType{ByteSize: 16},
+				StructName: "runtime.stack",
+				Field: []*dwarf.StructField{
+					&dwarf.StructField{
+						Name:       "lo",
+						Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+						ByteOffset: 0,
+					},
+					&dwarf.StructField{
+						Name:       "hi",
+						Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+						ByteOffset: 8,
+					},
+				},
+			},
+			ByteOffset: 0,
+		},
+		&dwarf.StructField{
+			Name:       "_panic",
+			Type:       &dwarf.PtrType{CommonType: dwarf.CommonType{ByteSize: 8}},
+			ByteOffset: 32,
+		},
+		&dwarf.StructField{
+			Name: "_defer",
+			Type: &dwarf.PtrType{
+				CommonType: dwarf.CommonType{ByteSize: 8},
+				Type: &dwarf.StructType{
+					CommonType: dwarf.CommonType{ByteSize: 48},
+					StructName: "runtime._defer",
+					Field: []*dwarf.StructField{
+						&dwarf.StructField{
+							Name:       "sp",
+							Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+							ByteOffset: 8,
+						},
+						&dwarf.StructField{
+							Name:       "pc",
+							Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+							ByteOffset: 16,
+						},
+						&dwarf.StructField{
+							Name:       "_panic",
+							Type:       &dwarf.PtrType{CommonType: dwarf.CommonType{ByteSize: 8}},
+							ByteOffset: 32,
+						},
+						&dwarf.StructField{
+							Name:       "link",
+							Type:       &dwarf.PtrType{CommonType: dwarf.CommonType{ByteSize: 8}},
+							ByteOffset: 40,
+						},
+					},
+				},
+			},
+			ByteOffset: 40,
+		},
+		&dwarf.StructField{
+			Name:       "goid",
+			Type:       &dwarf.IntType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+			ByteOffset: 152,
+		},
+		&dwarf.StructField{
+			Name: "ancestors",
+			Type: &dwarf.PtrType{
+				CommonType: dwarf.CommonType{ByteSize: 8},
+				Type: &dwarf.StructType{
+					CommonType: dwarf.CommonType{ByteSize: 24},
+					StructName: "[]runtime.ancestorInfo",
+					Field: []*dwarf.StructField{
+						&dwarf.StructField{
+							Name: "array",
+							Type: &dwarf.PtrType{
+								CommonType: dwarf.CommonType{ByteSize: 8},
+								Type: &dwarf.StructType{
+									CommonType: dwarf.CommonType{ByteSize: 16},
+									StructName: "runtime.ancestorInfo",
+									Field: []*dwarf.StructField{
+										&dwarf.StructField{
+											Name:       "goid",
+											Type:       &dwarf.IntType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+											ByteOffset: 24,
+										},
+									},
+								},
+							},
+							ByteOffset: 0,
+						},
+						&dwarf.StructField{
+							Name:       "len",
+							Type:       &dwarf.IntType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+							ByteOffset: 8,
+						},
+					},
+				},
+			},
+			ByteOffset: 288,
+		},
+	},
+}
+
 func (b nonDebuggableBinaryFile) runtimeGType() dwarf.Type {
-	return nil
+	return runtimeGType
 }
