@@ -4,6 +4,7 @@ import (
 	"debug/dwarf"
 	"encoding/binary"
 	"fmt"
+	"runtime"
 
 	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/debugapi/lldb"
@@ -17,6 +18,7 @@ type Process struct {
 	debugapiClient *lldb.Client
 	breakpoints    map[uint64]*breakpoint
 	Binary         BinaryFile
+	GoVersion      GoVersion
 	valueParser    valueParser
 }
 
@@ -41,7 +43,7 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 		return nil, err
 	}
 
-	proc, err := newProcess(debugapiClient, name)
+	proc, err := newProcess(debugapiClient, name, runtime.Version())
 	if err != nil {
 		debugapiClient.DetachProcess()
 	}
@@ -49,28 +51,23 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 }
 
 // AttachProcess attaches to the existing tracee process.
-func AttachProcess(pid int) (*Process, error) {
+func AttachProcess(pid int, programPath, goVersion string) (*Process, error) {
 	debugapiClient := lldb.NewClient()
 	err := debugapiClient.AttachProcess(pid)
 	if err != nil {
 		return nil, err
 	}
 
-	programPath, err := findProgramPath(pid)
-	if err != nil {
-		debugapiClient.DetachProcess()
-		return nil, err
-	}
-
-	proc, err := newProcess(debugapiClient, programPath)
+	proc, err := newProcess(debugapiClient, programPath, goVersion)
 	if err != nil {
 		debugapiClient.DetachProcess() // keep the attached process running
 	}
 	return proc, err
 }
 
-func newProcess(debugapiClient *lldb.Client, programPath string) (*Process, error) {
-	binary, err := OpenBinaryFile(programPath)
+func newProcess(debugapiClient *lldb.Client, programPath, rawGoVersion string) (*Process, error) {
+	goVersion := ParseGoVersion(rawGoVersion)
+	binary, err := OpenBinaryFile(programPath, goVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +81,7 @@ func newProcess(debugapiClient *lldb.Client, programPath string) (*Process, erro
 		debugapiClient: debugapiClient,
 		breakpoints:    make(map[uint64]*breakpoint),
 		Binary:         binary,
+		GoVersion:      goVersion,
 		valueParser:    valueParser{reader: debugapiClient, mapRuntimeType: mapRuntimeType},
 	}, nil
 }
@@ -430,7 +428,7 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 
 // TODO: depend on os
 func (p *Process) offsetToG() uint32 {
-	if p.Binary.CompiledGoVersion().LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
+	if p.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
 		return 0x30
 	}
 	return 0x8a0
@@ -522,7 +520,7 @@ func (p *Process) findPanicHandler(gAddr, panicAddr, stackHi uint64) (*PanicHand
 }
 
 func (p *Process) findAncestorGoIDs(gAddr uint64) ([]int64, error) {
-	if !p.Binary.CompiledGoVersion().LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+	if !p.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
 		// ancestors field is not supported
 		return nil, nil
 	}

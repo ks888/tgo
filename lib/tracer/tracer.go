@@ -95,11 +95,18 @@ func initialize(startTracePoint, endTracePoint uint64) error {
 		return err
 	}
 
+	programPath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
 	attachArgs := &service.AttachArgs{
 		Pid:                    os.Getpid(),
 		TraceLevel:             traceLevel,
 		ParseLevel:             parseLevel,
 		InitialStartTracePoint: startTracePoint,
+		GoVersion:              runtime.Version(),
+		ProgramPath:            programPath,
 	}
 	reply := &struct{}{}
 	if err := client.Call("Tracer.Attach", attachArgs, reply); err != nil {

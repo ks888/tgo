@@ -27,8 +27,6 @@ type BinaryFile interface {
 	FindFunction(pc uint64) (*Function, error)
 	// Functions returns all the functions defined in the binary.
 	Functions() []*Function
-	// CompiledGoVersion returns the go version used to compile this binary.
-	CompiledGoVersion() GoVersion
 	// Close closes the binary file.
 	Close() error
 	// findDwarfTypeByAddr finds the dwarf.Type to which the given address specifies.
@@ -46,7 +44,6 @@ type debuggableBinaryFile struct {
 	functions                    []*Function
 	dwarf                        dwarfData
 	closer                       io.Closer
-	GoVersion                    GoVersion
 	types                        map[uint64]dwarf.Offset
 	cachedRuntimeGType           dwarf.Type
 	cachedFirstModuleDataAddress uint64
@@ -76,11 +73,11 @@ type Parameter struct {
 }
 
 // OpenBinaryFile opens the specified program file.
-func OpenBinaryFile(pathToProgram string) (BinaryFile, error) {
-	return openBinaryFile(pathToProgram)
+func OpenBinaryFile(pathToProgram string, goVersion GoVersion) (BinaryFile, error) {
+	return openBinaryFile(pathToProgram, goVersion)
 }
 
-func newDebuggableBinaryFile(data dwarfData, closer io.Closer) (debuggableBinaryFile, error) {
+func newDebuggableBinaryFile(data dwarfData, goVersion GoVersion, closer io.Closer) (debuggableBinaryFile, error) {
 	binary := debuggableBinaryFile{dwarf: data, closer: closer}
 
 	var err error
@@ -89,9 +86,7 @@ func newDebuggableBinaryFile(data dwarfData, closer io.Closer) (debuggableBinary
 		return debuggableBinaryFile{}, err
 	}
 
-	binary.GoVersion = binary.findGoVersion()
-
-	binary.types, err = binary.buildTypes()
+	binary.types, err = binary.buildTypes(goVersion)
 	if err != nil {
 		return debuggableBinaryFile{}, err
 	}
@@ -125,8 +120,8 @@ func (b debuggableBinaryFile) listFunctions() ([]*Function, error) {
 	}
 }
 
-func (b debuggableBinaryFile) buildTypes() (map[uint64]dwarf.Offset, error) {
-	if !b.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+func (b debuggableBinaryFile) buildTypes(goVersion GoVersion) (map[uint64]dwarf.Offset, error) {
+	if !goVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
 		// attrGoRuntimeType is not supported
 		return nil, nil
 	}
@@ -147,32 +142,6 @@ func (b debuggableBinaryFile) buildTypes() (map[uint64]dwarf.Offset, error) {
 			}
 			types[val] = entry.Offset
 		}
-	}
-}
-
-func (b debuggableBinaryFile) findGoVersion() GoVersion {
-	const producerPrefix = "Go cmd/compile "
-
-	reader := b.dwarf.Reader()
-	for {
-		entry, err := reader.Next()
-		if err != nil || entry == nil {
-			log.Debugf("failed to find the go version of the binary: %v", err)
-			return GoVersion{}
-		}
-
-		if entry.Tag != dwarf.TagCompileUnit {
-			reader.SkipChildren()
-			continue
-		}
-
-		producer, err := stringClassAttr(entry, dwarf.AttrProducer)
-		if err != nil || !strings.HasPrefix(producer, producerPrefix) {
-			reader.SkipChildren()
-			continue
-		}
-
-		return ParseGoVersion(strings.TrimPrefix(producer, producerPrefix))
 	}
 }
 
@@ -239,12 +208,6 @@ func (b debuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
 // Functions lists the subprograms in the debug info section. They don't include parameters info.
 func (b debuggableBinaryFile) Functions() []*Function {
 	return b.functions
-}
-
-// CompiledGoVersion returns the go version used to compile this binary. If the multiple go versions
-// are used for compiling, the version found first is returned.
-func (b debuggableBinaryFile) CompiledGoVersion() GoVersion {
-	return b.GoVersion
 }
 
 // Close releases the resources associated with the binary.

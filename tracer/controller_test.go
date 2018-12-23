@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -25,7 +26,7 @@ func TestAttachProcess(t *testing.T) {
 	_ = cmd.Start()
 
 	controller := NewController()
-	err := controller.AttachTracee(cmd.Process.Pid)
+	err := controller.AttachTracee(cmd.Process.Pid, testutils.ProgramInfloop, runtime.Version())
 	if err != nil {
 		t.Fatalf("failed to attch to the process: %v", err)
 	}

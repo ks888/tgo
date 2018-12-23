@@ -12,14 +12,11 @@ import (
 )
 
 func TestOpenBinaryFile(t *testing.T) {
-	binary, err := OpenBinaryFile(testutils.ProgramHelloworld)
+	binary, err := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
 	if err != nil {
 		t.Fatalf("failed to create new binary: %v", err)
 	}
 
-	if binary.CompiledGoVersion() == (GoVersion{}) {
-		t.Errorf("empty go version")
-	}
 	if binary.firstModuleDataAddress() == 0 {
 		t.Errorf("runtime.firstmoduledata address is 0")
 	}
@@ -29,14 +26,14 @@ func TestOpenBinaryFile(t *testing.T) {
 }
 
 func TestOpenBinaryFile_ProgramNotFound(t *testing.T) {
-	_, err := OpenBinaryFile("./notexist")
+	_, err := OpenBinaryFile("./notexist", GoVersion{})
 	if err == nil {
 		t.Fatal("error not returned when the path is invalid")
 	}
 }
 
 func TestFindFunction(t *testing.T) {
-	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld)
+	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
 	function, err := binary.FindFunction(testutils.HelloworldAddrOneParameterAndVariable)
 	if err != nil {
 		t.Fatalf("failed to find function: %v", err)
@@ -52,7 +49,7 @@ func TestFindFunction(t *testing.T) {
 }
 
 func TestListFunctions(t *testing.T) {
-	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld)
+	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
 	functions := binary.Functions()
 	if functions == nil {
 		t.Fatalf("functions is nil")
@@ -223,7 +220,7 @@ func TestSeek_HasTwoParameters(t *testing.T) {
 }
 
 func TestModuleDataOffsets(t *testing.T) {
-	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld)
+	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
 	debuggableBinary, _ := binary.(debuggableBinaryFile)
 
 	entry, err := debuggableBinary.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
@@ -471,7 +468,7 @@ func TestDebugFrameSection(t *testing.T) {
 }
 
 func TestOpenNonDwarfBinaryFile(t *testing.T) {
-	binary, err := OpenBinaryFile(testutils.ProgramHelloworldNoDwarf)
+	binary, err := OpenBinaryFile(testutils.ProgramHelloworldNoDwarf, GoVersion{})
 	if err != nil {
 		t.Fatalf("failed to create new binary: %v", err)
 	}
@@ -480,9 +477,6 @@ func TestOpenNonDwarfBinaryFile(t *testing.T) {
 	}
 	if funcs := binary.Functions(); len(funcs) == 0 {
 		t.Errorf("Functions return empty list")
-	}
-	if binary.CompiledGoVersion() == (GoVersion{}) {
-		t.Errorf("empty go version")
 	}
 	if binary.firstModuleDataAddress() == 0 {
 		t.Errorf("runtime.firstmoduledata address is 0")
@@ -494,7 +488,7 @@ func TestOpenNonDwarfBinaryFile(t *testing.T) {
 }
 
 func findDwarfData(t *testing.T, pathToProgram string) dwarfData {
-	binaryFile, err := openBinaryFile(pathToProgram)
+	binaryFile, err := openBinaryFile(pathToProgram, GoVersion{})
 	if err != nil {
 		t.Fatalf("failed to open: %v", err)
 	}

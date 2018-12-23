@@ -30,6 +30,7 @@ type AttachArgs struct {
 	// after the attached tracee starts running without trace points.
 	InitialStartTracePoint uint64
 	Verbose                bool
+	GoVersion, ProgramPath string
 }
 
 // Version returns the service version. The backward compatibility may be broken if the version is not same as the expected one.
@@ -47,7 +48,7 @@ func (t *Tracer) Attach(args AttachArgs, reply *struct{}) error {
 	}
 
 	t.controller = tracer.NewController()
-	if err := t.controller.AttachTracee(args.Pid); err != nil {
+	if err := t.controller.AttachTracee(args.Pid, args.ProgramPath, args.GoVersion); err != nil {
 		return err
 	}
 	t.controller.SetTraceLevel(args.TraceLevel)

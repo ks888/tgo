@@ -81,10 +81,10 @@ func (c *Controller) LaunchTracee(name string, arg ...string) error {
 }
 
 // AttachTracee attaches to the existing process.
-func (c *Controller) AttachTracee(pid int) error {
+func (c *Controller) AttachTracee(pid int, programPath, goVersion string) error {
 	var err error
 	c.statusStore = make(map[int]goRoutineStatus)
-	c.process, err = tracee.AttachProcess(pid)
+	c.process, err = tracee.AttachProcess(pid, programPath, goVersion)
 	return err
 }
 

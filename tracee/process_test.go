@@ -3,6 +3,7 @@ package tracee
 import (
 	"os"
 	"os/exec"
+	"runtime"
 	"testing"
 
 	"github.com/ks888/tgo/testutils"
@@ -23,7 +24,7 @@ func TestAttachProcess(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
 
-	proc, err := AttachProcess(cmd.Process.Pid)
+	proc, err := AttachProcess(cmd.Process.Pid, testutils.ProgramInfloop, runtime.Version())
 	if err != nil {
 		t.Fatalf("failed to attach process: %v", err)
 	}
@@ -447,7 +448,7 @@ func TestCurrentGoRoutineInfo_HasAncestors(t *testing.T) {
 	}
 	defer proc.Detach()
 
-	if !proc.Binary.CompiledGoVersion().LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
+	if !proc.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
 		t.Skip("go 1.10 or earlier doesn't hold ancestors info")
 	}
 

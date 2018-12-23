@@ -14,7 +14,7 @@ var locationListSectionNames = []string{
 	"__debug_loc",
 }
 
-func openBinaryFile(pathToProgram string) (BinaryFile, error) {
+func openBinaryFile(pathToProgram string, goVersion GoVersion) (BinaryFile, error) {
 	machoFile, err := macho.Open(pathToProgram)
 	if err != nil {
 		return nil, err
@@ -30,7 +30,7 @@ func openBinaryFile(pathToProgram string) (BinaryFile, error) {
 		return binaryFile, err
 	}
 
-	binaryFile, err := newDebuggableBinaryFile(dwarfData{Data: data, locationList: locList}, closer)
+	binaryFile, err := newDebuggableBinaryFile(dwarfData{Data: data, locationList: locList}, goVersion, closer)
 	if err != nil {
 		closer.Close()
 	}
