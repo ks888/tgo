@@ -23,7 +23,7 @@ func openBinaryFile(pathToProgram string, goVersion GoVersion) (BinaryFile, erro
 
 	data, locList, err := findDWARF(machoFile)
 	if err != nil {
-		binaryFile, err := newNonDebuggableBinaryFile(findSymbols(machoFile), closer)
+		binaryFile, err := newNonDebuggableBinaryFile(findSymbols(machoFile), findFirstModuleData(machoFile), closer)
 		if err != nil {
 			closer.Close()
 		}
@@ -89,7 +89,23 @@ func findSymbols(machoFile *macho.File) (symbols []symbol) {
 	}
 
 	for _, sym := range machoFile.Symtab.Syms {
+		if sym.Sect != 0x1 {
+			continue
+		}
 		symbols = append(symbols, symbol{Name: sym.Name, Value: sym.Value})
 	}
 	return symbols
+}
+
+func findFirstModuleData(machoFile *macho.File) uint64 {
+	if machoFile.Symtab == nil {
+		return 0
+	}
+
+	for _, sym := range machoFile.Symtab.Syms {
+		if sym.Name == firstModuleDataName {
+			return sym.Value
+		}
+	}
+	return 0
 }

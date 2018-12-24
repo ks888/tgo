@@ -469,7 +469,7 @@ func (c *Controller) alterBreakpointsExceptTracingPoint(enable bool) error {
 			err = c.process.ClearBreakpoint(function.Value)
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to change the breakpoint setting of %s: %v", function.Name, err)
 		}
 	}
 	return nil

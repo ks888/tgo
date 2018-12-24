@@ -684,12 +684,13 @@ type symbol struct {
 
 // nonDebuggableBinaryFile represents the binary file WITHOUT DWARF sections.
 type nonDebuggableBinaryFile struct {
-	closer  io.Closer
-	symbols []symbol
+	closer              io.Closer
+	symbols             []symbol
+	firstModuleDataAddr uint64
 }
 
-func newNonDebuggableBinaryFile(symbols []symbol, closer io.Closer) (nonDebuggableBinaryFile, error) {
-	return nonDebuggableBinaryFile{closer: closer, symbols: symbols}, nil
+func newNonDebuggableBinaryFile(symbols []symbol, firstModuleDataAddr uint64, closer io.Closer) (nonDebuggableBinaryFile, error) {
+	return nonDebuggableBinaryFile{closer: closer, firstModuleDataAddr: firstModuleDataAddr, symbols: symbols}, nil
 }
 
 // FindFunction always returns error because it's difficult to get function info using non-DWARF binary.
@@ -713,12 +714,7 @@ func (b nonDebuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Typ
 }
 
 func (b nonDebuggableBinaryFile) firstModuleDataAddress() uint64 {
-	for _, sym := range b.symbols {
-		if sym.Name == firstModuleDataName {
-			return sym.Value
-		}
-	}
-	return 0
+	return b.firstModuleDataAddr
 }
 
 // Assume this dwarf.Type represents a subset of the module data type in the case DWARF is not available.
