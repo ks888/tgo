@@ -736,8 +736,7 @@ var moduleDataType = &dwarf.StructType{
 						Name: "array",
 						Type: &dwarf.PtrType{
 							CommonType: dwarf.CommonType{ByteSize: 8},
-							// Not sure ByteSize 1 here is correct, but this is what the actual type is anyway.
-							Type: &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 1}}},
+							Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 1}}},
 						},
 						ByteOffset: 0,
 					},
@@ -797,6 +796,11 @@ var moduleDataType = &dwarf.StructType{
 			Name:       "minpc",
 			Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
 			ByteOffset: 80,
+		},
+		&dwarf.StructField{
+			Name:       "maxpc",
+			Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 8}}},
+			ByteOffset: 88,
 		},
 		&dwarf.StructField{
 			Name:       "types",

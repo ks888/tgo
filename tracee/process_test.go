@@ -365,6 +365,40 @@ func TestStackFrameAt(t *testing.T) {
 	}
 }
 
+func TestStackFrameAt_NoDwarfCase(t *testing.T) {
+	proc, err := LaunchProcess(testutils.ProgramHelloworldNoDwarf)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	defer proc.Detach()
+
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrOneParameterAndVariable); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	event, err := proc.ContinueAndWait()
+	if err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+
+	tids := event.Data.([]int)
+	regs, err := proc.debugapiClient.ReadRegisters(tids[0])
+	if err != nil {
+		t.Fatalf("failed to read registers: %v", err)
+	}
+
+	stackFrame, err := proc.StackFrameAt(regs.Rsp, regs.Rip)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if stackFrame.Function.Name != "main.oneParameterAndOneVariable" {
+		t.Errorf("wrong function name: %s", stackFrame.Function.Name)
+	}
+	if stackFrame.Function.Value != testutils.HelloworldAddrOneParameterAndVariable {
+		t.Errorf("wrong function value: %#x", stackFrame.Function.Value)
+	}
+}
+
 func TestCurrentGoRoutineInfo(t *testing.T) {
 	for _, testProgram := range []string{testutils.ProgramHelloworld, testutils.ProgramHelloworldNoDwarf} {
 		proc, err := LaunchProcess(testProgram)

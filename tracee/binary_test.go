@@ -507,7 +507,7 @@ func TestRuntimeGOffsets(t *testing.T) {
 		return name == "runtime.g" && err == nil
 	})
 	if err != nil {
-		t.Fatalf("no moduledata type entry: %v", err)
+		t.Fatalf("no runtime.g type entry: %v", err)
 	}
 
 	expectedRuntimeG, err := debuggableBinary.dwarf.Type(entry.Offset)
@@ -550,6 +550,42 @@ func TestRuntimeGOffsets(t *testing.T) {
 	// 		}
 	// 	}
 	// }
+}
+
+func TestFuncTypeOffsets(t *testing.T) {
+	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
+	debuggableBinary, _ := binary.(debuggableBinaryFile)
+
+	entry, err := debuggableBinary.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
+		if entry.Tag != dwarf.TagStructType {
+			return false
+		}
+		name, err := stringClassAttr(entry, dwarf.AttrName)
+		return name == "runtime._func" && err == nil
+	})
+	if err != nil {
+		t.Fatalf("no _func type entry: %v", err)
+	}
+
+	expectedFuncType, err := debuggableBinary.dwarf.Type(entry.Offset)
+	if err != nil {
+		t.Fatalf("no func type: %v", err)
+	}
+
+	expectedFields := expectedFuncType.(*dwarf.StructType).Field
+	for _, actualField := range _funcType.Field {
+		for _, expectedField := range expectedFields {
+			if actualField.Name == expectedField.Name {
+				if actualField.ByteOffset != expectedField.ByteOffset {
+					t.Errorf("wrong byte offset. expect: %d, actual: %d", expectedField.ByteOffset, actualField.ByteOffset)
+				}
+				if actualField.Type.Size() != expectedField.Type.Size() {
+					t.Errorf("wrong size. expect: %d, actual: %d", expectedField.Type.Size(), actualField.Type.Size())
+				}
+				break
+			}
+		}
+	}
 }
 
 func findDwarfData(t *testing.T, pathToProgram string) dwarfData {
