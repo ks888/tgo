@@ -336,7 +336,7 @@ func (c *Controller) traced(goRoutineID int64, parentIDs []int64) bool {
 }
 
 func (c *Controller) isFunctionCall(breakpointAddr uint64) bool {
-	function, err := c.process.Binary.FindFunction(breakpointAddr)
+	function, err := c.process.FindFunction(breakpointAddr)
 	if err != nil {
 		log.Debugf("failed to find function (addr: %x): %v", breakpointAddr, err)
 		return false
@@ -423,7 +423,7 @@ func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineIn
 
 		} else if callingFuncs[i].usedStackSize == goRoutineInfo.UsedStackSize {
 			breakpointAddr := goRoutineInfo.CurrentPC - 1
-			currFunction, err := c.process.Binary.FindFunction(breakpointAddr)
+			currFunction, err := c.process.FindFunction(breakpointAddr)
 			if err != nil {
 				return nil, nil, err
 			}
