@@ -1,6 +1,7 @@
 package tracee
 
 import (
+	"debug/dwarf"
 	"os"
 	"os/exec"
 	"runtime"
@@ -396,6 +397,78 @@ func TestStackFrameAt_NoDwarfCase(t *testing.T) {
 	}
 	if stackFrame.Function.Value != testutils.HelloworldAddrOneParameterAndVariable {
 		t.Errorf("wrong function value: %#x", stackFrame.Function.Value)
+	}
+}
+
+func TestFuncTypeOffsets(t *testing.T) {
+	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
+	debuggableBinary, _ := binary.(debuggableBinaryFile)
+
+	entry, err := debuggableBinary.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
+		if entry.Tag != dwarf.TagStructType {
+			return false
+		}
+		name, err := stringClassAttr(entry, dwarf.AttrName)
+		return name == "runtime._func" && err == nil
+	})
+	if err != nil {
+		t.Fatalf("no _func type entry: %v", err)
+	}
+
+	expectedFuncType, err := debuggableBinary.dwarf.Type(entry.Offset)
+	if err != nil {
+		t.Fatalf("no func type: %v", err)
+	}
+
+	expectedFields := expectedFuncType.(*dwarf.StructType).Field
+	for _, actualField := range _funcType.Field {
+		for _, expectedField := range expectedFields {
+			if actualField.Name == expectedField.Name {
+				if actualField.ByteOffset != expectedField.ByteOffset {
+					t.Errorf("wrong byte offset. expect: %d, actual: %d", expectedField.ByteOffset, actualField.ByteOffset)
+				}
+				if actualField.Type.Size() != expectedField.Type.Size() {
+					t.Errorf("wrong size. expect: %d, actual: %d", expectedField.Type.Size(), actualField.Type.Size())
+				}
+				break
+			}
+		}
+	}
+}
+
+func TestFindfuncbucketTypeOffsets(t *testing.T) {
+	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
+	debuggableBinary, _ := binary.(debuggableBinaryFile)
+
+	entry, err := debuggableBinary.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
+		if entry.Tag != dwarf.TagStructType {
+			return false
+		}
+		name, err := stringClassAttr(entry, dwarf.AttrName)
+		return name == "runtime.findfuncbucket" && err == nil
+	})
+	if err != nil {
+		t.Fatalf("no findfuncbucket type entry: %v", err)
+	}
+
+	expectedFindfuncbucketType, err := debuggableBinary.dwarf.Type(entry.Offset)
+	if err != nil {
+		t.Fatalf("no findfuncbucket type: %v", err)
+	}
+
+	expectedFields := expectedFindfuncbucketType.(*dwarf.StructType).Field
+	for _, actualField := range findfuncbucketType.Field {
+		for _, expectedField := range expectedFields {
+			if actualField.Name == expectedField.Name {
+				if actualField.ByteOffset != expectedField.ByteOffset {
+					t.Errorf("wrong byte offset. expect: %d, actual: %d", expectedField.ByteOffset, actualField.ByteOffset)
+				}
+				if actualField.Type.Size() != expectedField.Type.Size() {
+					t.Errorf("wrong size. expect: %d, actual: %d", expectedField.Type.Size(), actualField.Type.Size())
+				}
+				break
+			}
+		}
 	}
 }
 

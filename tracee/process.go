@@ -437,13 +437,27 @@ func (p *Process) FindFunction(pc uint64) (*Function, error) {
 	return p.findFunctionByModuleData(pc)
 }
 
-const (
-	// must be same as the values defined in runtime package
-	numSubbuckets      = 16
-	minfunc            = 16
-	pcbucketsize       = 256 * minfunc
-	sizeFindfuncbucket = 20
-)
+var findfuncbucketType = &dwarf.StructType{
+	CommonType: dwarf.CommonType{ByteSize: 20},
+	StructName: "runtime.findfuncbucket",
+	Field: []*dwarf.StructField{
+		&dwarf.StructField{
+			Name:       "idx",
+			Type:       &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 4}}},
+			ByteOffset: 0,
+		},
+		&dwarf.StructField{
+			Name: "subbuckets",
+			Type: &dwarf.ArrayType{
+				CommonType:    dwarf.CommonType{ByteSize: 16},
+				Type:          &dwarf.UintType{BasicType: dwarf.BasicType{CommonType: dwarf.CommonType{ByteSize: 1}}},
+				StrideBitSize: 0,
+				Count:         16,
+			},
+			ByteOffset: 4,
+		},
+	},
+}
 
 // Assume this dwarf.Type represents a subset of the _func type in the case DWARF is not available.
 // TODO: check the assumption in CI.
@@ -476,7 +490,7 @@ func (p *Process) findFunctionByModuleData(pc uint64) (*Function, error) {
 		return nil, fmt.Errorf("no moduledata found for pc %#x", pc)
 	}
 
-	buff, err := p.findFuncType(md, pc)
+	funcTypeVal, err := p.findFuncType(md, pc)
 	if err != nil {
 		return nil, err
 	}
@@ -485,7 +499,7 @@ func (p *Process) findFunctionByModuleData(pc uint64) (*Function, error) {
 	var nameoff int32
 	// var args int32
 	for _, field := range _funcType.Field {
-		rawData := buff[field.ByteOffset : field.ByteOffset+field.Type.Size()]
+		rawData := funcTypeVal[field.ByteOffset : field.ByteOffset+field.Type.Size()]
 		switch field.Name {
 		case "entry":
 			entry = binary.LittleEndian.Uint64(rawData)
@@ -496,30 +510,13 @@ func (p *Process) findFunctionByModuleData(pc uint64) (*Function, error) {
 		}
 	}
 
-	ptrToFuncname := md.pclntable(p.debugapiClient, int(nameoff))
-	var rawFuncname []byte
-	for {
-		buff := make([]byte, 16)
-		if err := p.debugapiClient.ReadMemory(ptrToFuncname, buff); err != nil {
-			return nil, err
-		}
-
-		for i := 0; i < len(buff); i++ {
-			if buff[i] == 0 {
-				rawFuncname = append(rawFuncname, buff[0:i]...)
-				goto FoundFuncname
-			}
-		}
-
-		rawFuncname = append(rawFuncname, buff...)
-		ptrToFuncname += uint64(len(buff))
+	funcName, err := p.resolveNameoff(md, int(nameoff))
+	if err != nil {
+		return nil, err
 	}
-FoundFuncname:
-	funcname := string(rawFuncname)
 
 	// TODO: set Parameters using args.
-
-	return &Function{Name: funcname, Value: entry}, nil
+	return &Function{Name: funcName, Value: entry}, nil
 }
 
 func (p *Process) findModuleDataByPC(pc uint64) *moduleData {
@@ -531,56 +528,115 @@ func (p *Process) findModuleDataByPC(pc uint64) *moduleData {
 	return nil
 }
 
+const (
+	// must be same as the values defined in runtime package
+	minfunc      = 16            // minimum function size
+	pcbucketsize = 256 * minfunc // size of bucket in the pc->func lookup table
+)
+
+// findFuncType implements the core logic to find the func type using pc.
+// The logic is essentially same as the one used in the runtime.findfunc().
+// It involves 2 tables and linear search and has 4 steps (if the only 1 table is there, it must be huge!).
+// (1) Find the bucket. `findfunctab` points to the array of the buckets.
+//     The index is pc / (1 bucket region, typically 4096 bytes), so it uses the first 20 bits of the pc
+//     (assuming the pc can be represented in 32 bits).
+// (2) Find the subbucket. Each bucket contains the 16 subbuckets.
+//     The index is pc % 1 bucket region / (1 subbucket region, typically 256), so it uses the
+//     next 4 bits of the pc.
+// (3) Find the functab. `functab` points to the array of the functabs.
+//     We can find out the rough index using the index the bucket holds + sub-index the subbucket holds.
+//     But it may not be correct, because 1 subbucket region is typically 256 and may contain multiple functions.
+//     So do the linear search to find the correct index.
+// (4) Finally, get the func type using the funcoff field in functab, the pointer to the func type embedded in the pcln table.
+//     Note that the pcln table contains not only func type, but other data like function name.
 func (p *Process) findFuncType(md *moduleData, pc uint64) ([]byte, error) {
+	ftabIdx, err := p.findFtabIndex(md, pc)
+	if err != nil {
+		return nil, err
+	}
+
+	ftabIdx = p.adjustFtabIndex(md, pc, ftabIdx)
+	_, funcoff := md.functab(p.debugapiClient, ftabIdx)
+
+	funcTypePtr := md.pclntable(p.debugapiClient, int(funcoff))
+	buff := make([]byte, _funcType.Size())
+	if err := p.debugapiClient.ReadMemory(funcTypePtr, buff); err != nil {
+		return nil, err
+	}
+
+	return buff, nil
+}
+
+func (p *Process) findFtabIndex(md *moduleData, pc uint64) (int, error) {
+	var idxField, subbucketsField *dwarf.StructField
+	for _, field := range findfuncbucketType.Field {
+		switch field.Name {
+		case "idx":
+			idxField = field
+		case "subbuckets":
+			subbucketsField = field
+		}
+	}
+
 	x := pc - md.minpc(p.debugapiClient)
 	bucketIndex := x / pcbucketsize
-	subbucketIndex := x % pcbucketsize / (pcbucketsize / numSubbuckets)
+	subbucketIndex := int(x % pcbucketsize / (pcbucketsize / uint64(subbucketsField.Type.Size())))
 
-	ptrToFindFuncBucket := md.findfunctab(p.debugapiClient) + bucketIndex*sizeFindfuncbucket
-	buff := make([]byte, 4)
+	ptrToFindFuncBucket := md.findfunctab(p.debugapiClient) + bucketIndex*uint64(findfuncbucketType.Size())
+	buff := make([]byte, findfuncbucketType.Size())
 	if err := p.debugapiClient.ReadMemory(ptrToFindFuncBucket, buff); err != nil {
-		return nil, err
+		return 0, err
 	}
-	var ftabIdx int = int(binary.LittleEndian.Uint32(buff))
 
-	buff = make([]byte, 1)
-	if err := p.debugapiClient.ReadMemory(ptrToFindFuncBucket+4+subbucketIndex, buff); err != nil {
-		return nil, err
-	}
-	ftabIdx += int(buff[0])
+	ftabIdx := int(binary.LittleEndian.Uint32(buff[idxField.ByteOffset : idxField.ByteOffset+idxField.Type.Size()]))
+	ftabIdx += int(buff[int(subbucketsField.ByteOffset)+subbucketIndex])
+	return ftabIdx, nil
+}
 
+func (p *Process) adjustFtabIndex(md *moduleData, pc uint64, ftabIdx int) int {
 	ftabLen := md.ftabLen(p.debugapiClient)
 	if ftabIdx >= ftabLen {
 		ftabIdx = ftabLen - 1
 	}
 
-	entry, funcoff := md.functab(p.debugapiClient, ftabIdx)
+	entry, _ := md.functab(p.debugapiClient, ftabIdx)
 	if pc < entry {
 		for entry > pc && ftabIdx > 0 {
 			ftabIdx--
-			entry, funcoff = md.functab(p.debugapiClient, ftabIdx)
+			entry, _ = md.functab(p.debugapiClient, ftabIdx)
 		}
 		if ftabIdx == 0 {
 			panic("bad findfunctab entry idx")
 		}
 	} else {
 		// linear search to find func with pc >= entry.
-		nextEntry, nextFuncoff := md.functab(p.debugapiClient, ftabIdx+1)
+		nextEntry, _ := md.functab(p.debugapiClient, ftabIdx+1)
 		for nextEntry <= pc {
-			entry = nextEntry
-			funcoff = nextFuncoff
 			ftabIdx++
-			nextEntry, nextFuncoff = md.functab(p.debugapiClient, ftabIdx+1)
+			nextEntry, _ = md.functab(p.debugapiClient, ftabIdx+1)
 		}
 	}
+	return ftabIdx
+}
 
-	funcTypePtr := md.pclntable(p.debugapiClient, int(funcoff))
-	buff = make([]byte, _funcType.Size())
-	if err := p.debugapiClient.ReadMemory(funcTypePtr, buff); err != nil {
-		return nil, err
+func (p *Process) resolveNameoff(md *moduleData, nameoff int) (string, error) {
+	ptrToFuncname := md.pclntable(p.debugapiClient, nameoff)
+	var rawFuncname []byte
+	for {
+		buff := make([]byte, 16)
+		if err := p.debugapiClient.ReadMemory(ptrToFuncname, buff); err != nil {
+			return "", err
+		}
+
+		for i := 0; i < len(buff); i++ {
+			if buff[i] == 0 {
+				return string(append(rawFuncname, buff[0:i]...)), nil
+			}
+		}
+
+		rawFuncname = append(rawFuncname, buff...)
+		ptrToFuncname += uint64(len(buff))
 	}
-
-	return buff, nil
 }
 
 func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (inputArgs []Argument, outputArgs []Argument, err error) {

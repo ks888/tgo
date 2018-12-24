@@ -529,63 +529,6 @@ func TestRuntimeGOffsets(t *testing.T) {
 			}
 		}
 	}
-
-	// for _, field := range expectedRuntimeG.(*dwarf.StructType).Field {
-	// 	if field.Name == "ancestors" {
-	// 		fmt.Printf("  %#v\n", field)
-	// 		fmt.Printf("    %#v\n", field.Type)
-	// 		fmt.Printf("      %#v\n", field.Type.(*dwarf.PtrType).Type)
-	// 		for _, innerField := range field.Type.(*dwarf.PtrType).Type.(*dwarf.StructType).Field {
-	// 			fmt.Printf("        %#v\n", innerField)
-	// 			fmt.Printf("          %#v\n", innerField.Type)
-	// 			if innerField.Name == "array" {
-	// 				fmt.Printf("          %#v\n", innerField.Type.(*dwarf.PtrType).Type)
-	// 				fmt.Printf("          %#v\n", innerField.Type.(*dwarf.PtrType).Type.(*dwarf.TypedefType).Type)
-	// 				for _, mostInnerField := range innerField.Type.(*dwarf.PtrType).Type.(*dwarf.TypedefType).Type.(*dwarf.StructType).Field {
-	// 					fmt.Printf("            %#v\n", mostInnerField)
-	// 					fmt.Printf("            %#v\n", mostInnerField.Type)
-	// 				}
-	// 			}
-
-	// 		}
-	// 	}
-	// }
-}
-
-func TestFuncTypeOffsets(t *testing.T) {
-	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
-	debuggableBinary, _ := binary.(debuggableBinaryFile)
-
-	entry, err := debuggableBinary.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
-		if entry.Tag != dwarf.TagStructType {
-			return false
-		}
-		name, err := stringClassAttr(entry, dwarf.AttrName)
-		return name == "runtime._func" && err == nil
-	})
-	if err != nil {
-		t.Fatalf("no _func type entry: %v", err)
-	}
-
-	expectedFuncType, err := debuggableBinary.dwarf.Type(entry.Offset)
-	if err != nil {
-		t.Fatalf("no func type: %v", err)
-	}
-
-	expectedFields := expectedFuncType.(*dwarf.StructType).Field
-	for _, actualField := range _funcType.Field {
-		for _, expectedField := range expectedFields {
-			if actualField.Name == expectedField.Name {
-				if actualField.ByteOffset != expectedField.ByteOffset {
-					t.Errorf("wrong byte offset. expect: %d, actual: %d", expectedField.ByteOffset, actualField.ByteOffset)
-				}
-				if actualField.Type.Size() != expectedField.Type.Size() {
-					t.Errorf("wrong size. expect: %d, actual: %d", expectedField.Type.Size(), actualField.Type.Size())
-				}
-				break
-			}
-		}
-	}
 }
 
 func findDwarfData(t *testing.T, pathToProgram string) dwarfData {
