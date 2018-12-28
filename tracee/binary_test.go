@@ -144,6 +144,12 @@ func TestSeek(t *testing.T) {
 	if function.Name != "main.oneParameterAndOneVariable" {
 		t.Errorf("invalid function name: %s", function.Name)
 	}
+	if function.StartAddr == 0 {
+		t.Errorf("start addr is 0")
+	}
+	if function.EndAddr == 0 {
+		t.Errorf("end addr is 0")
+	}
 	if function.Parameters == nil {
 		t.Fatalf("parameters field is nil")
 	}

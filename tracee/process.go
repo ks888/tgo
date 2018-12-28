@@ -9,6 +9,7 @@ import (
 	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/debugapi/lldb"
 	"github.com/ks888/tgo/log"
+	"golang.org/x/arch/x86/x86asm"
 )
 
 var breakpointInsts = []byte{0xcc}
@@ -490,7 +491,7 @@ func (p *Process) findFunctionByModuleData(pc uint64) (*Function, error) {
 		return nil, fmt.Errorf("no moduledata found for pc %#x", pc)
 	}
 
-	funcTypeVal, err := p.findFuncType(md, pc)
+	funcTypeVal, endAddr, err := p.findFuncType(md, pc)
 	if err != nil {
 		return nil, err
 	}
@@ -516,7 +517,7 @@ func (p *Process) findFunctionByModuleData(pc uint64) (*Function, error) {
 	}
 
 	// TODO: set Parameters using args.
-	return &Function{Name: funcName, Value: entry}, nil
+	return &Function{Name: funcName, StartAddr: entry, EndAddr: endAddr}, nil
 }
 
 func (p *Process) findModuleDataByPC(pc uint64) *moduleData {
@@ -549,22 +550,23 @@ const (
 //     So do the linear search to find the correct index.
 // (4) Finally, get the func type using the funcoff field in functab, the pointer to the func type embedded in the pcln table.
 //     Note that the pcln table contains not only func type, but other data like function name.
-func (p *Process) findFuncType(md *moduleData, pc uint64) ([]byte, error) {
+func (p *Process) findFuncType(md *moduleData, pc uint64) ([]byte, uint64, error) {
 	ftabIdx, err := p.findFtabIndex(md, pc)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	ftabIdx = p.adjustFtabIndex(md, pc, ftabIdx)
+	endAddr := p.findEndAddr(md, ftabIdx)
 	_, funcoff := md.functab(p.debugapiClient, ftabIdx)
 
 	funcTypePtr := md.pclntable(p.debugapiClient, int(funcoff))
 	buff := make([]byte, _funcType.Size())
 	if err := p.debugapiClient.ReadMemory(funcTypePtr, buff); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return buff, nil
+	return buff, endAddr, nil
 }
 
 func (p *Process) findFtabIndex(md *moduleData, pc uint64) (int, error) {
@@ -619,6 +621,15 @@ func (p *Process) adjustFtabIndex(md *moduleData, pc uint64, ftabIdx int) int {
 	return ftabIdx
 }
 
+func (p *Process) findEndAddr(md *moduleData, ftabIdx int) uint64 {
+	ftabLen := md.ftabLen(p.debugapiClient)
+	if ftabIdx+1 >= ftabLen {
+		return 0
+	}
+	entry, _ := md.functab(p.debugapiClient, ftabIdx+1)
+	return entry
+}
+
 func (p *Process) resolveNameoff(md *moduleData, nameoff int) (string, error) {
 	ptrToFuncname := md.pclntable(p.debugapiClient, nameoff)
 	var rawFuncname []byte
@@ -664,6 +675,11 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 		}
 	}
 	return
+}
+
+// ReadInstructions reads the instructions of the specified function from memory.
+func (p *Process) ReadInstructions(f *Function) ([]x86asm.Inst, error) {
+	return nil, nil
 }
 
 // GoRoutineInfo describes the various info of the go routine like pc.

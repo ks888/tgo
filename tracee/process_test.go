@@ -352,6 +352,12 @@ func TestStackFrameAt(t *testing.T) {
 	if stackFrame.Function.Name != "main.oneParameterAndOneVariable" {
 		t.Errorf("wrong function name: %s", stackFrame.Function.Name)
 	}
+	if stackFrame.Function.StartAddr != testutils.HelloworldAddrOneParameterAndVariable {
+		t.Errorf("start addr is 0")
+	}
+	if stackFrame.Function.EndAddr == 0 {
+		t.Errorf("end addr is 0")
+	}
 	if stackFrame.ReturnAddress == 0x0 {
 		t.Errorf("empty return address")
 	}
@@ -395,8 +401,11 @@ func TestStackFrameAt_NoDwarfCase(t *testing.T) {
 	if stackFrame.Function.Name != "main.oneParameterAndOneVariable" {
 		t.Errorf("wrong function name: %s", stackFrame.Function.Name)
 	}
-	if stackFrame.Function.Value != testutils.HelloworldAddrOneParameterAndVariable {
-		t.Errorf("wrong function value: %#x", stackFrame.Function.Value)
+	if stackFrame.Function.StartAddr != testutils.HelloworldAddrOneParameterAndVariable {
+		t.Errorf("wrong function value: %#x", stackFrame.Function.StartAddr)
+	}
+	if stackFrame.Function.EndAddr == 0 {
+		t.Errorf("end addr is 0")
 	}
 }
 
@@ -469,6 +478,26 @@ func TestFindfuncbucketTypeOffsets(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestReadInstructions(t *testing.T) {
+	for _, testProgram := range []string{testutils.ProgramHelloworld, testutils.ProgramHelloworldNoDwarf} {
+		proc, err := LaunchProcess(testProgram)
+		if err != nil {
+			t.Fatalf("failed to launch process: %v", err)
+		}
+		defer proc.Detach()
+
+		f, err := proc.FindFunction(testutils.HelloworldAddrMain)
+		if err != nil {
+			t.Fatalf("failed to find function: %v", err)
+		}
+		insts, err := proc.ReadInstructions(f)
+		if err != nil {
+			t.Fatalf("failed to read instructions: %v", err)
+		}
+		insts = insts
 	}
 }
 

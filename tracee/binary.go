@@ -59,8 +59,12 @@ type dwarfData struct {
 
 // Function represents a function info in the debug info section.
 type Function struct {
-	Name       string
-	Value      uint64
+	Name string
+	// StartAddr is the start address of the function, inclusive.
+	StartAddr uint64
+	// EndAddr is the end address of the function, exclusive. 0 if unknown.
+	EndAddr uint64
+	// Parameters may be empty due to the lack of information.
 	Parameters []Parameter
 }
 
@@ -357,7 +361,7 @@ func (r subprogramReader) buildFunction(subprogram *dwarf.Entry) (*Function, err
 		return nil, fmt.Errorf("%s: %v", name, err)
 	}
 
-	_, err = addressClassAttr(subprogram, dwarf.AttrHighpc)
+	highPC, err := addressClassAttr(subprogram, dwarf.AttrHighpc)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %v", name, err)
 	}
@@ -369,7 +373,7 @@ func (r subprogramReader) buildFunction(subprogram *dwarf.Entry) (*Function, err
 		log.Printf("The frame base attribute of %s has the unexpected value. The parameter values may be wrong.", name)
 	}
 
-	return &Function{Name: name, Value: lowPC}, nil
+	return &Function{Name: name, StartAddr: lowPC, EndAddr: highPC}, nil
 }
 
 func (r subprogramReader) parameters() ([]Parameter, error) {
@@ -700,7 +704,7 @@ func (b nonDebuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
 
 func (b nonDebuggableBinaryFile) Functions() (funcs []*Function) {
 	for _, sym := range b.symbols {
-		funcs = append(funcs, &Function{Name: sym.Name, Value: sym.Value})
+		funcs = append(funcs, &Function{Name: sym.Name, StartAddr: sym.Value})
 	}
 	return funcs
 }

@@ -20,7 +20,7 @@ var ErrInterrupted = errors.New("interrupted")
 // Controller controls the associated tracee process.
 type Controller struct {
 	process     *tracee.Process
-	statusStore map[int]goRoutineStatus
+	statusStore map[int64]goRoutineStatus
 
 	tracingPoints tracingPoints
 	traceLevel    int
@@ -51,7 +51,7 @@ func (status goRoutineStatus) usedStackSize() uint64 {
 
 func (status goRoutineStatus) lastFunctionAddr() uint64 {
 	if len(status.callingFunctions) > 0 {
-		return status.callingFunctions[len(status.callingFunctions)-1].Value
+		return status.callingFunctions[len(status.callingFunctions)-1].StartAddr
 	}
 	return 0
 }
@@ -75,7 +75,7 @@ func NewController() *Controller {
 // LaunchTracee launches the new tracee process to be controlled.
 func (c *Controller) LaunchTracee(name string, arg ...string) error {
 	var err error
-	c.statusStore = make(map[int]goRoutineStatus)
+	c.statusStore = make(map[int64]goRoutineStatus)
 	c.process, err = tracee.LaunchProcess(name, arg...)
 	return err
 }
@@ -83,7 +83,7 @@ func (c *Controller) LaunchTracee(name string, arg ...string) error {
 // AttachTracee attaches to the existing process.
 func (c *Controller) AttachTracee(pid int, programPath, goVersion string) error {
 	var err error
-	c.statusStore = make(map[int]goRoutineStatus)
+	c.statusStore = make(map[int64]goRoutineStatus)
 	c.process, err = tracee.AttachProcess(pid, programPath, goVersion)
 	return err
 }
@@ -281,7 +281,7 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 
-	status, _ := c.statusStore[int(goRoutineInfo.ID)]
+	status, _ := c.statusStore[goRoutineInfo.ID]
 	if goRoutineInfo.UsedStackSize == status.usedStackSize() && breakpointAddr == status.lastFunctionAddr() {
 		// it's likely we are in the same stack frame as before (typical in the stack growth case).
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
@@ -342,7 +342,7 @@ func (c *Controller) isFunctionCall(breakpointAddr uint64) bool {
 		return false
 	}
 
-	return function.Value == breakpointAddr
+	return function.StartAddr == breakpointAddr
 }
 
 func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, breakpointAddr uint64) error {
@@ -350,7 +350,7 @@ func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, breakpointAdd
 }
 
 func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	status, _ := c.statusStore[int(goRoutineInfo.ID)]
+	status, _ := c.statusStore[goRoutineInfo.ID]
 	stackFrame, err := c.currentStackFrame(goRoutineInfo)
 	if err != nil {
 		return err
@@ -385,11 +385,11 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		}
 	}
 
-	if err := c.process.SingleStep(threadID, stackFrame.Function.Value); err != nil {
+	if err := c.process.SingleStep(threadID, stackFrame.Function.StartAddr); err != nil {
 		return err
 	}
 
-	c.statusStore[int(goRoutineInfo.ID)] = goRoutineStatus{callingFunctions: remainingFuncs}
+	c.statusStore[goRoutineInfo.ID] = goRoutineStatus{callingFunctions: remainingFuncs}
 	return nil
 }
 
@@ -458,15 +458,15 @@ func (c *Controller) clearBreakpointsExceptTracingPoint() error {
 
 func (c *Controller) alterBreakpointsExceptTracingPoint(enable bool) error {
 	for _, function := range c.process.Binary.Functions() {
-		if !c.canSetBreakpoint(function) || c.tracingPoints.IsStartAddress(function.Value) || c.tracingPoints.IsEndAddress(function.Value) {
+		if !c.canSetBreakpoint(function) || c.tracingPoints.IsStartAddress(function.StartAddr) || c.tracingPoints.IsEndAddress(function.StartAddr) {
 			continue
 		}
 
 		var err error
 		if enable {
-			err = c.process.SetBreakpoint(function.Value)
+			err = c.process.SetBreakpoint(function.StartAddr)
 		} else {
-			err = c.process.ClearBreakpoint(function.Value)
+			err = c.process.ClearBreakpoint(function.StartAddr)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to change the breakpoint setting of %s: %v", function.Name, err)
@@ -485,7 +485,7 @@ func (c *Controller) canPrint(goRoutineID int64, parentIDs []int64, currStackDep
 }
 
 func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	status, _ := c.statusStore[int(goRoutineInfo.ID)]
+	status, _ := c.statusStore[goRoutineInfo.ID]
 
 	remainingFuncs, unwindedFuncs, err := c.unwindFunctions(status.callingFunctions, goRoutineInfo)
 	if err != nil {
@@ -499,7 +499,7 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 	}
 
 	if c.canPrint(goRoutineInfo.ID, goRoutineInfo.Ancestors, currStackDepth) {
-		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, returnedFunc.Value)
+		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, returnedFunc.StartAddr)
 		if err != nil {
 			return err
 		}
@@ -512,7 +512,7 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 		return err
 	}
 
-	c.statusStore[int(goRoutineInfo.ID)] = goRoutineStatus{callingFunctions: remainingFuncs}
+	c.statusStore[goRoutineInfo.ID] = goRoutineStatus{callingFunctions: remainingFuncs}
 	return nil
 }
 
