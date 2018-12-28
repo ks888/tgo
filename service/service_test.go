@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"runtime"
 	"testing"
 	"time"
 
@@ -15,7 +16,13 @@ func TestAttachAndDetach(t *testing.T) {
 	_ = cmd.Start()
 
 	tracer := &Tracer{}
-	if err := tracer.Attach(AttachArgs{Pid: cmd.Process.Pid, InitialStartTracePoint: testutils.InfloopAddrMain}, nil); err != nil {
+	args := AttachArgs{
+		Pid:                    cmd.Process.Pid,
+		InitialStartTracePoint: testutils.InfloopAddrMain,
+		ProgramPath:            testutils.ProgramInfloop,
+		GoVersion:              runtime.Version(),
+	}
+	if err := tracer.Attach(args, nil); err != nil {
 		t.Errorf("failed to attach: %v", err)
 	}
 

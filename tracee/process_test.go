@@ -446,6 +446,10 @@ func TestFuncTypeOffsets(t *testing.T) {
 }
 
 func TestFindfuncbucketTypeOffsets(t *testing.T) {
+	if !ParseGoVersion(runtime.Version()).LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
+		t.Skip("go1.10 or earlier doesn't have findfuncbucket type in DWARF")
+	}
+
 	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
 	debuggableBinary, _ := binary.(debuggableBinaryFile)
 
