@@ -14,10 +14,15 @@ import (
 
 var breakpointInsts = []byte{0xcc}
 
+type breakpoint struct {
+	addr     uint64
+	orgInsts []byte
+}
+
 // Process represents the tracee process launched by or attached to this tracer.
 type Process struct {
 	debugapiClient *lldb.Client
-	breakpoints    map[uint64]*breakpoint
+	breakpoints    map[uint64]breakpoint
 	Binary         BinaryFile
 	GoVersion      GoVersion
 	moduleDataList []*moduleData
@@ -64,7 +69,7 @@ func AttachProcess(pid int, programPath, goVersion string) (*Process, error) {
 }
 
 func newProcess(debugapiClient *lldb.Client, programPath, rawGoVersion string) (*Process, error) {
-	proc := &Process{debugapiClient: debugapiClient, breakpoints: make(map[uint64]*breakpoint)}
+	proc := &Process{debugapiClient: debugapiClient, breakpoints: make(map[uint64]breakpoint)}
 
 	proc.GoVersion = ParseGoVersion(rawGoVersion)
 	var err error
@@ -319,7 +324,21 @@ func (p *Process) stepAndWait(threadID int) (event debugapi.Event, err error) {
 
 // SetBreakpoint sets the breakpoint at the specified address.
 func (p *Process) SetBreakpoint(addr uint64) error {
-	return p.SetConditionalBreakpoint(addr, 0)
+	_, ok := p.breakpoints[addr]
+	if ok {
+		return nil
+	}
+
+	originalInsts := make([]byte, len(breakpointInsts))
+	if err := p.debugapiClient.ReadMemory(addr, originalInsts); err != nil {
+		return err
+	}
+	if err := p.debugapiClient.WriteMemory(addr, breakpointInsts); err != nil {
+		return err
+	}
+
+	p.breakpoints[addr] = breakpoint{addr, originalInsts}
+	return nil
 }
 
 // ClearBreakpoint clears the breakpoint at the specified address.
@@ -337,71 +356,8 @@ func (p *Process) ClearBreakpoint(addr uint64) error {
 	return nil
 }
 
-// SetConditionalBreakpoint sets the breakpoint which only the specified go routine hits.
-func (p *Process) SetConditionalBreakpoint(addr uint64, goRoutineID int64) error {
-	bp, ok := p.breakpoints[addr]
-	if ok {
-		if goRoutineID != 0 {
-			bp.AddTarget(goRoutineID)
-		}
-		return nil
-	}
-
-	originalInsts := make([]byte, len(breakpointInsts))
-	if err := p.debugapiClient.ReadMemory(addr, originalInsts); err != nil {
-		return err
-	}
-	if err := p.debugapiClient.WriteMemory(addr, breakpointInsts); err != nil {
-		return err
-	}
-
-	bp = newBreakpoint(addr, originalInsts)
-	if goRoutineID != 0 {
-		bp.AddTarget(goRoutineID)
-	}
-	p.breakpoints[addr] = bp
-	return nil
-}
-
-// ClearAllConditionalBreakpoints clears all the conditional breakpoints associated with the specified go routine.
-func (p *Process) ClearAllConditionalBreakpoints(goRoutineID int64) error {
-	for addr := range p.breakpoints {
-		if err := p.ClearConditionalBreakpoint(addr, goRoutineID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ClearConditionalBreakpoint clears the conditional breakpoint at the specified address and go routine.
-// The breakpoint may still exist on memory if there are other go routines not cleared.
-// Use SingleStep() to temporary disable the breakpoint.
-func (p *Process) ClearConditionalBreakpoint(addr uint64, goRoutineID int64) error {
-	bp, ok := p.breakpoints[addr]
-	if !ok {
-		return nil
-	}
-	bp.RemoveTarget(goRoutineID)
-
-	if !bp.NoTarget() {
-		return nil
-	}
-
-	return p.ClearBreakpoint(addr)
-}
-
-// HitBreakpoint checks the current go routine meets the condition of the breakpoint.
-func (p *Process) HitBreakpoint(addr uint64, goRoutineID int64) bool {
-	bp, ok := p.breakpoints[addr]
-	if !ok {
-		return false
-	}
-
-	return bp.Hit(goRoutineID)
-}
-
-// HasBreakpoint returns true if the the breakpoint is already set at the specified address.
-func (p *Process) HasBreakpoint(addr uint64) bool {
+// ExistBreakpoint returns true if the the breakpoint is already set at the specified address.
+func (p *Process) ExistBreakpoint(addr uint64) bool {
 	_, ok := p.breakpoints[addr]
 	return ok
 }
@@ -936,45 +892,4 @@ func (arg Argument) ParseValue(depth int) string {
 		return fmt.Sprintf("%s = -", arg.Name)
 	}
 	return fmt.Sprintf("%s = %s", arg.Name, val)
-}
-
-type breakpoint struct {
-	addr     uint64
-	orgInsts []byte
-	// targetGoRoutineIDs are go routine ids interested in this breakpoint.
-	// Empty list implies all the go routines are target.
-	targetGoRoutineIDs []int64
-}
-
-func newBreakpoint(addr uint64, orgInsts []byte) *breakpoint {
-	return &breakpoint{addr: addr, orgInsts: orgInsts}
-}
-
-func (bp *breakpoint) AddTarget(goRoutineID int64) {
-	bp.targetGoRoutineIDs = append(bp.targetGoRoutineIDs, goRoutineID)
-	return
-}
-
-func (bp *breakpoint) RemoveTarget(goRoutineID int64) {
-	for i, candidate := range bp.targetGoRoutineIDs {
-		if candidate == goRoutineID {
-			bp.targetGoRoutineIDs = append(bp.targetGoRoutineIDs[0:i], bp.targetGoRoutineIDs[i+1:len(bp.targetGoRoutineIDs)]...)
-			return
-		}
-	}
-	return
-}
-
-func (bp *breakpoint) NoTarget() bool {
-	return len(bp.targetGoRoutineIDs) == 0
-}
-
-func (bp *breakpoint) Hit(goRoutineID int64) bool {
-	for _, existingID := range bp.targetGoRoutineIDs {
-		if existingID == goRoutineID {
-			return true
-		}
-	}
-
-	return len(bp.targetGoRoutineIDs) == 0
 }

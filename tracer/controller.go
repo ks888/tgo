@@ -32,8 +32,10 @@ const (
 type Controller struct {
 	process           *tracee.Process
 	statusStore       map[int64]goRoutineStatus
-	breakpointTypes   map[uint64]breakpointType
 	callInstAddrCache map[uint64][]uint64
+
+	breakpointTypes map[uint64]breakpointType
+	breakpoints     Breakpoints
 
 	tracingPoints tracingPoints
 	traceLevel    int
@@ -92,6 +94,7 @@ func NewController() *Controller {
 func (c *Controller) LaunchTracee(name string, arg ...string) error {
 	var err error
 	c.process, err = tracee.LaunchProcess(name, arg...)
+	c.breakpoints = NewBreakpoints(c.process.SetBreakpoint, c.process.ClearBreakpoint)
 	return err
 }
 
@@ -99,6 +102,7 @@ func (c *Controller) LaunchTracee(name string, arg ...string) error {
 func (c *Controller) AttachTracee(pid int, programPath, goVersion string) error {
 	var err error
 	c.process, err = tracee.AttachProcess(pid, programPath, goVersion)
+	c.breakpoints = NewBreakpoints(c.process.SetBreakpoint, c.process.ClearBreakpoint)
 	return err
 }
 
@@ -206,7 +210,7 @@ func (c *Controller) setPendingTracePoints() error {
 				continue // set already
 			}
 
-			if err := c.process.SetBreakpoint(startAddr); err != nil {
+			if err := c.breakpoints.Set(startAddr); err != nil {
 				return err
 			}
 			c.tracingPoints.startAddressList = append(c.tracingPoints.startAddressList, startAddr)
@@ -216,7 +220,7 @@ func (c *Controller) setPendingTracePoints() error {
 				continue // set already
 			}
 
-			if err := c.process.SetBreakpoint(endAddr); err != nil {
+			if err := c.breakpoints.Set(endAddr); err != nil {
 				return err
 			}
 			c.tracingPoints.endAddressList = append(c.tracingPoints.endAddressList, endAddr)
@@ -245,7 +249,7 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	}
 
 	breakpointAddr := goRoutineInfo.CurrentPC - 1
-	if !c.process.HitBreakpoint(breakpointAddr, goRoutineInfo.ID) {
+	if !c.breakpoints.Hit(breakpointAddr, goRoutineInfo.ID) {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 
@@ -294,7 +298,7 @@ func (c *Controller) exitTracepoint(threadID int, goRoutineInfo tracee.GoRoutine
 	goRoutineID := goRoutineInfo.ID
 
 	if c.tracingPoints.Inside(goRoutineID) {
-		if err := c.process.ClearAllConditionalBreakpoints(goRoutineID); err != nil {
+		if err := c.breakpoints.ClearAllByGoRoutineID(goRoutineID); err != nil {
 			return err
 		}
 
@@ -326,10 +330,10 @@ func (c *Controller) alterCallInstBreakpoints(enable bool, goRoutineID int64, pc
 
 	for _, callInstAddr := range callInstAddresses {
 		if enable {
-			err = c.process.SetConditionalBreakpoint(callInstAddr, goRoutineID)
+			err = c.breakpoints.SetConditional(callInstAddr, goRoutineID)
 			c.breakpointTypes[callInstAddr] = breakpointTypeCall
 		} else {
-			err = c.process.ClearConditionalBreakpoint(callInstAddr, goRoutineID)
+			err = c.breakpoints.ClearConditional(callInstAddr, goRoutineID)
 		}
 		if err != nil {
 			return err
@@ -341,11 +345,11 @@ func (c *Controller) alterCallInstBreakpoints(enable bool, goRoutineID int64, pc
 
 func (c *Controller) setDeferredFuncBreakpoints(goRoutineInfo tracee.GoRoutineInfo) error {
 	nextAddr := goRoutineInfo.NextDeferFuncAddr
-	if c.process.HasBreakpoint(nextAddr) || nextAddr == 0x0 /* no deferred func */ {
+	if c.breakpoints.Exist(nextAddr) || nextAddr == 0x0 /* no deferred func */ {
 		return nil
 	}
 
-	if err := c.process.SetConditionalBreakpoint(nextAddr, goRoutineInfo.ID); err != nil {
+	if err := c.breakpoints.SetConditional(nextAddr, goRoutineInfo.ID); err != nil {
 		return err
 	}
 	c.breakpointTypes[nextAddr] = breakpointTypeDeferredFunc
@@ -460,7 +464,7 @@ func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineIn
 		}
 
 		retAddr := callingFuncs[i].returnAddress
-		if err := c.process.ClearConditionalBreakpoint(retAddr, goRoutineInfo.ID); err != nil {
+		if err := c.breakpoints.ClearConditional(retAddr, goRoutineInfo.ID); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -468,7 +472,7 @@ func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineIn
 }
 
 func (c *Controller) appendFunction(callingFuncs []callingFunction, newFunc callingFunction, goRoutineID int64) ([]callingFunction, error) {
-	if err := c.process.SetConditionalBreakpoint(newFunc.returnAddress, goRoutineID); err != nil {
+	if err := c.breakpoints.SetConditional(newFunc.returnAddress, goRoutineID); err != nil {
 		return nil, err
 	}
 	c.breakpointTypes[newFunc.returnAddress] = breakpointTypeReturn
@@ -481,7 +485,7 @@ func (c *Controller) handleTrapAtDeferredFuncCall(threadID int, goRoutineInfo tr
 		return err
 	}
 
-	return c.process.ClearConditionalBreakpoint(goRoutineInfo.CurrentPC-1, goRoutineInfo.ID)
+	return c.breakpoints.ClearConditional(goRoutineInfo.CurrentPC-1, goRoutineInfo.ID)
 }
 
 func (c *Controller) handleTrapAfterFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {

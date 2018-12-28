@@ -84,7 +84,7 @@ func hasBreakpointAt(controller *Controller, functionName string) bool {
 		return false
 	}
 
-	return controller.process.HasBreakpoint(f.StartAddr)
+	return controller.breakpoints.Exist(f.StartAddr)
 }
 
 func TestMainLoop_MainMain(t *testing.T) {
