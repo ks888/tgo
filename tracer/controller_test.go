@@ -112,6 +112,28 @@ func TestMainLoop_MainMain(t *testing.T) {
 	}
 }
 
+func TestMainLoop_NoDWARFBinary(t *testing.T) {
+	controller := NewController()
+	buff := &bytes.Buffer{}
+	controller.outputWriter = buff
+	controller.SetTraceLevel(1)
+	if err := controller.LaunchTracee(testutils.ProgramHelloworldNoDwarf); err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	if err := controller.AddStartTracePoint(testutils.HelloworldAddrMain); err != nil {
+		t.Fatalf("failed to set tracing point: %v", err)
+	}
+
+	if err := controller.MainLoop(); err != nil {
+		t.Errorf("failed to run main loop: %v", err)
+	}
+
+	output := buff.String()
+	if strings.Count(output, "main.main") != 0 {
+		t.Errorf("unexpected output: %s", output)
+	}
+}
+
 func TestMainLoop_MainNoParameter(t *testing.T) {
 	controller := NewController()
 	buff := &bytes.Buffer{}
