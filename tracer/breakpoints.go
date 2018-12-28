@@ -60,7 +60,8 @@ func (b Breakpoints) ClearConditional(addr uint64, goRoutineID int64) error {
 // ClearAllByGoRoutineID clears all the breakpoints associated with the specified go routine.
 func (b Breakpoints) ClearAllByGoRoutineID(goRoutineID int64) error {
 	for addr, bp := range b.setBreakpoints {
-		bp.Disassociate(goRoutineID)
+		for bp.Disassociate(goRoutineID) {
+		}
 
 		if !bp.NoAssociation() {
 			continue
@@ -112,7 +113,7 @@ type association struct {
 	goRoutineID int64
 }
 
-// conditionalBreakpoint is the virtual breakpoint which holds some conditions to be considered as 'hit'
+// conditionalBreakpoint is the breakpoint which holds some conditions to be considered as 'hit'
 type conditionalBreakpoint struct {
 	addr         uint64
 	associations []int64
@@ -134,19 +135,20 @@ func (b *conditionalBreakpoint) NoAssociation() bool {
 	return len(b.associations) == 0
 }
 
-// Associate associates the specified go routine.
+// Associate associates the specified go routine. Multiple same go routine id can be associated
+// because it's useful in the recursive call's case.
 func (b *conditionalBreakpoint) Associate(goRoutineID int64) {
 	b.associations = append(b.associations, goRoutineID)
 	return
 }
 
-// Disassociate disassociates the specified go routine.
-func (b *conditionalBreakpoint) Disassociate(goRoutineID int64) {
+// Disassociate disassociates the specified go routine. It returns true if actually disassociated.
+func (b *conditionalBreakpoint) Disassociate(goRoutineID int64) bool {
 	for i, association := range b.associations {
 		if association == goRoutineID {
 			b.associations = append(b.associations[0:i], b.associations[i+1:len(b.associations)]...)
-			return
+			return true
 		}
 	}
-	return
+	return false
 }

@@ -73,8 +73,9 @@ func (status goRoutineStatus) lastFunctionAddr() uint64 {
 
 type callingFunction struct {
 	*tracee.Function
-	returnAddress uint64
-	usedStackSize uint64
+	returnAddress          uint64
+	usedStackSize          uint64
+	setCallInstBreakpoints bool
 }
 
 // NewController returns the new controller.
@@ -345,7 +346,7 @@ func (c *Controller) alterCallInstBreakpoints(enable bool, goRoutineID int64, pc
 
 func (c *Controller) setDeferredFuncBreakpoints(goRoutineInfo tracee.GoRoutineInfo) error {
 	nextAddr := goRoutineInfo.NextDeferFuncAddr
-	if c.breakpoints.Exist(nextAddr) || nextAddr == 0x0 /* no deferred func */ {
+	if nextAddr == 0x0 /* no deferred func */ {
 		return nil
 	}
 
@@ -399,25 +400,20 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		return err
 	}
 
-	callingFunc := callingFunction{
-		Function:      stackFrame.Function,
-		returnAddress: stackFrame.ReturnAddress,
-		usedStackSize: goRoutineInfo.UsedStackSize,
-	}
-	remainingFuncs, err = c.appendFunction(remainingFuncs, callingFunc, goRoutineInfo.ID)
-	if err != nil {
-		return err
-	}
-
-	currStackDepth := len(remainingFuncs)
+	currStackDepth := len(remainingFuncs) + 1 // add the currently calling funciont
 	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {
 		currStackDepth -= c.countSkippedFuncs(status.callingFunctions, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
 	}
 
-	if currStackDepth < c.traceLevel {
-		if err := c.setCallInstBreakpoints(goRoutineInfo.ID, goRoutineInfo.CurrentPC); err != nil {
-			return err
-		}
+	callingFunc := callingFunction{
+		Function:               stackFrame.Function,
+		returnAddress:          stackFrame.ReturnAddress,
+		usedStackSize:          goRoutineInfo.UsedStackSize,
+		setCallInstBreakpoints: currStackDepth < c.traceLevel,
+	}
+	remainingFuncs, err = c.appendFunction(remainingFuncs, callingFunc, goRoutineInfo.ID)
+	if err != nil {
+		return err
 	}
 
 	if err := c.setDeferredFuncBreakpoints(goRoutineInfo); err != nil {
@@ -463,9 +459,15 @@ func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineIn
 			}
 		}
 
-		retAddr := callingFuncs[i].returnAddress
-		if err := c.breakpoints.ClearConditional(retAddr, goRoutineInfo.ID); err != nil {
+		unwindFunc := callingFuncs[i]
+		if err := c.breakpoints.ClearConditional(unwindFunc.returnAddress, goRoutineInfo.ID); err != nil {
 			return nil, nil, err
+		}
+
+		if unwindFunc.setCallInstBreakpoints {
+			if err := c.clearCallInstBreakpoints(goRoutineInfo.ID, unwindFunc.StartAddr); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	return nil, callingFuncs, nil
@@ -476,6 +478,12 @@ func (c *Controller) appendFunction(callingFuncs []callingFunction, newFunc call
 		return nil, err
 	}
 	c.breakpointTypes[newFunc.returnAddress] = breakpointTypeReturn
+
+	if newFunc.setCallInstBreakpoints {
+		if err := c.setCallInstBreakpoints(goRoutineID, newFunc.StartAddr); err != nil {
+			return nil, err
+		}
+	}
 
 	return append(callingFuncs, newFunc), nil
 }
@@ -496,10 +504,6 @@ func (c *Controller) handleTrapAfterFunctionReturn(threadID int, goRoutineInfo t
 		return err
 	}
 	returnedFunc := unwindedFuncs[0].Function
-
-	if err := c.clearCallInstBreakpoints(goRoutineInfo.ID, returnedFunc.StartAddr); err != nil {
-		return err
-	}
 
 	currStackDepth := len(remainingFuncs) + 1 // include returnedFunc for now
 	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {

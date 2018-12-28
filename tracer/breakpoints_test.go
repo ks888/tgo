@@ -177,3 +177,26 @@ func TestBreakpoints_ClearAllByGoRoutineID(t *testing.T) {
 		t.Errorf("wrong number of clear ops: %d", numCleared)
 	}
 }
+
+func TestBreakpoints_ClearAllByGoRoutineID_DuplicateBreakpoints(t *testing.T) {
+	numCleared := 0
+	setBreakpoint := func(uint64) error { return nil }
+	clearBreakpoint := func(uint64) error { numCleared++; return nil }
+	bps := NewBreakpoints(setBreakpoint, clearBreakpoint)
+
+	if err := bps.SetConditional(0x100, 1); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	if err := bps.SetConditional(0x100, 1); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	if err := bps.ClearAllByGoRoutineID(1); err != nil {
+		t.Fatalf("failed to clear breakpoint: %v", err)
+	}
+
+	if numCleared != 1 {
+		t.Errorf("wrong number of clear ops: %d", numCleared)
+	}
+}
