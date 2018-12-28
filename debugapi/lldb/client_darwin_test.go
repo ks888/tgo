@@ -198,6 +198,25 @@ func TestReadMemory(t *testing.T) {
 	}
 }
 
+func TestReadMemory_LargeSize(t *testing.T) {
+	client := NewClient()
+	err := client.LaunchProcess(testutils.ProgramInfloop)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	defer client.DetachProcess()
+
+	out := make([]byte, 2048)
+	err = client.ReadMemory(testutils.InfloopAddrMain, out)
+	if err != nil {
+		t.Fatalf("failed to read memory: %v", err)
+	}
+
+	if out[0] != 0x65 || out[1] != 0x48 {
+		t.Errorf("wrong memory: %v", out)
+	}
+}
+
 func TestWriteMemory(t *testing.T) {
 	client := NewClient()
 	err := client.LaunchProcess(testutils.ProgramInfloop)

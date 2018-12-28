@@ -22,9 +22,10 @@ import (
 const debugServerPath = "/Library/Developer/CommandLineTools/Library/PrivateFrameworks/LLDB.framework/Versions/A/Resources/debugserver"
 
 // Assumes the packet size is not larger than this.
-const maxPacketSize = 8192
-
-const excBadAccess = syscall.Signal(0x91) // EXC_BAD_ACCESS
+const (
+	maxPacketSize = 4096
+	excBadAccess  = syscall.Signal(0x91) // EXC_BAD_ACCESS
+)
 
 // Client is the debug api client which depends on lldb's debugserver.
 // See the gdb's doc for the reference: https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html
@@ -446,11 +447,6 @@ func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
 
 // ReadMemory reads the specified memory region.
 func (c *Client) ReadMemory(addr uint64, out []byte) error {
-	if len(out) > maxPacketSize-4 /* header 1 byte + footer 3 bytes */ {
-		// TODO: Remove the max size constraint.
-		return fmt.Errorf("can't read the memory region larger than %d (specified %d)", maxPacketSize-4, len(out))
-	}
-
 	command := fmt.Sprintf("m%x,%x", addr, len(out))
 	if err := c.send(command); err != nil {
 		return err
@@ -805,24 +801,31 @@ func (c *Client) receiveAndCheck() error {
 }
 
 func (c *Client) receive() (string, error) {
-	n, err := c.conn.Read(c.buffer)
-	if err != nil {
-		return "", err
+	var rawPacket []byte
+	for {
+		n, err := c.conn.Read(c.buffer)
+		if err != nil {
+			return "", err
+		}
+
+		rawPacket = append(rawPacket, c.buffer[0:n]...)
+		if len(rawPacket) < 4 {
+			// there should be at least 4 bytes
+			continue
+		} else if rawPacket[len(rawPacket)-3] == '#' {
+			// received at least 1 packet.
+			// TODO: handle multiple packets case
+			break
+		}
 	}
 
-	packet := string(c.buffer[0:n])
-	data := string(packet[1 : n-3])
+	packet := string(rawPacket)
+	data := string(rawPacket[1 : len(rawPacket)-3])
 	if !c.noAckMode {
 		if err := verifyPacket(packet); err != nil {
 			return "", err
 		}
-
 		return data, c.sendAck()
-	}
-
-	// quick check
-	if packet[n-3] != '#' {
-		return data, fmt.Errorf("No checksum. There may be unreceived packets: %s", packet)
 	}
 
 	return data, nil
