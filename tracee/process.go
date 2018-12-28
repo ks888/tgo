@@ -363,6 +363,16 @@ func (p *Process) SetConditionalBreakpoint(addr uint64, goRoutineID int64) error
 	return nil
 }
 
+// ClearAllConditionalBreakpoints clears all the conditional breakpoints associated with the specified go routine.
+func (p *Process) ClearAllConditionalBreakpoints(goRoutineID int64) error {
+	for addr := range p.breakpoints {
+		if err := p.ClearConditionalBreakpoint(addr, goRoutineID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ClearConditionalBreakpoint clears the conditional breakpoint at the specified address and go routine.
 // The breakpoint may still exist on memory if there are other go routines not cleared.
 // Use SingleStep() to temporary disable the breakpoint.
@@ -679,18 +689,40 @@ func (p *Process) currentArgs(params []Parameter, addrBeginningOfArgs uint64) (i
 
 // ReadInstructions reads the instructions of the specified function from memory.
 func (p *Process) ReadInstructions(f *Function) ([]x86asm.Inst, error) {
-	return nil, nil
+	if f.EndAddr == 0 {
+		return nil, fmt.Errorf("the end address of the function %s is unknown", f.Name)
+	}
+
+	buff := make([]byte, f.EndAddr-f.StartAddr)
+	if err := p.debugapiClient.ReadMemory(f.StartAddr, buff); err != nil {
+		return nil, err
+	}
+
+	var pos int
+	var insts []x86asm.Inst
+	for pos < len(buff) {
+		inst, err := x86asm.Decode(buff[pos:len(buff)], 64)
+		if err != nil {
+			log.Debugf("decode error at %#x: %v", pos, err)
+		} else {
+			insts = append(insts, inst)
+		}
+
+		pos += inst.Len
+	}
+
+	return insts, nil
 }
 
 // GoRoutineInfo describes the various info of the go routine like pc.
 type GoRoutineInfo struct {
-	ID               int64
-	UsedStackSize    uint64
-	CurrentPC        uint64
-	CurrentStackAddr uint64
-	Panicking        bool
-	PanicHandler     *PanicHandler
-	Ancestors        []int64
+	ID                int64
+	UsedStackSize     uint64
+	CurrentPC         uint64
+	CurrentStackAddr  uint64
+	NextDeferFuncAddr uint64
+	Panicking         bool
+	PanicHandler      *PanicHandler
 }
 
 // PanicHandler holds the function info which (will) handles panic.
@@ -746,12 +778,12 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 		return GoRoutineInfo{}, err
 	}
 
-	ancestors, err := p.findAncestorGoIDs(gAddr)
+	nextDeferFuncAddr, err := p.findNextDeferFuncAddr(gAddr)
 	if err != nil {
 		return GoRoutineInfo{}, err
 	}
 
-	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, Panicking: panicking, PanicHandler: panicHandler, Ancestors: ancestors}, nil
+	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, NextDeferFuncAddr: nextDeferFuncAddr, Panicking: panicking, PanicHandler: panicHandler}, nil
 }
 
 // TODO: depend on os
@@ -779,6 +811,30 @@ func (p *Process) singleStepUnspecifiedThreads(threadID int, err debugapi.Unspec
 	return nil
 }
 
+func (p *Process) findNextDeferFuncAddr(gAddr uint64) (uint64, error) {
+	ptrToDeferType, rawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType(), "_defer")
+	if err != nil {
+		return 0, err
+	}
+	deferAddr := binary.LittleEndian.Uint64(rawVal)
+	if deferAddr == 0x0 {
+		return 0x0, nil
+	}
+
+	deferType := ptrToDeferType.(*dwarf.PtrType).Type
+	_, rawVal, err = p.findFieldInStruct(deferAddr, deferType, "fn")
+	if err != nil {
+		return 0, err
+	}
+	ptrToFuncAddr := binary.LittleEndian.Uint64(rawVal)
+
+	buff := make([]byte, 8)
+	if err := p.debugapiClient.ReadMemory(ptrToFuncAddr, buff); err != nil {
+		return 0, fmt.Errorf("failed to read memory at %#x: %v", ptrToFuncAddr, err)
+	}
+	return binary.LittleEndian.Uint64(buff), nil
+}
+
 func (p *Process) findFieldInStruct(structAddr uint64, structType dwarf.Type, fieldName string) (dwarf.Type, []byte, error) {
 	for {
 		typedefType, ok := structType.(*dwarf.TypedefType)
@@ -794,8 +850,9 @@ func (p *Process) findFieldInStruct(structAddr uint64, structType dwarf.Type, fi
 		}
 
 		buff := make([]byte, field.Type.Size())
-		if err := p.debugapiClient.ReadMemory(structAddr+uint64(field.ByteOffset), buff); err != nil {
-			return nil, nil, fmt.Errorf("failed to read memory: %v", err)
+		addr := structAddr + uint64(field.ByteOffset)
+		if err := p.debugapiClient.ReadMemory(addr, buff); err != nil {
+			return nil, nil, fmt.Errorf("failed to read memory at %#x: %v", addr, err)
 		}
 		return field.Type, buff, nil
 	}
@@ -845,28 +902,6 @@ func (p *Process) findPanicHandler(gAddr, panicAddr, stackHi uint64) (*PanicHand
 	pc := binary.LittleEndian.Uint64(rawVal)
 
 	return &PanicHandler{UsedStackSizeAtDefer: usedStackSizeAtDefer, PCAtDefer: pc}, nil
-}
-
-func (p *Process) findAncestorGoIDs(gAddr uint64) ([]int64, error) {
-	if !p.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
-		// ancestors field is not supported
-		return nil, nil
-	}
-
-	ptrToAncestorsType, rawVal, err := p.findFieldInStruct(gAddr, p.Binary.runtimeGType(), "ancestors")
-	if err != nil || binary.LittleEndian.Uint64(rawVal) == 0 {
-		return nil, err
-	}
-
-	ptrToAncestorsVal := p.valueParser.parseValue(ptrToAncestorsType, rawVal, 1)
-	ancestorsVal := ptrToAncestorsVal.(ptrValue).pointedVal.(sliceValue)
-
-	var ancestorGoIDs []int64
-	for _, ancestor := range ancestorsVal.val {
-		ancestorGoID := ancestor.(structValue).fields["goid"].(int64Value).val
-		ancestorGoIDs = append(ancestorGoIDs, ancestorGoID)
-	}
-	return ancestorGoIDs, nil
 }
 
 // ThreadInfo describes the various info of thread.

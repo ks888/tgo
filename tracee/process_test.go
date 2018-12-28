@@ -2,7 +2,7 @@ package tracee
 
 import (
 	"debug/dwarf"
-	"os"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"testing"
@@ -482,14 +482,22 @@ func TestFindfuncbucketTypeOffsets(t *testing.T) {
 }
 
 func TestReadInstructions(t *testing.T) {
-	for _, testProgram := range []string{testutils.ProgramHelloworld, testutils.ProgramHelloworldNoDwarf} {
-		proc, err := LaunchProcess(testProgram)
+	for _, testdata := range []struct {
+		program  string
+		funcAddr uint64
+		expected int
+	}{
+		{testutils.ProgramHelloworld, testutils.HelloworldAddrMain, 22},
+		{testutils.ProgramHelloworldNoDwarf, testutils.HelloworldAddrMain, 26}, // include the last 0xcc insts
+		{testutils.ProgramHelloworld, 0x1001000, 43},                           // go.buidid, which includes bad insts
+	} {
+		proc, err := LaunchProcess(testdata.program)
 		if err != nil {
 			t.Fatalf("failed to launch process: %v", err)
 		}
 		defer proc.Detach()
 
-		f, err := proc.FindFunction(testutils.HelloworldAddrMain)
+		f, err := proc.FindFunction(testdata.funcAddr)
 		if err != nil {
 			t.Fatalf("failed to find function: %v", err)
 		}
@@ -497,7 +505,10 @@ func TestReadInstructions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to read instructions: %v", err)
 		}
-		insts = insts
+
+		if len(insts) != testdata.expected {
+			t.Errorf("wrong number of insts: %d\n%v", len(insts), insts)
+		}
 	}
 }
 
@@ -533,8 +544,12 @@ func TestCurrentGoRoutineInfo(t *testing.T) {
 			t.Errorf("empty return address: %d", goRoutineInfo.CurrentPC)
 		}
 		if goRoutineInfo.CurrentStackAddr == 0 {
-			t.Errorf("empty stack address: %d", goRoutineInfo.CurrentStackAddr)
+			t.Errorf("current stack address is 0")
 		}
+		if goRoutineInfo.NextDeferFuncAddr == 0 {
+			t.Errorf("NextDeferFuncAddr is 0")
+		}
+		fmt.Printf("%#v\n", goRoutineInfo.NextDeferFuncAddr)
 		if goRoutineInfo.Panicking {
 			t.Errorf("panicking")
 		}
@@ -573,41 +588,6 @@ func TestCurrentGoRoutineInfo_Panicking(t *testing.T) {
 
 		if goRoutineInfo.PanicHandler.PCAtDefer == 0 {
 			t.Errorf("invalid panic handler")
-		}
-	}
-}
-
-func TestCurrentGoRoutineInfo_HasAncestors(t *testing.T) {
-	os.Setenv("GODEBUG", "tracebackancestors=1")
-	defer os.Unsetenv("GODEBUG")
-
-	for _, testProgram := range []string{testutils.ProgramGoRoutines, testutils.ProgramGoRoutinesNoDwarf} {
-		proc, err := LaunchProcess(testProgram)
-		if err != nil {
-			t.Fatalf("failed to launch process: %v", err)
-		}
-		defer proc.Detach()
-
-		if !proc.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
-			t.Skip("go 1.10 or earlier doesn't hold ancestors info")
-		}
-
-		if err := proc.SetBreakpoint(testutils.GoRoutinesAddrInc); err != nil {
-			t.Fatalf("failed to set breakpoint: %v", err)
-		}
-
-		event, err := proc.ContinueAndWait()
-		if err != nil {
-			t.Fatalf("failed to continue and wait: %v", err)
-		}
-
-		tids := event.Data.([]int)
-		goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
-		if err != nil {
-			t.Fatalf("error: %v", err)
-		}
-		if goRoutineInfo.Ancestors == nil {
-			t.Errorf("nil ancestors")
 		}
 	}
 }

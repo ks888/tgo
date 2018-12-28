@@ -10,6 +10,7 @@ import (
 	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/log"
 	"github.com/ks888/tgo/tracee"
+	"golang.org/x/arch/x86/x86asm"
 )
 
 const chanBufferSize = 64
@@ -17,10 +18,22 @@ const chanBufferSize = 64
 // ErrInterrupted indicates the tracer is interrupted due to the Interrupt() call.
 var ErrInterrupted = errors.New("interrupted")
 
+type breakpointType int
+
+const (
+	// These types determine the handling of hit-breakpoints.
+	breakpointTypeUnknown breakpointType = iota
+	breakpointTypeCall
+	breakpointTypeDeferredFunc
+	breakpointTypeReturn
+)
+
 // Controller controls the associated tracee process.
 type Controller struct {
-	process     *tracee.Process
-	statusStore map[int64]goRoutineStatus
+	process           *tracee.Process
+	statusStore       map[int64]goRoutineStatus
+	breakpointTypes   map[uint64]breakpointType
+	callInstAddrCache map[uint64][]uint64
 
 	tracingPoints tracingPoints
 	traceLevel    int
@@ -66,6 +79,9 @@ type callingFunction struct {
 func NewController() *Controller {
 	return &Controller{
 		outputWriter:           os.Stdout,
+		statusStore:            make(map[int64]goRoutineStatus),
+		breakpointTypes:        make(map[uint64]breakpointType),
+		callInstAddrCache:      make(map[uint64][]uint64),
 		interruptCh:            make(chan bool, chanBufferSize),
 		pendingStartTracePoint: make(chan uint64, chanBufferSize),
 		pendingEndTracePoint:   make(chan uint64, chanBufferSize),
@@ -75,7 +91,6 @@ func NewController() *Controller {
 // LaunchTracee launches the new tracee process to be controlled.
 func (c *Controller) LaunchTracee(name string, arg ...string) error {
 	var err error
-	c.statusStore = make(map[int64]goRoutineStatus)
 	c.process, err = tracee.LaunchProcess(name, arg...)
 	return err
 }
@@ -83,7 +98,6 @@ func (c *Controller) LaunchTracee(name string, arg ...string) error {
 // AttachTracee attaches to the existing process.
 func (c *Controller) AttachTracee(pid int, programPath, goVersion string) error {
 	var err error
-	c.statusStore = make(map[int64]goRoutineStatus)
 	c.process, err = tracee.AttachProcess(pid, programPath, goVersion)
 	return err
 }
@@ -117,42 +131,6 @@ func (c *Controller) findFunction(functionName string) (*tracee.Function, error)
 		}
 	}
 	return nil, fmt.Errorf("failed to find function %s", functionName)
-}
-
-// The list of functions which should not set the breakpoint for some reason.
-// Always write a comment to describe the reason blacklisted.
-var blacklist = []string{
-	"gosave", // used when libc function is called. e.g. when runtime.lock() fails to acquire the lock immediately, it may wait a little more using libc's usleep(). The tracing log of this function appears suddenly and suprises an user.
-}
-
-// The list of runtime and unexported functions which can set the breakpoint.
-// Always write a comment to describe the reason whitelisted.
-var whitelist = []string{
-	"runtime.gopanic",   // need to trap gopanic function in order to calculate a stack depth correctly.
-	"runtime.chansend1", // builtin function: ch <- x
-	"runtime.chanrecv1", // builtin function: x <- ch
-	"runtime.makeslice", // builtin function: make([]...)
-}
-
-// canSetBreakpoint returns true if it's safe to set the breakpoint at the given function.
-// Most unexported runtime functions are not supported, because these functions make the tracer unstable (especially in the case the system stack is used).
-func (c *Controller) canSetBreakpoint(function *tracee.Function) bool {
-	const runtimePrefix = "runtime."
-	if strings.HasPrefix(function.Name, runtimePrefix) {
-		for _, f := range whitelist {
-			if f == function.Name {
-				return true
-			}
-		}
-		return function.IsExported()
-	}
-
-	for _, f := range blacklist {
-		if f == function.Name {
-			return false
-		}
-	}
-	return true
 }
 
 // SetTraceLevel set the tracing level, which determines whether to print the traced info of the functions.
@@ -277,43 +255,101 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	} else if c.tracingPoints.IsEndAddress(breakpointAddr) {
 		return c.exitTracepoint(threadID, goRoutineInfo)
 
-	} else if !c.traced(goRoutineInfo.ID, goRoutineInfo.Ancestors) {
+	} else if !c.tracingPoints.Inside(goRoutineInfo.ID) {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 
-	status, _ := c.statusStore[goRoutineInfo.ID]
-	if goRoutineInfo.UsedStackSize == status.usedStackSize() && breakpointAddr == status.lastFunctionAddr() {
-		// it's likely we are in the same stack frame as before (typical in the stack growth case).
-		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
-	} else if c.isFunctionCall(breakpointAddr) {
-		return c.handleTrapAtFunctionCall(threadID, goRoutineInfo)
+	switch c.breakpointTypes[breakpointAddr] {
+	case breakpointTypeCall:
+		return c.handleTrapBeforeFunctionCall(threadID, goRoutineInfo)
+	case breakpointTypeDeferredFunc:
+		return c.handleTrapAtDeferredFuncCall(threadID, goRoutineInfo)
+	case breakpointTypeReturn:
+		return c.handleTrapAfterFunctionReturn(threadID, goRoutineInfo)
+	default:
+		return fmt.Errorf("unknown breakpoint: %#x", breakpointAddr)
 	}
-
-	return c.handleTrapAtFunctionReturn(threadID, goRoutineInfo)
 }
 
 func (c *Controller) enterTracepoint(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	if !c.tracingPoints.InsideAny() {
-		if err := c.setBreakpointsExceptTracingPoint(); err != nil {
+	goRoutineID := goRoutineInfo.ID
+
+	if !c.tracingPoints.Inside(goRoutineID) {
+		if err := c.setCallInstBreakpoints(goRoutineID, goRoutineInfo.CurrentPC); err != nil {
 			return err
 		}
+
+		if err := c.setDeferredFuncBreakpoints(goRoutineInfo); err != nil {
+			return err
+		}
+
+		c.tracingPoints.Enter(goRoutineID)
 	}
 
-	c.tracingPoints.Enter(goRoutineInfo.ID)
 	breakpointAddr := goRoutineInfo.CurrentPC - 1
 	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 }
 
 func (c *Controller) exitTracepoint(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	if c.tracingPoints.InsideAny() {
-		if err := c.clearBreakpointsExceptTracingPoint(); err != nil {
+	goRoutineID := goRoutineInfo.ID
+
+	if c.tracingPoints.Inside(goRoutineID) {
+		if err := c.process.ClearAllConditionalBreakpoints(goRoutineID); err != nil {
 			return err
 		}
+
 		c.tracingPoints.Exit()
 	}
 
 	breakpointAddr := goRoutineInfo.CurrentPC - 1
 	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
+}
+
+func (c *Controller) setCallInstBreakpoints(goRoutineID int64, pc uint64) error {
+	return c.alterCallInstBreakpoints(true, goRoutineID, pc)
+}
+
+func (c *Controller) clearCallInstBreakpoints(goRoutineID int64, pc uint64) error {
+	return c.alterCallInstBreakpoints(false, goRoutineID, pc)
+}
+
+func (c *Controller) alterCallInstBreakpoints(enable bool, goRoutineID int64, pc uint64) error {
+	f, err := c.process.FindFunction(pc)
+	if err != nil {
+		return err
+	}
+
+	callInstAddresses, err := c.findCallInstAddresses(f)
+	if err != nil {
+		return err
+	}
+
+	for _, callInstAddr := range callInstAddresses {
+		if enable {
+			err = c.process.SetConditionalBreakpoint(callInstAddr, goRoutineID)
+			c.breakpointTypes[callInstAddr] = breakpointTypeCall
+		} else {
+			err = c.process.ClearConditionalBreakpoint(callInstAddr, goRoutineID)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Controller) setDeferredFuncBreakpoints(goRoutineInfo tracee.GoRoutineInfo) error {
+	nextAddr := goRoutineInfo.NextDeferFuncAddr
+	if c.process.HasBreakpoint(nextAddr) || nextAddr == 0x0 /* no deferred func */ {
+		return nil
+	}
+
+	if err := c.process.SetConditionalBreakpoint(nextAddr, goRoutineInfo.ID); err != nil {
+		return err
+	}
+	c.breakpointTypes[nextAddr] = breakpointTypeDeferredFunc
+	return nil
 }
 
 func (c *Controller) handleTrappedSystemRoutine(threadID int) error {
@@ -326,27 +362,22 @@ func (c *Controller) handleTrappedSystemRoutine(threadID int) error {
 	return c.process.SingleStep(threadID, breakpointAddr)
 }
 
-func (c *Controller) traced(goRoutineID int64, parentIDs []int64) bool {
-	for _, parentID := range append([]int64{goRoutineID}, parentIDs...) {
-		if c.tracingPoints.Inside(parentID) {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *Controller) isFunctionCall(breakpointAddr uint64) bool {
-	function, err := c.process.FindFunction(breakpointAddr)
-	if err != nil {
-		log.Debugf("failed to find function (addr: %x): %v", breakpointAddr, err)
-		return false
-	}
-
-	return function.StartAddr == breakpointAddr
-}
-
 func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, breakpointAddr uint64) error {
 	return c.process.SingleStep(threadID, breakpointAddr)
+}
+
+func (c *Controller) handleTrapBeforeFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
+	if err := c.process.SingleStep(threadID, goRoutineInfo.CurrentPC-1); err != nil {
+		return err
+	}
+
+	// Now the go routine jumped to the beginning of the function.
+	goRoutineInfo, err := c.process.CurrentGoRoutineInfo(threadID)
+	if err != nil {
+		return err
+	}
+
+	return c.handleTrapAtFunctionCall(threadID, goRoutineInfo)
 }
 
 func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
@@ -379,7 +410,17 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		currStackDepth -= c.countSkippedFuncs(status.callingFunctions, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
 	}
 
-	if c.canPrint(goRoutineInfo.ID, goRoutineInfo.Ancestors, currStackDepth) {
+	if currStackDepth < c.traceLevel {
+		if err := c.setCallInstBreakpoints(goRoutineInfo.ID, goRoutineInfo.CurrentPC); err != nil {
+			return err
+		}
+	}
+
+	if err := c.setDeferredFuncBreakpoints(goRoutineInfo); err != nil {
+		return err
+	}
+
+	if currStackDepth <= c.traceLevel {
 		if err := c.printFunctionInput(goRoutineInfo.ID, stackFrame, currStackDepth); err != nil {
 			return err
 		}
@@ -394,26 +435,12 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 }
 
 func (c *Controller) countSkippedFuncs(callingFuncs []callingFunction, usedStackSize uint64) int {
-	panicFuncIndex := c.findPanicFunction(callingFuncs)
-	if panicFuncIndex == -1 {
-		return 0
-	}
-
-	for i := panicFuncIndex; i >= 0; i-- {
+	for i := len(callingFuncs) - 1; i >= 0; i-- {
 		if callingFuncs[i].usedStackSize < usedStackSize {
-			return panicFuncIndex - i
+			return len(callingFuncs) - 1 - i
 		}
 	}
-	return panicFuncIndex + 1
-}
-
-func (c *Controller) findPanicFunction(callingFuncs []callingFunction) int {
-	for i, callingFunc := range callingFuncs {
-		if callingFunc.Name == "runtime.gopanic" {
-			return i
-		}
-	}
-	return -1
+	return len(callingFuncs) - 1
 }
 
 func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineInfo tracee.GoRoutineInfo) ([]callingFunction, []callingFunction, error) {
@@ -422,8 +449,7 @@ func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineIn
 			return callingFuncs[0 : i+1], callingFuncs[i+1:], nil
 
 		} else if callingFuncs[i].usedStackSize == goRoutineInfo.UsedStackSize {
-			breakpointAddr := goRoutineInfo.CurrentPC - 1
-			currFunction, err := c.process.FindFunction(breakpointAddr)
+			currFunction, err := c.process.FindFunction(goRoutineInfo.CurrentPC)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -445,46 +471,20 @@ func (c *Controller) appendFunction(callingFuncs []callingFunction, newFunc call
 	if err := c.process.SetConditionalBreakpoint(newFunc.returnAddress, goRoutineID); err != nil {
 		return nil, err
 	}
+	c.breakpointTypes[newFunc.returnAddress] = breakpointTypeReturn
+
 	return append(callingFuncs, newFunc), nil
 }
 
-func (c *Controller) setBreakpointsExceptTracingPoint() error {
-	return c.alterBreakpointsExceptTracingPoint(true)
-}
-
-func (c *Controller) clearBreakpointsExceptTracingPoint() error {
-	return c.alterBreakpointsExceptTracingPoint(false)
-}
-
-func (c *Controller) alterBreakpointsExceptTracingPoint(enable bool) error {
-	for _, function := range c.process.Binary.Functions() {
-		if !c.canSetBreakpoint(function) || c.tracingPoints.IsStartAddress(function.StartAddr) || c.tracingPoints.IsEndAddress(function.StartAddr) {
-			continue
-		}
-
-		var err error
-		if enable {
-			err = c.process.SetBreakpoint(function.StartAddr)
-		} else {
-			err = c.process.ClearBreakpoint(function.StartAddr)
-		}
-		if err != nil {
-			return fmt.Errorf("failed to change the breakpoint setting of %s: %v", function.Name, err)
-		}
+func (c *Controller) handleTrapAtDeferredFuncCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
+	if err := c.handleTrapAtFunctionCall(threadID, goRoutineInfo); err != nil {
+		return err
 	}
-	return nil
+
+	return c.process.ClearConditionalBreakpoint(goRoutineInfo.CurrentPC-1, goRoutineInfo.ID)
 }
 
-func (c *Controller) canPrint(goRoutineID int64, parentIDs []int64, currStackDepth int) bool {
-	for _, parentID := range append([]int64{goRoutineID}, parentIDs...) {
-		if c.tracingPoints.Inside(parentID) {
-			return currStackDepth <= c.traceLevel
-		}
-	}
-	return false
-}
-
-func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
+func (c *Controller) handleTrapAfterFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
 	status, _ := c.statusStore[goRoutineInfo.ID]
 
 	remainingFuncs, unwindedFuncs, err := c.unwindFunctions(status.callingFunctions, goRoutineInfo)
@@ -493,12 +493,16 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 	}
 	returnedFunc := unwindedFuncs[0].Function
 
-	currStackDepth := len(remainingFuncs) + 1 // include returnedFunc for now
-	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {
-		currStackDepth -= c.countSkippedFuncs(status.callingFunctions, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
+	if err := c.clearCallInstBreakpoints(goRoutineInfo.ID, returnedFunc.StartAddr); err != nil {
+		return err
 	}
 
-	if c.canPrint(goRoutineInfo.ID, goRoutineInfo.Ancestors, currStackDepth) {
+	currStackDepth := len(remainingFuncs) + 1 // include returnedFunc for now
+	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {
+		currStackDepth -= c.countSkippedFuncs(remainingFuncs, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
+	}
+
+	if currStackDepth <= c.traceLevel {
 		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, returnedFunc.StartAddr)
 		if err != nil {
 			return err
@@ -518,7 +522,7 @@ func (c *Controller) handleTrapAtFunctionReturn(threadID int, goRoutineInfo trac
 
 // It must be called at the beginning of the function due to the StackFrameAt's constraint.
 func (c *Controller) currentStackFrame(goRoutineInfo tracee.GoRoutineInfo) (*tracee.StackFrame, error) {
-	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr, goRoutineInfo.CurrentPC-1)
+	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr, goRoutineInfo.CurrentPC)
 }
 
 // It must be called at return address due to the StackFrameAt's constraint.
@@ -545,6 +549,30 @@ func (c *Controller) printFunctionOutput(goRoutineID int64, stackFrame *tracee.S
 	fmt.Fprintf(c.outputWriter, "%s/ (#%02d) %s() (%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
 
 	return nil
+}
+
+func (c *Controller) findCallInstAddresses(f *tracee.Function) ([]uint64, error) {
+	// this cache is not only efficient, but required because there are no call insts if breakpoints are set.
+	if cache, ok := c.callInstAddrCache[f.StartAddr]; ok {
+		return cache, nil
+	}
+
+	insts, err := c.process.ReadInstructions(f)
+	if err != nil {
+		return nil, err
+	}
+
+	var pos int
+	var addresses []uint64
+	for _, inst := range insts {
+		if inst.Op == x86asm.CALL || inst.Op == x86asm.LCALL {
+			addresses = append(addresses, f.StartAddr+uint64(pos))
+		}
+		pos += inst.Len
+	}
+
+	c.callInstAddrCache[f.StartAddr] = addresses
+	return addresses, nil
 }
 
 // Interrupt interrupts the main loop.

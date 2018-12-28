@@ -873,6 +873,11 @@ var runtimeGType = &dwarf.StructType{
 							ByteOffset: 16,
 						},
 						&dwarf.StructField{
+							Name:       "fn",
+							Type:       &dwarf.PtrType{CommonType: dwarf.CommonType{ByteSize: 8}},
+							ByteOffset: 24,
+						},
+						&dwarf.StructField{
 							Name:       "_panic",
 							Type:       &dwarf.PtrType{CommonType: dwarf.CommonType{ByteSize: 8}},
 							ByteOffset: 32,

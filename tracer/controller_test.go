@@ -3,14 +3,12 @@ package tracer
 import (
 	"bytes"
 	"io/ioutil"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/ks888/tgo/testutils"
-	"github.com/ks888/tgo/tracee"
 )
 
 func TestLaunchProcess(t *testing.T) {
@@ -118,10 +116,10 @@ func TestMainLoop_MainNoParameter(t *testing.T) {
 	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
+	controller.SetTraceLevel(1)
 	if err := controller.LaunchTracee(testutils.ProgramHelloworld); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	controller.SetTraceLevel(1)
 	if err := controller.AddStartTracePoint(testutils.HelloworldAddrNoParameter); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
 	}
@@ -145,10 +143,7 @@ func TestMainLoop_MainNoParameter(t *testing.T) {
 	}
 }
 
-func TestMainLoop_GoRoutines_FollowChildren(t *testing.T) {
-	os.Setenv("GODEBUG", "tracebackancestors=1")
-	defer os.Unsetenv("GODEBUG")
-
+func TestMainLoop_GoRoutines(t *testing.T) {
 	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
@@ -156,11 +151,8 @@ func TestMainLoop_GoRoutines_FollowChildren(t *testing.T) {
 	if err := controller.LaunchTracee(testutils.ProgramGoRoutines); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
-	if err := controller.AddStartTracePoint(testutils.GoRoutinesAddrMain); err != nil {
+	if err := controller.AddStartTracePoint(testutils.GoRoutinesAddrInc); err != nil {
 		t.Fatalf("failed to set tracing point: %v", err)
-	}
-	if !controller.process.GoVersion.LaterThan(tracee.GoVersion{MajorVersion: 1, MinorVersion: 11, PatchVersion: 0}) {
-		t.Skip("go 1.10 or earlier doesn't hold ancestors info")
 	}
 
 	if err := controller.MainLoop(); err != nil {
@@ -168,7 +160,7 @@ func TestMainLoop_GoRoutines_FollowChildren(t *testing.T) {
 	}
 
 	output := buff.String()
-	if strings.Count(output, "main.inc") != 40 {
+	if strings.Count(output, "runtime.chanrecv1") != 40 {
 		t.Errorf("unexpected output: %s", output)
 	}
 }

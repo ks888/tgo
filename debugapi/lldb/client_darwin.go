@@ -22,7 +22,7 @@ import (
 const debugServerPath = "/Library/Developer/CommandLineTools/Library/PrivateFrameworks/LLDB.framework/Versions/A/Resources/debugserver"
 
 // Assumes the packet size is not larger than this.
-const maxPacketSize = 4096
+const maxPacketSize = 8192
 
 const excBadAccess = syscall.Signal(0x91) // EXC_BAD_ACCESS
 
