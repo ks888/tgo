@@ -1,7 +1,6 @@
 package debugapi
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"reflect"
@@ -36,8 +35,29 @@ func terminateProcess(pid int) {
 	}
 }
 
-func TestLaunchProcess(t *testing.T) {
+func TestCheckInterface(t *testing.T) {
+	var _ client = newRawClient()
+	var _ client = NewClient()
+}
+
+func TestClientProxy(t *testing.T) {
 	client := NewClient()
+	_ = client.LaunchProcess(testutils.ProgramInfloop)
+	pid := client.raw.tracingThreadIDs[0]
+	defer terminateProcess(pid)
+
+	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
+	event, err := client.ContinueAndWait()
+	if err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+	if event.Type != EventTypeTrapped {
+		t.Fatalf("unexpected event: %#v", event.Type)
+	}
+}
+
+func TestLaunchProcess(t *testing.T) {
+	client := newRawClient()
 	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -52,15 +72,12 @@ func TestLaunchProcess(t *testing.T) {
 	}
 }
 
-func TestLaunchProcess_NonExistProgram(t *testing.T) {
-	client := NewClient()
+func TestLaunchProcess_ProgramNotExist(t *testing.T) {
+	client := newRawClient()
 	err := client.LaunchProcess("notexist")
 	if err == nil {
 		t.Fatal("error is not returned")
 	}
-
-	pid := client.tracingThreadIDs[0]
-	defer terminateProcess(pid)
 }
 
 func TestAttachProcess(t *testing.T) {
@@ -69,8 +86,7 @@ func TestAttachProcess(t *testing.T) {
 	pid := cmd.Process.Pid
 	defer terminateProcess(pid)
 
-	fmt.Println(pid)
-	client := NewClient()
+	client := newRawClient()
 	err := client.AttachProcess(pid)
 	if err != nil {
 		t.Fatalf("failed to attach process: %v", err)
@@ -92,7 +108,7 @@ func TestAttachProcess_SignaledBeforeAttach(t *testing.T) {
 	proc, _ := os.FindProcess(pid)
 	_ = proc.Signal(unix.SIGUSR1)
 
-	client := NewClient()
+	client := newRawClient()
 	err := client.AttachProcess(pid)
 	if err == nil {
 		t.Fatalf("error is not returned")
@@ -105,7 +121,7 @@ func TestAttachProcess_NonExistPid(t *testing.T) {
 	pid := cmd.Process.Pid
 	terminateProcess(pid) // make sure the pid doesn't exist
 
-	client := NewClient()
+	client := newRawClient()
 	err := client.AttachProcess(pid)
 	if err == nil {
 		t.Fatalf("error is not returned")
@@ -113,7 +129,7 @@ func TestAttachProcess_NonExistPid(t *testing.T) {
 }
 
 func TestDetachProcess(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -133,14 +149,14 @@ func TestDetachProcess(t *testing.T) {
 }
 
 func TestReadMemory(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramInfloop)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	expected := []byte{0x64, 0x48, 0x8b}
 	buff := make([]byte, len(expected))
-	err := client.ReadMemory(pid, uintptr(testutils.InfloopAddrMain), buff)
+	err := client.ReadMemory(testutils.InfloopAddrMain, buff)
 	if err != nil {
 		t.Fatalf("failed to read memory (pid: %d): %v", pid, err)
 	}
@@ -151,20 +167,20 @@ func TestReadMemory(t *testing.T) {
 }
 
 func TestWriteMemory(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramInfloop)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	softwareBreakpoint := []byte{0xcc}
-	err := client.WriteMemory(pid, uintptr(testutils.InfloopAddrMain), softwareBreakpoint)
+	err := client.WriteMemory(testutils.InfloopAddrMain, softwareBreakpoint)
 	if err != nil {
 		t.Fatalf("failed to write memory (pid: %d): %v", pid, err)
 	}
 }
 
 func TestReadRegisters(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramInfloop)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
@@ -180,27 +196,49 @@ func TestReadRegisters(t *testing.T) {
 }
 
 func TestWriteRegisters(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramInfloop)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	regs, _ := client.ReadRegisters(pid)
 	regs.Rip = uint64(testutils.InfloopAddrMain)
-	err := client.WriteRegisters(pid, &regs)
+	err := client.WriteRegisters(pid, regs)
 	if err != nil {
 		t.Fatalf("failed to write registers (pid: %d): %v", pid, err)
 	}
 }
 
+func TestReadTLS(t *testing.T) {
+	client := newRawClient()
+	err := client.LaunchProcess(testutils.ProgramInfloop)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	pid := client.tracingThreadIDs[0]
+	defer terminateProcess(pid)
+
+	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
+	_, _ = client.ContinueAndWait()
+
+	var offset uint32 = 0xf8ffffff
+	gAddr, err := client.ReadTLS(client.trappedThreadIDs[0], offset)
+	if err != nil {
+		t.Fatalf("failed to read tls: %v", err)
+	}
+	if gAddr == 0 {
+		t.Errorf("empty addr")
+	}
+}
+
 func TestContinueAndWait_Trapped(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramInfloop)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
-	_ = client.WriteMemory(pid, uintptr(testutils.InfloopAddrMain), []byte{0xcc})
-	event, err := client.ContinueAndWait(pid)
+	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
+	event, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
@@ -214,26 +252,24 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 }
 
 func TestContinueAndWait_Exited(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramHelloworld)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
-	wpid := pid
 	for {
-		event, err := client.ContinueAndWait(wpid)
+		event, err := client.ContinueAndWait()
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
 		if event.Type == EventTypeExited {
 			break
 		}
-		wpid = event.Data.([]int)[0]
 	}
 }
 
 func TestContinueAndWait_Signaled(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramHelloworld)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
@@ -241,7 +277,7 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 	proc, _ := os.FindProcess(pid)
 	_ = proc.Signal(unix.SIGTERM)
 
-	event, err := client.ContinueAndWait(pid)
+	event, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
@@ -252,7 +288,7 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 }
 
 func TestContinueAndWait_Stopped(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramHelloworld)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
@@ -261,14 +297,14 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 	_ = proc.Signal(unix.SIGUSR1)
 
 	// non-SIGTRAP signal is handled internally.
-	_, err := client.ContinueAndWait(pid)
+	_, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 }
 
 func TestContinueAndWait_CoreDump(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramHelloworld)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
@@ -276,7 +312,7 @@ func TestContinueAndWait_CoreDump(t *testing.T) {
 	proc, _ := os.FindProcess(pid)
 	_ = proc.Signal(unix.SIGQUIT)
 
-	event, err := client.ContinueAndWait(pid)
+	event, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
@@ -287,7 +323,7 @@ func TestContinueAndWait_CoreDump(t *testing.T) {
 }
 
 func TestContinueAndWait_Continued(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramHelloworld)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
@@ -295,21 +331,20 @@ func TestContinueAndWait_Continued(t *testing.T) {
 	proc, _ := os.FindProcess(pid)
 	_ = proc.Signal(unix.SIGCONT)
 
-	_, err := client.ContinueAndWait(pid)
+	_, err := client.ContinueAndWait()
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
 }
 
 func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramHelloworld)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
-	pids := []int{pid}
 	for {
-		event, err := client.ContinueAndWait(pids...)
+		event, err := client.ContinueAndWait()
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
@@ -317,18 +352,11 @@ func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
 		if event.Type == EventTypeExited {
 			break
 		}
-
-		switch event.Type {
-		case EventTypeExited:
-			pids = nil
-		default:
-			pids = event.Data.([]int)
-		}
 	}
 }
 
 func TestStepAndWait(t *testing.T) {
-	client := NewClient()
+	client := newRawClient()
 	_ = client.LaunchProcess(testutils.ProgramInfloop)
 	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)

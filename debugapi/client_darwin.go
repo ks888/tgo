@@ -526,8 +526,7 @@ func (c *Client) buildReadTLSFunction(offset uint32) []byte {
 	offsetBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(offsetBytes, offset)
 
-	// TODO: do not assume gs_base. fs_base is used in linux.
-	readTLSFunction := []byte{0x65, 0x48, 0x8b, 0x0c, 0x25}
+	readTLSFunction := []byte{0x65, 0x48, 0x8b, 0x0c, 0x25} // mac OS X uses gs_base
 	return append(readTLSFunction, offsetBytes...)
 }
 

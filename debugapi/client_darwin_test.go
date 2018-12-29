@@ -17,6 +17,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestCheckInterface(t *testing.T) {
+	var _ client = NewClient()
+}
+
 func TestLaunchProcess(t *testing.T) {
 	client := NewClient()
 	err := client.LaunchProcess(testutils.ProgramInfloop)
@@ -251,12 +255,12 @@ func TestReadTLS(t *testing.T) {
 	threadIDs := event.Data.([]int)
 
 	var offset uint32 = 0xf
-	_, err = client.ReadTLS(threadIDs[0], offset)
+	gAddr, err := client.ReadTLS(threadIDs[0], offset)
 	if err != nil {
 		t.Fatalf("failed to read tls: %v", err)
 	}
-	if client.currentTLSOffset != offset {
-		t.Errorf("wrong offset: %x", client.currentTLSOffset)
+	if gAddr == 0 {
+		t.Errorf("empty addr")
 	}
 }
 
