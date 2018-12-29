@@ -145,10 +145,7 @@ func (v ptrValue) String() string {
 	if v.pointedVal != nil {
 		return fmt.Sprintf("&%s", v.pointedVal)
 	}
-	if v.addr != 0 {
-		return fmt.Sprintf("%#x", v.addr)
-	}
-	return "nil"
+	return fmt.Sprintf("%#x", v.addr)
 }
 
 type funcValue struct {

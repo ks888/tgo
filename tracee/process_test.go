@@ -232,6 +232,9 @@ func TestStackFrameAt_NoDwarfCase(t *testing.T) {
 	if stackFrame.Function.EndAddr == 0 {
 		t.Errorf("end addr is 0")
 	}
+	if len(stackFrame.Function.Parameters) != 1 {
+		t.Errorf("wrong number of params")
+	}
 }
 
 func TestFuncTypeOffsets(t *testing.T) {
@@ -418,4 +421,21 @@ func TestCurrentGoRoutineInfo_Panicking(t *testing.T) {
 			t.Errorf("invalid panic handler")
 		}
 	}
+}
+
+func TestArgument_ParseValue(t *testing.T) {
+	for i, testdata := range []struct {
+		arg      Argument
+		expected string
+	}{
+		{Argument{Name: "a", parseValue: func(int) value { return int8Value{val: 1} }}, "a = 1"},
+		{Argument{Name: "a", parseValue: func(int) value { return nil }}, "a = -"},
+		{Argument{Name: "", parseValue: func(int) value { return int8Value{val: 1} }}, "1"},
+	} {
+		actual := testdata.arg.ParseValue(0)
+		if actual != testdata.expected {
+			t.Errorf("[%d] wrong parsed result. expect: %s, actual %s", i, testdata.expected, actual)
+		}
+	}
+
 }
