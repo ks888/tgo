@@ -254,13 +254,9 @@ func TestReadTLS(t *testing.T) {
 	event, _ := client.ContinueAndWait()
 	threadIDs := event.Data.([]int)
 
-	var offset uint32 = 0xf
-	gAddr, err := client.ReadTLS(threadIDs[0], offset)
+	_, err = client.ReadTLS(threadIDs[0], 0xf)
 	if err != nil {
 		t.Fatalf("failed to read tls: %v", err)
-	}
-	if gAddr == 0 {
-		t.Errorf("empty addr")
 	}
 }
 
