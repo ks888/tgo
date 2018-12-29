@@ -1,4 +1,4 @@
-package lldb
+package debugapi
 
 import (
 	"bytes"
@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/log"
 	"golang.org/x/sys/unix"
 )
@@ -283,11 +282,11 @@ func (c *Client) ThreadIDs() ([]int, error) {
 
 	var threadIDs []int
 	for _, rawThreadID := range strings.Split(rawThreadIDs, ",") {
-		tid, err := hexToUint64(rawThreadID, false)
+		threadID, err := hexToUint64(rawThreadID, false)
 		if err != nil {
 			return nil, err
 		}
-		threadIDs = append(threadIDs, int(tid))
+		threadIDs = append(threadIDs, int(threadID))
 	}
 	return threadIDs, nil
 }
@@ -363,18 +362,18 @@ func (c *Client) killProcess() error {
 	return nil
 }
 
-// ReadRegisters reads the target tid's registers.
-func (c *Client) ReadRegisters(tid int) (debugapi.Registers, error) {
-	data, err := c.readRegisters(tid)
+// ReadRegisters reads the target threadID's registers.
+func (c *Client) ReadRegisters(threadID int) (Registers, error) {
+	data, err := c.readRegisters(threadID)
 	if err != nil {
-		return debugapi.Registers{}, err
+		return Registers{}, err
 	}
 
 	return c.parseRegisterData(data)
 }
 
-func (c *Client) readRegisters(tid int) (string, error) {
-	command := fmt.Sprintf("g;thread:%x;", tid)
+func (c *Client) readRegisters(threadID int) (string, error) {
+	command := fmt.Sprintf("g;thread:%x;", threadID)
 	if err := c.send(command); err != nil {
 		return "", err
 	}
@@ -388,8 +387,8 @@ func (c *Client) readRegisters(tid int) (string, error) {
 	return data, nil
 }
 
-func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
-	var regs debugapi.Registers
+func (c *Client) parseRegisterData(data string) (Registers, error) {
+	var regs Registers
 	for _, metadata := range c.registerMetadataList {
 		rawValue := data[metadata.offset*2 : (metadata.offset+metadata.size)*2]
 
@@ -403,7 +402,7 @@ func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
 			regs.Rcx, err = hexToUint64(rawValue, true)
 		}
 		if err != nil {
-			return debugapi.Registers{}, err
+			return Registers{}, err
 		}
 	}
 
@@ -411,8 +410,8 @@ func (c *Client) parseRegisterData(data string) (debugapi.Registers, error) {
 }
 
 // WriteRegisters updates the registers' value.
-func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
-	data, err := c.readRegisters(tid)
+func (c *Client) WriteRegisters(threadID int, regs Registers) error {
+	data, err := c.readRegisters(threadID)
 	if err != nil {
 		return err
 	}
@@ -437,7 +436,7 @@ func (c *Client) WriteRegisters(tid int, regs debugapi.Registers) error {
 		}
 	}
 
-	command := fmt.Sprintf("G%s;thread:%x;", data, tid)
+	command := fmt.Sprintf("G%s;thread:%x;", data, threadID)
 	if err := c.send(command); err != nil {
 		return err
 	}
@@ -485,28 +484,28 @@ func (c *Client) WriteMemory(addr uint64, data []byte) error {
 }
 
 // ReadTLS reads the offset from the beginning of the TLS block.
-func (c *Client) ReadTLS(tid int, offset uint32) (uint64, error) {
+func (c *Client) ReadTLS(threadID int, offset uint32) (uint64, error) {
 	if err := c.updateReadTLSFunction(offset); err != nil {
 		return 0, err
 	}
 
-	originalRegs, err := c.ReadRegisters(tid)
+	originalRegs, err := c.ReadRegisters(threadID)
 	if err != nil {
 		return 0, err
 	}
-	defer func() { err = c.WriteRegisters(tid, originalRegs) }()
+	defer func() { err = c.WriteRegisters(threadID, originalRegs) }()
 
 	modifiedRegs := originalRegs
 	modifiedRegs.Rip = c.readTLSFuncAddr
-	if err = c.WriteRegisters(tid, modifiedRegs); err != nil {
+	if err = c.WriteRegisters(threadID, modifiedRegs); err != nil {
 		return 0, err
 	}
 
-	if _, err := c.StepAndWait(tid); err != nil {
+	if _, err := c.StepAndWait(threadID); err != nil {
 		return 0, err
 	}
 
-	modifiedRegs, err = c.ReadRegisters(tid)
+	modifiedRegs, err = c.ReadRegisters(threadID)
 	return modifiedRegs.Rcx, err
 }
 
@@ -534,14 +533,14 @@ func (c *Client) buildReadTLSFunction(offset uint32) []byte {
 
 // ContinueAndWait resumes processes and waits until an event happens.
 // The exited event is reported when the main process exits (and not when its threads exit).
-func (c *Client) ContinueAndWait() (debugapi.Event, error) {
+func (c *Client) ContinueAndWait() (Event, error) {
 	return c.continueAndWait(c.pendingSignal)
 }
 
 // StepAndWait executes the one instruction of the specified thread and waits until an event happens.
 // The returned event may not be the trapped event.
-// If unspecified thread is stopped, debugapi.UnspecifiedThreadError is returned.
-func (c *Client) StepAndWait(threadID int) (debugapi.Event, error) {
+// If unspecified thread is stopped, UnspecifiedThreadError is returned.
+func (c *Client) StepAndWait(threadID int) (Event, error) {
 	var command string
 	if c.pendingSignal == 0 {
 		command = fmt.Sprintf("vCont;s:%x", threadID)
@@ -550,21 +549,21 @@ func (c *Client) StepAndWait(threadID int) (debugapi.Event, error) {
 	}
 
 	if err := c.send(command); err != nil {
-		return debugapi.Event{}, fmt.Errorf("send error: %v", err)
+		return Event{}, fmt.Errorf("send error: %v", err)
 	}
 
 	event, err := c.wait()
 	if err != nil {
-		return debugapi.Event{}, err
-	} else if event.Type != debugapi.EventTypeTrapped {
-		return debugapi.Event{}, fmt.Errorf("unexpected event: %#v", event)
-	} else if tids := event.Data.([]int); len(tids) != 1 || tids[0] != threadID {
-		return debugapi.Event{}, debugapi.UnspecifiedThreadError{ThreadIDs: tids}
+		return Event{}, err
+	} else if event.Type != EventTypeTrapped {
+		return Event{}, fmt.Errorf("unexpected event: %#v", event)
+	} else if threadIDs := event.Data.([]int); len(threadIDs) != 1 || threadIDs[0] != threadID {
+		return Event{}, UnspecifiedThreadError{ThreadIDs: threadIDs}
 	}
 	return event, err
 }
 
-func (c *Client) continueAndWait(signalNumber int) (debugapi.Event, error) {
+func (c *Client) continueAndWait(signalNumber int) (Event, error) {
 	var command string
 	if signalNumber == 0 {
 		command = "vCont;c"
@@ -574,13 +573,13 @@ func (c *Client) continueAndWait(signalNumber int) (debugapi.Event, error) {
 		command = fmt.Sprintf("vCont;C%02x", signalNumber)
 	}
 	if err := c.send(command); err != nil {
-		return debugapi.Event{}, fmt.Errorf("send error: %v", err)
+		return Event{}, fmt.Errorf("send error: %v", err)
 	}
 
 	return c.wait()
 }
 
-func (c *Client) wait() (debugapi.Event, error) {
+func (c *Client) wait() (Event, error) {
 	var data string
 	var err error
 	for {
@@ -589,13 +588,13 @@ func (c *Client) wait() (debugapi.Event, error) {
 			// debugserver sometimes does not send a reply packet even when a thread is stopped.
 			data, err = c.checkStopReply()
 			if err != nil {
-				return debugapi.Event{}, fmt.Errorf("failed to query stop reply: %v", err)
+				return Event{}, fmt.Errorf("failed to query stop reply: %v", err)
 			} else if data != "" {
 				log.Debugf("debugserver did not reply packets though there is the stopped thread.")
 				break
 			}
 		} else if err != nil {
-			return debugapi.Event{}, fmt.Errorf("receive error: %v", err)
+			return Event{}, fmt.Errorf("receive error: %v", err)
 		}
 		if data != "" {
 			break
@@ -606,7 +605,7 @@ func (c *Client) wait() (debugapi.Event, error) {
 	// process O packet beforehand in order to simplify further processing.
 	stopReplies, err = c.processOutputPacket(stopReplies)
 	if err != nil {
-		return debugapi.Event{}, fmt.Errorf("failed to process output packet: %v", err)
+		return Event{}, fmt.Errorf("failed to process output packet: %v", err)
 	}
 	if len(stopReplies) == 0 {
 		return c.wait()
@@ -615,13 +614,13 @@ func (c *Client) wait() (debugapi.Event, error) {
 }
 
 func (c *Client) checkStopReply() (string, error) {
-	tids, err := c.ThreadIDs()
+	threadIDs, err := c.ThreadIDs()
 	if err != nil {
 		return "", err
 	}
 
-	for _, tid := range tids {
-		data, err := c.qThreadStopInfo(tid)
+	for _, threadID := range threadIDs {
+		data, err := c.qThreadStopInfo(threadID)
 		if err != nil {
 			return "", err
 		}
@@ -659,7 +658,7 @@ func (c *Client) processOutputPacket(stopReplies []string) ([]string, error) {
 	return unprocessedReplies, nil
 }
 
-func (c *Client) handleStopReply(stopReplies []string) (event debugapi.Event, err error) {
+func (c *Client) handleStopReply(stopReplies []string) (event Event, err error) {
 	switch stopReplies[0][0] {
 	case 'T':
 		if len(stopReplies) > 1 {
@@ -677,23 +676,23 @@ func (c *Client) handleStopReply(stopReplies []string) (event debugapi.Event, er
 	}
 	if err != nil {
 		log.Debugf("failed to handle the packet (data: %v): %v", stopReplies[0], err)
-		return debugapi.Event{}, err
+		return Event{}, err
 	}
 
-	if debugapi.IsExitEvent(event.Type) {
+	if IsExitEvent(event.Type) {
 		// the connection may be closed already.
 		_ = c.close()
 	}
 	return event, nil
 }
 
-func (c *Client) handleTPacket(packet string) (debugapi.Event, error) {
+func (c *Client) handleTPacket(packet string) (Event, error) {
 	signalNumber, err := hexToUint64(packet[1:3], false)
 	if err != nil {
-		return debugapi.Event{}, err
+		return Event{}, err
 	}
 	if syscall.Signal(signalNumber) == excBadAccess {
-		return debugapi.Event{}, fmt.Errorf("bad memory access")
+		return Event{}, fmt.Errorf("bad memory access")
 	}
 
 	var threadIDs []int
@@ -701,19 +700,19 @@ func (c *Client) handleTPacket(packet string) (debugapi.Event, error) {
 		kvArr := strings.Split(kvInStr, ":")
 		key, value := kvArr[0], kvArr[1]
 		if key == "threads" {
-			for _, tid := range strings.Split(value, ",") {
-				tidInNum, err := hexToUint64(tid, false)
+			for _, threadID := range strings.Split(value, ",") {
+				threadIDInNum, err := hexToUint64(threadID, false)
 				if err != nil {
-					return debugapi.Event{}, err
+					return Event{}, err
 				}
-				threadIDs = append(threadIDs, int(tidInNum))
+				threadIDs = append(threadIDs, int(threadIDInNum))
 			}
 		}
 	}
 
 	trappedThreadIDs, err := c.selectTrappedThreads(threadIDs)
 	if err != nil {
-		return debugapi.Event{}, err
+		return Event{}, err
 	} else if len(trappedThreadIDs) == 0 {
 		return c.continueAndWait(int(signalNumber))
 	}
@@ -723,13 +722,13 @@ func (c *Client) handleTPacket(packet string) (debugapi.Event, error) {
 		c.pendingSignal = 0
 	}
 
-	return debugapi.Event{Type: debugapi.EventTypeTrapped, Data: trappedThreadIDs}, nil
+	return Event{Type: EventTypeTrapped, Data: trappedThreadIDs}, nil
 }
 
-func (c *Client) selectTrappedThreads(tids []int) ([]int, error) {
+func (c *Client) selectTrappedThreads(threadIDs []int) ([]int, error) {
 	var trappedThreads []int
-	for _, tid := range tids {
-		data, err := c.qThreadStopInfo(tid)
+	for _, threadID := range threadIDs {
+		data, err := c.qThreadStopInfo(threadID)
 		if err != nil {
 			return nil, err
 		}
@@ -740,14 +739,14 @@ func (c *Client) selectTrappedThreads(tids []int) ([]int, error) {
 		}
 
 		if syscall.Signal(signalNumber) == unix.SIGTRAP {
-			trappedThreads = append(trappedThreads, tid)
+			trappedThreads = append(trappedThreads, threadID)
 		}
 	}
 	return trappedThreads, nil
 }
 
-func (c *Client) qThreadStopInfo(tid int) (string, error) {
-	command := fmt.Sprintf("qThreadStopInfo%02x", tid)
+func (c *Client) qThreadStopInfo(threadID int) (string, error) {
+	command := fmt.Sprintf("qThreadStopInfo%02x", threadID)
 	if err := c.send(command); err != nil {
 		return "", err
 	}
@@ -761,15 +760,15 @@ func (c *Client) qThreadStopInfo(tid int) (string, error) {
 	return data, nil
 }
 
-func (c *Client) handleWPacket(packet string) (debugapi.Event, error) {
+func (c *Client) handleWPacket(packet string) (Event, error) {
 	exitStatus, err := hexToUint64(packet[1:3], false)
-	return debugapi.Event{Type: debugapi.EventTypeExited, Data: int(exitStatus)}, err
+	return Event{Type: EventTypeExited, Data: int(exitStatus)}, err
 }
 
-func (c *Client) handleXPacket(packet string) (debugapi.Event, error) {
+func (c *Client) handleXPacket(packet string) (Event, error) {
 	signalNumber, err := hexToUint64(packet[1:3], false)
 	// TODO: signalNumber here looks always 0. The number in the description looks correct, so maybe better to use it instead.
-	return debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(signalNumber)}, err
+	return Event{Type: EventTypeTerminated, Data: int(signalNumber)}, err
 }
 
 func (c *Client) send(command string) error {

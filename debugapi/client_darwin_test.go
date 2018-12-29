@@ -1,4 +1,4 @@
-package lldb
+package debugapi
 
 import (
 	"bytes"
@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/testutils"
 	"golang.org/x/sys/unix"
 )
@@ -102,9 +101,9 @@ func TestReadRegisters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	tids := event.Data.([]int)
+	threadIDs := event.Data.([]int)
 
-	regs, err := client.ReadRegisters(tids[0])
+	regs, err := client.ReadRegisters(threadIDs[0])
 	if err != nil {
 		t.Fatalf("failed to read registers: %v", err)
 	}
@@ -124,17 +123,17 @@ func TestWriteRegisters(t *testing.T) {
 	}
 	defer client.DetachProcess()
 
-	tids, err := client.ThreadIDs()
+	threadIDs, err := client.ThreadIDs()
 	if err != nil {
 		t.Fatalf("failed to get thread ids: %v", err)
 	}
 
-	regs := debugapi.Registers{Rip: 0x1, Rsp: 0x2, Rcx: 0x3}
-	if err := client.WriteRegisters(tids[0], regs); err != nil {
+	regs := Registers{Rip: 0x1, Rsp: 0x2, Rcx: 0x3}
+	if err := client.WriteRegisters(threadIDs[0], regs); err != nil {
 		t.Fatalf("failed to write registers: %v", err)
 	}
 
-	actualRegs, _ := client.ReadRegisters(tids[0])
+	actualRegs, _ := client.ReadRegisters(threadIDs[0])
 	if actualRegs.Rip != 0x1 {
 		t.Errorf("wrong rip: %x", actualRegs.Rip)
 	}
@@ -249,10 +248,10 @@ func TestReadTLS(t *testing.T) {
 
 	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
 	event, _ := client.ContinueAndWait()
-	tids := event.Data.([]int)
+	threadIDs := event.Data.([]int)
 
 	var offset uint32 = 0xf
-	_, err = client.ReadTLS(tids[0], offset)
+	_, err = client.ReadTLS(threadIDs[0], offset)
 	if err != nil {
 		t.Fatalf("failed to read tls: %v", err)
 	}
@@ -276,14 +275,14 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 	}
 
 	event, err := client.ContinueAndWait()
-	tids := event.Data.([]int)
+	threadIDs := event.Data.([]int)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	if len(tids) == 0 {
-		t.Errorf("empty tids")
+	if len(threadIDs) == 0 {
+		t.Errorf("empty threadIDs")
 	}
-	if event.Type != debugapi.EventTypeTrapped {
+	if event.Type != EventTypeTrapped {
 		t.Errorf("wrong event type: %v", event.Type)
 	}
 }
@@ -301,7 +300,7 @@ func TestContinueAndWait_Exited(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
-		if event == (debugapi.Event{Type: debugapi.EventTypeExited, Data: 0}) {
+		if event == (Event{Type: EventTypeExited, Data: 0}) {
 			break
 		}
 	}
@@ -343,7 +342,7 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	if event != (debugapi.Event{Type: debugapi.EventTypeTerminated, Data: 0}) {
+	if event != (Event{Type: EventTypeTerminated, Data: 0}) {
 		t.Fatalf("wrong event: %v", event)
 	}
 }
@@ -358,16 +357,16 @@ func TestStepAndWait(t *testing.T) {
 	}
 	defer client.DetachProcess()
 
-	tids, err := client.ThreadIDs()
+	threadIDs, err := client.ThreadIDs()
 	if err != nil {
 		t.Fatalf("failed to get thread ids: %v", err)
 	}
 
-	event, err := client.StepAndWait(tids[0])
+	event, err := client.StepAndWait(threadIDs[0])
 	if err != nil {
 		t.Fatalf("failed to step and wait: %v", err)
 	}
-	if event.Type != debugapi.EventTypeTrapped {
+	if event.Type != EventTypeTrapped {
 		t.Fatalf("wrong event type: %v", event.Type)
 	}
 }
@@ -384,19 +383,19 @@ func TestStepAndWait_StopAtBreakpoint(t *testing.T) {
 	_ = client.ReadMemory(testutils.InfloopAddrMain, orgInsts)
 	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
 	event, _ := client.ContinueAndWait()
-	tids := event.Data.([]int)
+	threadIDs := event.Data.([]int)
 
-	regs, _ := client.ReadRegisters(tids[0])
+	regs, _ := client.ReadRegisters(threadIDs[0])
 	regs.Rip--
-	_ = client.WriteRegisters(tids[0], regs)
+	_ = client.WriteRegisters(threadIDs[0], regs)
 	_ = client.WriteMemory(testutils.InfloopAddrMain, orgInsts)
 
-	_, err = client.StepAndWait(tids[0])
+	_, err = client.StepAndWait(threadIDs[0])
 	if err != nil {
 		t.Fatalf("failed to step and wait: %v", err)
 	}
 
-	regs, _ = client.ReadRegisters(tids[0])
+	regs, _ = client.ReadRegisters(threadIDs[0])
 	if regs.Rip != uint64(testutils.InfloopAddrMain)+9 {
 		t.Errorf("wrong pc: %x", regs.Rip)
 	}
@@ -414,15 +413,15 @@ func TestStepAndWait_UnspecifiedThread(t *testing.T) {
 	_ = client.ReadMemory(testutils.InfloopAddrMain, orgInsts)
 	_ = client.WriteMemory(testutils.InfloopAddrMain, []byte{0xcc})
 	event, _ := client.ContinueAndWait()
-	tids := event.Data.([]int)
+	threadIDs := event.Data.([]int)
 
-	regs, _ := client.ReadRegisters(tids[0])
+	regs, _ := client.ReadRegisters(threadIDs[0])
 	regs.Rip--
-	_ = client.WriteRegisters(tids[0], regs)
+	_ = client.WriteRegisters(threadIDs[0], regs)
 	_ = client.WriteMemory(testutils.InfloopAddrMain, orgInsts)
 
 	_, err = client.StepAndWait(0)
-	if _, ok := err.(debugapi.UnspecifiedThreadError); !ok {
+	if _, ok := err.(UnspecifiedThreadError); !ok {
 		t.Fatalf("not UnspecifiedThreadError: %v", err)
 	}
 	fmt.Println(err)
@@ -675,12 +674,12 @@ func TestQfThreadInfo(t *testing.T) {
 
 	client := newTestClient(connForReceive, true)
 
-	tid, err := client.qfThreadInfo()
+	threadID, err := client.qfThreadInfo()
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if tid != "15296fb" {
-		t.Errorf("unexpected tid: %v", tid)
+	if threadID != "15296fb" {
+		t.Errorf("unexpected threadID: %v", threadID)
 	}
 
 	<-sendDone

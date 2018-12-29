@@ -1,6 +1,7 @@
-package os
+package debugapi
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"reflect"
@@ -8,7 +9,6 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/testutils"
 	"golang.org/x/sys/unix"
 )
@@ -38,10 +38,11 @@ func terminateProcess(pid int) {
 
 func TestLaunchProcess(t *testing.T) {
 	client := NewClient()
-	pid, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	// Do some ptrace action for testing
@@ -53,10 +54,12 @@ func TestLaunchProcess(t *testing.T) {
 
 func TestLaunchProcess_NonExistProgram(t *testing.T) {
 	client := NewClient()
-	pid, err := client.LaunchProcess("notexist")
+	err := client.LaunchProcess("notexist")
 	if err == nil {
 		t.Fatal("error is not returned")
 	}
+
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 }
 
@@ -66,6 +69,7 @@ func TestAttachProcess(t *testing.T) {
 	pid := cmd.Process.Pid
 	defer terminateProcess(pid)
 
+	fmt.Println(pid)
 	client := NewClient()
 	err := client.AttachProcess(pid)
 	if err != nil {
@@ -110,14 +114,14 @@ func TestAttachProcess_NonExistPid(t *testing.T) {
 
 func TestDetachProcess(t *testing.T) {
 	client := NewClient()
-	pid, err := client.LaunchProcess(testutils.ProgramInfloop)
+	err := client.LaunchProcess(testutils.ProgramInfloop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
-	err = client.DetachProcess(pid)
-	if err != nil {
+	if err := client.DetachProcess(); err != nil {
 		t.Fatalf("failed to detach process: %v", err)
 	}
 
@@ -130,7 +134,8 @@ func TestDetachProcess(t *testing.T) {
 
 func TestReadMemory(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
+	_ = client.LaunchProcess(testutils.ProgramInfloop)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	expected := []byte{0x64, 0x48, 0x8b}
@@ -147,7 +152,8 @@ func TestReadMemory(t *testing.T) {
 
 func TestWriteMemory(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
+	_ = client.LaunchProcess(testutils.ProgramInfloop)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	softwareBreakpoint := []byte{0xcc}
@@ -159,7 +165,8 @@ func TestWriteMemory(t *testing.T) {
 
 func TestReadRegisters(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
+	_ = client.LaunchProcess(testutils.ProgramInfloop)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	regs, err := client.ReadRegisters(pid)
@@ -174,7 +181,8 @@ func TestReadRegisters(t *testing.T) {
 
 func TestWriteRegisters(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
+	_ = client.LaunchProcess(testutils.ProgramInfloop)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	regs, _ := client.ReadRegisters(pid)
@@ -187,7 +195,8 @@ func TestWriteRegisters(t *testing.T) {
 
 func TestContinueAndWait_Trapped(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
+	_ = client.LaunchProcess(testutils.ProgramInfloop)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	_ = client.WriteMemory(pid, uintptr(testutils.InfloopAddrMain), []byte{0xcc})
@@ -195,7 +204,7 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	if event.Type != debugapi.EventTypeTrapped {
+	if event.Type != EventTypeTrapped {
 		t.Fatalf("unexpected event: %#v", event.Type)
 	}
 	stoppedPID := event.Data.([]int)
@@ -206,7 +215,8 @@ func TestContinueAndWait_Trapped(t *testing.T) {
 
 func TestContinueAndWait_Exited(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
+	_ = client.LaunchProcess(testutils.ProgramHelloworld)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	wpid := pid
@@ -215,7 +225,7 @@ func TestContinueAndWait_Exited(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
-		if event.Type == debugapi.EventTypeExited {
+		if event.Type == EventTypeExited {
 			break
 		}
 		wpid = event.Data.([]int)[0]
@@ -224,7 +234,8 @@ func TestContinueAndWait_Exited(t *testing.T) {
 
 func TestContinueAndWait_Signaled(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
+	_ = client.LaunchProcess(testutils.ProgramHelloworld)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -234,7 +245,7 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	expectedEvent := debugapi.Event{Type: debugapi.EventTypeTerminated, Data: int(unix.SIGTERM)}
+	expectedEvent := Event{Type: EventTypeTerminated, Data: int(unix.SIGTERM)}
 	if event != expectedEvent {
 		t.Fatalf("unexpected event: %#v", event)
 	}
@@ -242,7 +253,8 @@ func TestContinueAndWait_Signaled(t *testing.T) {
 
 func TestContinueAndWait_Stopped(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
+	_ = client.LaunchProcess(testutils.ProgramHelloworld)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -257,7 +269,8 @@ func TestContinueAndWait_Stopped(t *testing.T) {
 
 func TestContinueAndWait_CoreDump(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
+	_ = client.LaunchProcess(testutils.ProgramHelloworld)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -267,7 +280,7 @@ func TestContinueAndWait_CoreDump(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	expectedEvent := debugapi.Event{Type: debugapi.EventTypeCoreDump}
+	expectedEvent := Event{Type: EventTypeCoreDump}
 	if event != expectedEvent {
 		t.Fatalf("unexpected event: %#v", event)
 	}
@@ -275,7 +288,8 @@ func TestContinueAndWait_CoreDump(t *testing.T) {
 
 func TestContinueAndWait_Continued(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
+	_ = client.LaunchProcess(testutils.ProgramHelloworld)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	proc, _ := os.FindProcess(pid)
@@ -289,7 +303,8 @@ func TestContinueAndWait_Continued(t *testing.T) {
 
 func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramHelloworld)
+	_ = client.LaunchProcess(testutils.ProgramHelloworld)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	pids := []int{pid}
@@ -299,12 +314,12 @@ func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
 			t.Fatalf("failed to continue and wait: %v", err)
 		}
 
-		if event.Type == debugapi.EventTypeExited {
+		if event.Type == EventTypeExited {
 			break
 		}
 
 		switch event.Type {
-		case debugapi.EventTypeExited:
+		case EventTypeExited:
 			pids = nil
 		default:
 			pids = event.Data.([]int)
@@ -314,14 +329,15 @@ func TestContinueAndWait_WaitAllChildrenExit(t *testing.T) {
 
 func TestStepAndWait(t *testing.T) {
 	client := NewClient()
-	pid, _ := client.LaunchProcess(testutils.ProgramInfloop)
+	_ = client.LaunchProcess(testutils.ProgramInfloop)
+	pid := client.tracingThreadIDs[0]
 	defer terminateProcess(pid)
 
 	event, err := client.StepAndWait(pid)
 	if err != nil {
 		t.Fatalf("failed to continue and wait: %v", err)
 	}
-	if event.Type != debugapi.EventTypeTrapped {
+	if event.Type != EventTypeTrapped {
 		t.Fatalf("unexpected event type: %v", event.Type)
 	}
 	stoppedPID := event.Data.([]int)[0]

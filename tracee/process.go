@@ -7,7 +7,6 @@ import (
 	"runtime"
 
 	"github.com/ks888/tgo/debugapi"
-	"github.com/ks888/tgo/debugapi/lldb"
 	"github.com/ks888/tgo/log"
 	"golang.org/x/arch/x86/x86asm"
 )
@@ -21,7 +20,7 @@ type breakpoint struct {
 
 // Process represents the tracee process launched by or attached to this tracer.
 type Process struct {
-	debugapiClient *lldb.Client
+	debugapiClient *debugapi.Client
 	breakpoints    map[uint64]breakpoint
 	Binary         BinaryFile
 	GoVersion      GoVersion
@@ -41,7 +40,7 @@ type StackFrame struct {
 
 // LaunchProcess launches new tracee process.
 func LaunchProcess(name string, arg ...string) (*Process, error) {
-	debugapiClient := lldb.NewClient()
+	debugapiClient := debugapi.NewClient()
 	if err := debugapiClient.LaunchProcess(name, arg...); err != nil {
 		return nil, err
 	}
@@ -55,7 +54,7 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 
 // AttachProcess attaches to the existing tracee process.
 func AttachProcess(pid int, programPath, goVersion string) (*Process, error) {
-	debugapiClient := lldb.NewClient()
+	debugapiClient := debugapi.NewClient()
 	err := debugapiClient.AttachProcess(pid)
 	if err != nil {
 		return nil, err
@@ -68,7 +67,7 @@ func AttachProcess(pid int, programPath, goVersion string) (*Process, error) {
 	return proc, err
 }
 
-func newProcess(debugapiClient *lldb.Client, programPath, rawGoVersion string) (*Process, error) {
+func newProcess(debugapiClient *debugapi.Client, programPath, rawGoVersion string) (*Process, error) {
 	proc := &Process{debugapiClient: debugapiClient, breakpoints: make(map[uint64]breakpoint)}
 
 	proc.GoVersion = ParseGoVersion(rawGoVersion)

@@ -1,24 +1,24 @@
 package debugapi
 
-import "fmt"
+import (
+	"fmt"
+)
 
-// WIP interface.
-// The thread id is exposed, because it's strange if registers can be read or changed without specifying the thread id.
+// client is the client interface to control the tracee process.
+// It's still unstable and so do not export it.
 type client interface {
 	// LaunchProcess launches the new prcoess.
-	// When returned, the process is stopped at the beginning of the program.
-	LaunchProcess(name string, arg ...string) (tid int, err error)
+	LaunchProcess(name string, arg ...string) error
 	// AttachProcess attaches to the existing process.
-	// When returned, the process is stopped.
-	AttachProcess(pid int) (tid int, err error)
-	DetachProcess()
-	ReadMemory()
-	WriteMemory()
-	ReadRegisters()
-	WriteRegisters()
+	AttachProcess(pid int) error
+	DetachProcess() error
+	ReadMemory(addr uint64, out []byte) error
+	WriteMemory(addr uint64, data []byte) error
+	ReadRegisters(threadID int) (Registers, error)
+	WriteRegisters(threadID int, regs Registers) error
 	ReadTLS(offset uint64) (value uint64)
-	ContinueAndWait()
-	StepAndWait()
+	ContinueAndWait() (Event, error)
+	StepAndWait(threadID int) (Event, error)
 }
 
 // EventType represents the type of the event.
