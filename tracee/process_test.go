@@ -2,7 +2,6 @@ package tracee
 
 import (
 	"debug/dwarf"
-	"fmt"
 	"os/exec"
 	"runtime"
 	"testing"
@@ -317,11 +316,15 @@ func TestReadInstructions(t *testing.T) {
 	for _, testdata := range []struct {
 		program  string
 		funcAddr uint64
+		targetOS string // specify if the func is not available in some OSes. Keep it empty otherwise.
 	}{
-		{testutils.ProgramHelloworld, testutils.HelloworldAddrMain},
-		{testutils.ProgramHelloworldNoDwarf, testutils.HelloworldAddrMain}, // includes the last 0xcc insts
-		{testutils.ProgramHelloworld, 0x1001000},                           // includes bad insts
+		{testutils.ProgramHelloworld, testutils.HelloworldAddrMain, ""},
+		{testutils.ProgramHelloworldNoDwarf, testutils.HelloworldAddrMain, ""},     // includes the last 0xcc insts
+		{testutils.ProgramHelloworld, testutils.HelloworldAddrGoBuildID, "darwin"}, // includes bad insts
 	} {
+		if testdata.targetOS != "" && testdata.targetOS != runtime.GOOS {
+			continue
+		}
 		proc, err := LaunchProcess(testdata.program)
 		if err != nil {
 			t.Fatalf("failed to launch process: %v", err)
@@ -344,49 +347,48 @@ func TestReadInstructions(t *testing.T) {
 }
 
 func TestCurrentGoRoutineInfo(t *testing.T) {
-	for _, testProgram := range []string{testutils.ProgramHelloworld, testutils.ProgramHelloworldNoDwarf} {
+	for i, testProgram := range []string{testutils.ProgramHelloworld, testutils.ProgramHelloworldNoDwarf} {
 		proc, err := LaunchProcess(testProgram)
 		if err != nil {
-			t.Fatalf("failed to launch process: %v", err)
+			t.Fatalf("[%d] failed to launch process: %v", i, err)
 		}
 		defer proc.Detach()
 
 		if err := proc.SetBreakpoint(testutils.HelloworldAddrMain); err != nil {
-			t.Fatalf("failed to set breakpoint: %v", err)
+			t.Fatalf("[%d] failed to set breakpoint: %v", i, err)
 		}
 
 		event, err := proc.ContinueAndWait()
 		if err != nil {
-			t.Fatalf("failed to continue and wait: %v", err)
+			t.Fatalf("[%d] failed to continue and wait: %v", i, err)
 		}
 
-		tids := event.Data.([]int)
-		goRoutineInfo, err := proc.CurrentGoRoutineInfo(tids[0])
+		threadIDs := event.Data.([]int)
+		goRoutineInfo, err := proc.CurrentGoRoutineInfo(threadIDs[0])
 		if err != nil {
-			t.Fatalf("error: %v", err)
+			t.Fatalf("[%d] error: %v", i, err)
 		}
 		if goRoutineInfo.ID != 1 {
-			t.Errorf("wrong id: %d", goRoutineInfo.ID)
+			t.Errorf("[%d] wrong id: %d", i, goRoutineInfo.ID)
 		}
 		if goRoutineInfo.UsedStackSize == 0 {
-			t.Errorf("wrong stack size: %d", goRoutineInfo.UsedStackSize)
+			t.Errorf("[%d] wrong stack size: %d", i, goRoutineInfo.UsedStackSize)
 		}
 		if goRoutineInfo.CurrentPC != testutils.HelloworldAddrMain+1 {
-			t.Errorf("empty return address: %d", goRoutineInfo.CurrentPC)
+			t.Errorf("[%d] wrong pc: %d", i, goRoutineInfo.CurrentPC)
 		}
 		if goRoutineInfo.CurrentStackAddr == 0 {
-			t.Errorf("current stack address is 0")
+			t.Errorf("[%d] current stack address is 0", i)
 		}
 		if goRoutineInfo.NextDeferFuncAddr == 0 {
-			t.Errorf("NextDeferFuncAddr is 0")
+			t.Errorf("[%d] NextDeferFuncAddr is 0", i)
 		}
-		fmt.Printf("%#v\n", goRoutineInfo.NextDeferFuncAddr)
 		if goRoutineInfo.Panicking {
-			t.Errorf("panicking")
+			t.Errorf("[%d] panicking", i)
 		}
 		// main go routine always has 'defer' setting. See runtime.main() for the detail.
 		if goRoutineInfo.PanicHandler == nil || goRoutineInfo.PanicHandler.PCAtDefer == 0 || goRoutineInfo.PanicHandler.UsedStackSizeAtDefer == 0 {
-			t.Errorf("deferedBy is nil or its value is 0")
+			t.Errorf("[%d] deferedBy is nil or its value is 0", i)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package debugapi
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/ks888/tgo/log"
 	"golang.org/x/sys/unix"
 )
 
@@ -76,7 +78,7 @@ func (c *Client) WriteRegisters(threadID int, regs Registers) (err error) {
 	return
 }
 
-func (c *Client) ReadTLS(threadID int, offset uint32) (addr uint64, err error) {
+func (c *Client) ReadTLS(threadID int, offset int32) (addr uint64, err error) {
 	c.reqCh <- func() { addr, err = c.raw.ReadTLS(threadID, offset) }
 	_ = <-c.doneCh
 	return
@@ -161,25 +163,35 @@ func (c *rawClient) waitAndInitialize(pid int) error {
 
 // DetachProcess detaches from the process.
 func (c *rawClient) DetachProcess() error {
+	// detach the processes even when we will kill them soon, because
+	// next wait call may receive the terminated event of these processes.
+	for _, pid := range c.tracingThreadIDs {
+		if err := unix.PtraceDetach(pid); err != nil {
+			// the process may have exited already
+			log.Debugf("failed to detach %d: %v", pid, err)
+		}
+	}
+
 	if c.killOnDetach {
 		return c.killProcess()
 	}
 
-	for _, pid := range c.tracingThreadIDs {
-		if err := unix.PtraceDetach(pid); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
 func (c *rawClient) killProcess() error {
-	proc, err := os.FindProcess(c.tracingProcessID)
-	if err != nil {
-		return err
-	}
+	// it may be exited already
+	proc, _ := os.FindProcess(c.tracingProcessID)
+	_ = proc.Kill()
 
-	return proc.Kill()
+	// We can't simply call proc.Wait, since it will hang when the thread leader exits while there are still subthreads.
+	// By calling wait4 like below, it reaps the subthreads first and then reaps the thread leader.
+	var status unix.WaitStatus
+	for {
+		if wpid, err := unix.Wait4(-1, &status, 0, nil); err != nil || wpid == c.tracingProcessID {
+			return err
+		}
+	}
 }
 
 // ReadMemory reads the specified memory region in the prcoess.
@@ -190,7 +202,7 @@ func (c *rawClient) ReadMemory(addr uint64, out []byte) error {
 
 	count, err := unix.PtracePeekData(c.trappedThreadIDs[0], uintptr(addr), out)
 	if count != len(out) {
-		return fmt.Errorf("the number of data read is invalid: %d", count)
+		return fmt.Errorf("the number of data read is invalid: expect: %d, actual %d", len(out), count)
 	}
 	return err
 }
@@ -198,12 +210,12 @@ func (c *rawClient) ReadMemory(addr uint64, out []byte) error {
 // WriteMemory write the data to the specified memory region in the prcoess.
 func (c *rawClient) WriteMemory(addr uint64, data []byte) error {
 	if len(c.trappedThreadIDs) == 0 {
-		return errors.New("failed to read memory: currently no trapped threads")
+		return errors.New("failed to write memory: currently no trapped threads")
 	}
 
 	count, err := unix.PtracePokeData(c.trappedThreadIDs[0], uintptr(addr), data)
 	if count != len(data) {
-		return fmt.Errorf("the number of data written is invalid: %d", count)
+		return fmt.Errorf("the number of data written is invalid: expect: %d, actual %d", len(data), count)
 	}
 	return err
 }
@@ -235,13 +247,17 @@ func (c *rawClient) WriteRegisters(threadID int, regs Registers) error {
 }
 
 // ReadTLS reads the offset from the beginning of the TLS block.
-func (c *rawClient) ReadTLS(threadID int, offset uint32) (uint64, error) {
+func (c *rawClient) ReadTLS(threadID int, offset int32) (uint64, error) {
 	var rawRegs unix.PtraceRegs
 	if err := unix.PtraceGetRegs(threadID, &rawRegs); err != nil {
 		return 0, err
 	}
 
-	return rawRegs.Fs_base + uint64(offset), nil
+	buff := make([]byte, 8)
+	if err := c.ReadMemory(rawRegs.Fs_base+uint64(offset), buff); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint64(buff), nil
 }
 
 // ContinueAndWait resumes the list of processes and waits until an event happens.
@@ -257,7 +273,13 @@ func (c *rawClient) continueAndWait(sig int) (Event, error) {
 	}
 	c.trappedThreadIDs = nil
 
-	return c.wait()
+	var status unix.WaitStatus
+	waitedThreadID, err := unix.Wait4(-1 /* any tracing thread */, &status, 0, nil)
+	if err != nil {
+		return Event{}, err
+	}
+
+	return c.handleWaitStatus(status, waitedThreadID)
 }
 
 // StepAndWait executes the single instruction of the specified process and waits until an event happens.
@@ -273,30 +295,29 @@ func (c *rawClient) StepAndWait(threadID int) (Event, error) {
 		}
 	}
 
-	return c.wait()
-}
-
-func (c *rawClient) wait() (Event, error) {
 	var status unix.WaitStatus
-	waitedThreadID, err := unix.Wait4(-1 /* any thread */, &status, 0, nil)
+	waitedThreadID, err := unix.Wait4(threadID, &status, unix.WNOTHREAD, nil)
 	if err != nil {
 		return Event{}, err
 	}
 
-	var event Event
+	return c.handleWaitStatus(status, waitedThreadID)
+}
+
+func (c *rawClient) handleWaitStatus(status unix.WaitStatus, threadID int) (event Event, err error) {
 	if status.Stopped() {
-		c.trappedThreadIDs = append(c.trappedThreadIDs, waitedThreadID)
+		c.trappedThreadIDs = append(c.trappedThreadIDs, threadID)
 
 		if status.StopSignal() == unix.SIGTRAP {
 			if status.TrapCause() == unix.PTRACE_EVENT_CLONE {
-				_, err := c.continueClone(waitedThreadID)
+				_, err := c.continueClone(threadID)
 				if err != nil {
 					return Event{}, err
 				}
 				return c.continueAndWait(0)
 			}
 
-			event = Event{Type: EventTypeTrapped, Data: []int{waitedThreadID}}
+			event = Event{Type: EventTypeTrapped, Data: []int{threadID}}
 		} else {
 			return c.continueAndWait(int(status.StopSignal()))
 		}

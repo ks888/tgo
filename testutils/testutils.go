@@ -27,6 +27,7 @@ var (
 	HelloworldAddrTwoParameters           uint64
 	HelloworldAddrFuncWithAbstractOrigin  uint64 // any function which corresponding DIE has the DW_AT_abstract_origin attribute.
 	HelloworldAddrFmtPrintln              uint64
+	HelloworldAddrGoBuildID               uint64
 
 	ProgramInfloop  string
 	InfloopAddrMain uint64
@@ -143,6 +144,8 @@ func buildProgramHelloworld(srcDirname string) error {
 			HelloworldAddrFmtPrintln = value
 		case "reflect.Value.Kind":
 			HelloworldAddrFuncWithAbstractOrigin = value
+		case "go.buildid":
+			HelloworldAddrGoBuildID = value
 		}
 		return nil
 	}

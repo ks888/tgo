@@ -109,7 +109,8 @@ func (p *Process) mapRuntimeType(runtimeTypeAddr uint64) (dwarf.Type, error) {
 func (p *Process) Detach() error {
 	for breakpointAddr := range p.breakpoints {
 		if err := p.ClearBreakpoint(breakpointAddr); err != nil {
-			return err
+			// the process may have exited already
+			log.Debugf("failed to clear breakpoint at %#x: %v", breakpointAddr, err)
 		}
 	}
 
@@ -609,14 +610,6 @@ func (p *Process) CurrentGoRoutineInfo(threadID int) (GoRoutineInfo, error) {
 	}
 
 	return GoRoutineInfo{ID: id, UsedStackSize: usedStackSize, CurrentPC: regs.Rip, CurrentStackAddr: regs.Rsp, NextDeferFuncAddr: nextDeferFuncAddr, Panicking: panicking, PanicHandler: panicHandler}, nil
-}
-
-// TODO: depend on os
-func (p *Process) offsetToG() uint32 {
-	if p.GoVersion.LaterThan(GoVersion{MajorVersion: 1, MinorVersion: 11}) {
-		return 0x30
-	}
-	return 0x8a0
 }
 
 func (p *Process) singleStepUnspecifiedThreads(threadID int, err debugapi.UnspecifiedThreadError) error {

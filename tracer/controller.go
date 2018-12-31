@@ -154,7 +154,7 @@ func (c *Controller) SetParseLevel(level int) {
 // MainLoop repeatedly lets the tracee continue and then wait an event. It returns ErrInterrupted error if
 // the trace ends due to the interrupt.
 func (c *Controller) MainLoop() error {
-	defer func() { _ = c.process.Detach() }() // the connection status is unknown at this point
+	defer c.process.Detach() // the connection status is unknown at this point
 
 	event, err := c.continueAndWait()
 	if err == ErrInterrupted {
@@ -236,7 +236,7 @@ func (c *Controller) handleTrapEvent(trappedThreadIDs []int) (debugapi.Event, er
 	for i := 0; i < len(trappedThreadIDs); i++ {
 		threadID := trappedThreadIDs[i]
 		if err := c.handleTrapEventOfThread(threadID); err != nil {
-			return debugapi.Event{}, err
+			return debugapi.Event{}, fmt.Errorf("failed to handle trap event (thread id: %d): %v", threadID, err)
 		}
 	}
 

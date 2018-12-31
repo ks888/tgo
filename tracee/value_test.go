@@ -175,7 +175,7 @@ func TestParseValue_NotFixedStringCase(t *testing.T) {
 		}
 		f, err := proc.Binary.FindFunction(testdata.funcAddr)
 		if err != nil {
-			t.Fatalf("failed to FindFunction: %v", err)
+			t.Fatalf("failed to findFunction: %v", err)
 		}
 
 		typ := f.Parameters[0].Typ

@@ -484,8 +484,8 @@ func (c *Client) WriteMemory(addr uint64, data []byte) error {
 }
 
 // ReadTLS reads the offset from the beginning of the TLS block.
-func (c *Client) ReadTLS(threadID int, offset uint32) (uint64, error) {
-	if err := c.updateReadTLSFunction(offset); err != nil {
+func (c *Client) ReadTLS(threadID int, offset int32) (uint64, error) {
+	if err := c.updateReadTLSFunction(uint32(offset)); err != nil {
 		return 0, err
 	}
 

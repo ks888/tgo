@@ -16,7 +16,7 @@ type client interface {
 	WriteMemory(addr uint64, data []byte) error
 	ReadRegisters(threadID int) (Registers, error)
 	WriteRegisters(threadID int, regs Registers) error
-	ReadTLS(threadID int, offset uint32) (uint64, error)
+	ReadTLS(threadID int, offset int32) (uint64, error)
 	ContinueAndWait() (Event, error)
 	StepAndWait(threadID int) (Event, error)
 }
