@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 func inc(input, output chan int) {
 	val := <-input
@@ -20,4 +23,7 @@ func main() {
 	chans[0] <- 0
 	val := <-chans[len(chans)-1]
 	fmt.Println(val)
+
+	// the main go routine may exit before all go routines created above exit and tracing ends.
+	time.Sleep(100 * time.Millisecond)
 }

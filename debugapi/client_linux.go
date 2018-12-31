@@ -201,10 +201,12 @@ func (c *rawClient) ReadMemory(addr uint64, out []byte) error {
 	}
 
 	count, err := unix.PtracePeekData(c.trappedThreadIDs[0], uintptr(addr), out)
-	if count != len(out) {
+	if err != nil {
+		return err
+	} else if count != len(out) {
 		return fmt.Errorf("the number of data read is invalid: expect: %d, actual %d", len(out), count)
 	}
-	return err
+	return nil
 }
 
 // WriteMemory write the data to the specified memory region in the prcoess.
@@ -214,10 +216,12 @@ func (c *rawClient) WriteMemory(addr uint64, data []byte) error {
 	}
 
 	count, err := unix.PtracePokeData(c.trappedThreadIDs[0], uintptr(addr), data)
-	if count != len(data) {
+	if err != nil {
+		return err
+	} else if count != len(data) {
 		return fmt.Errorf("the number of data written is invalid: expect: %d, actual %d", len(data), count)
 	}
-	return err
+	return nil
 }
 
 // ReadRegisters reads the registers of the prcoess.

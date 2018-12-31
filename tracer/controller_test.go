@@ -182,6 +182,9 @@ func TestMainLoop_GoRoutines(t *testing.T) {
 	}
 
 	output := buff.String()
+	if strings.Count(output, "runtime.chansend1") != 40 {
+		t.Errorf("unexpected output: %s", output)
+	}
 	if strings.Count(output, "runtime.chanrecv1") != 40 {
 		t.Errorf("unexpected output: %s", output)
 	}
