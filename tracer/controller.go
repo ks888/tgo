@@ -190,9 +190,6 @@ func (c *Controller) MainLoop() error {
 func (c *Controller) continueAndWait() (debugapi.Event, error) {
 	select {
 	case <-c.interruptCh:
-		if err := c.process.Detach(); err != nil {
-			return debugapi.Event{}, err
-		}
 		return debugapi.Event{}, ErrInterrupted
 	default:
 		if err := c.setPendingTracePoints(); err != nil {

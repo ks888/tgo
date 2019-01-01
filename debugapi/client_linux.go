@@ -4,9 +4,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"syscall"
 
 	"github.com/ks888/tgo/log"
@@ -129,15 +131,40 @@ func (c *rawClient) LaunchProcess(name string, arg ...string) error {
 
 // AttachProcess attaches to the process.
 func (c *rawClient) AttachProcess(pid int) error {
-	// TODO: attach existing threads with the same pid
-	if err := unix.PtraceAttach(pid); err != nil {
+	// There is a race because a new thread may be created after we get the member list and before attaching to all of them.
+	// TODO: Recheck the member list later.
+	members, err := c.threadGroupMembers(pid)
+	if err != nil {
 		return err
+	}
+
+	for _, member := range members {
+		if err := unix.PtraceAttach(member); err != nil {
+			return err
+		}
 	}
 
 	c.killOnDetach = false
 
 	// SIGSTOP signal is sent when attached.
 	return c.waitAndInitialize(pid)
+}
+
+func (c *rawClient) threadGroupMembers(pid int) ([]int, error) {
+	files, err := ioutil.ReadDir(fmt.Sprintf("/proc/%d/task", pid))
+	if err != nil {
+		return nil, err
+	}
+
+	var members []int
+	for _, f := range files {
+		pid, err := strconv.Atoi(f.Name())
+		if err != nil {
+			log.Debugf("failed to parse %s: %v", f.Name(), err)
+		}
+		members = append(members, pid)
+	}
+	return members, nil
 }
 
 func (c *rawClient) waitAndInitialize(pid int) error {

@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 	_ = os.Mkdir(outDirname, os.FileMode(0700)) // the directory may exist already
 
 	if err := build(filepath.Join(srcDirname, "..", "..", "cmd", "tgo"), filepath.Join(outDirname, "tgo")); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to build: %v", err)
+		fmt.Fprintf(os.Stderr, "failed to build: %v\n", err)
 	}
 
 	orgPath := os.Getenv("PATH")
