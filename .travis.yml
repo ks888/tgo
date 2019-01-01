@@ -11,4 +11,6 @@ matrix:
     - go: tip
 git:
   depth: false
-script: go test -v -timeout 3m ./...
+script:
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo sh -c "echo 0 > /proc/sys/kernel/yama/ptrace_scope"; fi
+  - go test -v -timeout 3m ./...
