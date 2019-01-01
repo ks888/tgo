@@ -230,7 +230,7 @@ func TestMainLoop_Panic(t *testing.T) {
 
 	output := buff.String()
 	if strings.Count(output, "main.catch") != 2 {
-		t.Errorf("wrong number of main.catch: %d", strings.Count(output, "main.catch"))
+		t.Errorf("wrong number of main.catch: %d\n%s", strings.Count(output, "main.catch"), output)
 	}
 }
 
