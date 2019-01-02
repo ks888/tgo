@@ -117,8 +117,7 @@ func init() {
 }
 
 func buildProgramHelloworld(srcDirname string) error {
-	// TODO: use filepath.Join
-	ProgramHelloworld = srcDirname + "/testdata/helloworld"
+	ProgramHelloworld = filepath.Join(srcDirname, "testdata", "helloworld")
 	if err := buildProgram(ProgramHelloworld); err != nil {
 		return err
 	}

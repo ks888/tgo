@@ -260,10 +260,104 @@ func (p *Process) StackFrameAt(rsp, rip uint64) (*StackFrame, error) {
 func (p *Process) FindFunction(pc uint64) (*Function, error) {
 	function, err := p.Binary.FindFunction(pc)
 	if err == nil {
+		function.Parameters = p.fillInParameterOffset(pc, function.Parameters)
 		return function, err
 	}
 
 	return p.findFunctionByModuleData(pc)
+}
+
+func (p *Process) fillInParameterOffset(pc uint64, params []Parameter) []Parameter {
+	if !p.canFillInSafely(pc, params) {
+		return params
+	}
+
+	fillInIndex := -1
+	for i, param := range params {
+		if !param.Exist {
+			fillInIndex = i
+			break
+		}
+	}
+
+	fillInValue := p.calculateFillInValue(params)
+	params[fillInIndex].Exist = true
+	params[fillInIndex].Offset = fillInValue
+	return params
+}
+
+func (p *Process) canFillInSafely(pc uint64, params []Parameter) bool {
+	numNonExistParams := 0
+	for _, param := range params {
+		if !param.Exist {
+			numNonExistParams++
+		}
+	}
+	if numNonExistParams != 1 {
+		// 0: no need to fill in.
+		// 1>: we can not fill in the parameter's location in decisive way.
+		return false
+	}
+
+	expectedArgsSize, err := p.findFunctionArgsSize(pc)
+	if err != nil {
+		log.Debugf("failed to fill in non exist parameters: %v", err)
+		return false
+	}
+
+	actualArgsSize := 0
+	for _, param := range params {
+		actualArgsSize += int(param.Typ.Size())
+	}
+	if actualArgsSize != expectedArgsSize {
+		// there may be some alignment. So it may be dangerous to fill in the parameter's location.
+		return false
+	}
+	return true
+}
+
+func (p *Process) findFunctionArgsSize(pc uint64) (int, error) {
+	md := p.findModuleDataByPC(pc)
+	if md == nil {
+		return 0, fmt.Errorf("no moduledata found for pc %#x", pc)
+	}
+
+	funcTypeVal, _, err := p.findFuncType(md, pc)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, field := range _funcType.Field {
+		if field.Name == "args" {
+			rawData := funcTypeVal[field.ByteOffset : field.ByteOffset+field.Type.Size()]
+			return int(binary.LittleEndian.Uint32(rawData)), nil
+		}
+	}
+	return 0, fmt.Errorf("failed to find args size at %#x", pc)
+}
+
+func (p *Process) calculateFillInValue(params []Parameter) int {
+	argsSize := 0
+	for _, param := range params {
+		argsSize += int(param.Typ.Size())
+	}
+
+	params = append(params, Parameter{Offset: argsSize, Exist: true} /* sentinel */)
+	for i := 0; i < len(params)-1; i++ {
+		if !params[i].Exist {
+			continue
+		}
+		j := i + 1
+		if !params[j].Exist {
+			j++
+		}
+
+		nextOffset := params[i].Offset + int(params[i].Typ.Size())
+		if nextOffset != params[j].Offset {
+			return nextOffset
+		}
+	}
+	return -1
 }
 
 var findfuncbucketType = &dwarf.StructType{
