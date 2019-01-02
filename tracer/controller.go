@@ -417,7 +417,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		return err
 	}
 
-	if currStackDepth <= c.traceLevel {
+	if currStackDepth <= c.traceLevel && c.printableFunc(stackFrame.Function) {
 		if err := c.printFunctionInput(goRoutineInfo.ID, stackFrame, currStackDepth); err != nil {
 			return err
 		}
@@ -507,7 +507,7 @@ func (c *Controller) handleTrapAfterFunctionReturn(threadID int, goRoutineInfo t
 		currStackDepth -= c.countSkippedFuncs(remainingFuncs, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
 	}
 
-	if currStackDepth <= c.traceLevel {
+	if currStackDepth <= c.traceLevel && c.printableFunc(returnedFunc) {
 		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, returnedFunc.StartAddr)
 		if err != nil {
 			return err
@@ -533,6 +533,17 @@ func (c *Controller) currentStackFrame(goRoutineInfo tracee.GoRoutineInfo) (*tra
 // It must be called at return address due to the StackFrameAt's constraint.
 func (c *Controller) prevStackFrame(goRoutineInfo tracee.GoRoutineInfo, rip uint64) (*tracee.StackFrame, error) {
 	return c.process.StackFrameAt(goRoutineInfo.CurrentStackAddr-8, rip)
+}
+
+func (c *Controller) printableFunc(f *tracee.Function) bool {
+	const runtimePkgPrefix = "runtime."
+	if strings.HasPrefix(f.Name, runtimePkgPrefix) {
+		// it may be ok to print runtime unexported functions, but
+		// these functions tend to be verbose and confusing.
+		return f.IsExported()
+	}
+
+	return true
 }
 
 func (c *Controller) printFunctionInput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {

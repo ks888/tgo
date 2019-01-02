@@ -5,9 +5,19 @@ import (
 	"time"
 )
 
+//go:noinline
+func receive(ch chan int) int {
+	return <-ch
+}
+
+//go:noinline
+func send(ch chan int, val int) {
+	ch <- val
+}
+
 func inc(input, output chan int) {
-	val := <-input
-	output <- val + 1
+	val := receive(input)
+	send(output, val+1)
 }
 
 func main() {
