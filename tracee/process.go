@@ -264,7 +264,6 @@ func (p *Process) FindFunction(pc uint64) (*Function, error) {
 	if err == nil {
 		p.fillInOutputParameters(pc, function.Parameters)
 		p.fillInUnknownParameter(pc, function.Parameters)
-		sort.Slice(function.Parameters, func(i, j int) bool { return function.Parameters[i].Offset < function.Parameters[j].Offset })
 		return function, err
 	}
 
@@ -277,6 +276,8 @@ func (p *Process) fillInOutputParameters(pc uint64, params []Parameter) {
 	}
 
 	p.doFillInOutputParameters(pc, params)
+
+	sort.Slice(params, func(i, j int) bool { return params[i].Offset < params[j].Offset })
 	return
 }
 
@@ -334,6 +335,8 @@ func (p *Process) fillInUnknownParameter(pc uint64, params []Parameter) {
 	offset := p.calculateUnknownParameterOffset(params)
 	params[unknownParamIndex].Exist = true
 	params[unknownParamIndex].Offset = offset
+
+	sort.Slice(params, func(i, j int) bool { return params[i].Offset < params[j].Offset })
 	return
 }
 
@@ -412,7 +415,7 @@ func (p *Process) calculateUnknownParameterOffset(params []Parameter) int {
 			return nextOffset
 		}
 	}
-	return -1
+	return 0
 }
 
 var findfuncbucketType = &dwarf.StructType{
@@ -493,13 +496,16 @@ func (p *Process) findFunctionByModuleData(pc uint64) (*Function, error) {
 	}
 
 	numParams := int(args) / 8 // the actual number of params is unknown. Assumes the each parameter has 1 ptr size.
-	params := make([]Parameter, numParams)
+	params := make([]Parameter, 0, numParams*2)
 	for i := 0; i < numParams; i++ {
-		params[i] = Parameter{
+		param := Parameter{
 			Typ:    &dwarf.PtrType{CommonType: dwarf.CommonType{ByteSize: 8}, Type: &dwarf.VoidType{}},
 			Offset: i * 8,
 			Exist:  true,
 		}
+		params = append(params, param)
+		param.IsOutput = true
+		params = append(params, param)
 	}
 
 	return &Function{Name: funcName, StartAddr: entry, EndAddr: endAddr, Parameters: params}, nil

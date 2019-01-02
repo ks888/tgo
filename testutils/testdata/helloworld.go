@@ -12,7 +12,7 @@ func noParameter() {
 
 //go:noinline
 func oneParameter(s []int) []int {
-	s2 := []int{}
+	s2 := []int{2}
 	return append(s, s2...)
 }
 
@@ -37,7 +37,7 @@ func twoReturns() (int, int) {
 
 func main() {
 	noParameter()
-	oneParameter([]int{})
+	oneParameter([]int{1})
 	oneParameterAndOneVariable(1)
 	twoParameters(1, 1)
 	_, _ = twoReturns()

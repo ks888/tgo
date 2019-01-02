@@ -231,46 +231,57 @@ func TestStackFrameAt_NoDwarfCase(t *testing.T) {
 	if stackFrame.Function.EndAddr == 0 {
 		t.Errorf("end addr is 0")
 	}
-	if len(stackFrame.Function.Parameters) != 1 {
+	if len(stackFrame.Function.Parameters) != 2 {
 		t.Errorf("wrong number of params")
+	}
+	if stackFrame.Function.Parameters[0].IsOutput {
+		t.Errorf("should be input parameter")
+	}
+	if !stackFrame.Function.Parameters[1].IsOutput {
+		t.Errorf("should be output parameter")
 	}
 }
 
 func TestFindFunction_FillInOneUnknownParameterOffset(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworld)
-	if err != nil {
-		t.Fatalf("failed to launch process: %v", err)
-	}
-	defer proc.Detach()
-
-	if err := proc.SetBreakpoint(testutils.HelloworldAddrMain); err != nil {
-		t.Fatalf("failed to set breakpoint: %v", err)
-	}
-
-	if _, err := proc.ContinueAndWait(); err != nil {
-		t.Fatalf("failed to continue and wait: %v", err)
-	}
-
-	f, err := proc.FindFunction(testutils.HelloworldAddrOneParameter)
-	if err != nil {
-		t.Fatalf("failed to find func: %v", err)
-	}
-
-	numNotExist := 0
-	numOffset0 := 0
-	for _, param := range f.Parameters {
-		if !param.Exist {
-			numNotExist++
+	for _, testdata := range []uint64{
+		testutils.HelloworldAddrOneParameter,
+		testutils.HelloworldAddrFmtPrintln,
+	} {
+		proc, err := LaunchProcess(testutils.ProgramHelloworld)
+		if err != nil {
+			t.Fatalf("failed to launch process: %v", err)
 		}
-		if param.Offset == 0 {
-			numOffset0++
+		defer proc.Detach()
+
+		if err := proc.SetBreakpoint(testutils.HelloworldAddrMain); err != nil {
+			t.Fatalf("failed to set breakpoint: %v", err)
 		}
-	}
-	if numNotExist == 1 {
-		t.Errorf("The number of NonExist parameter is 1, params: %#v", f.Parameters)
-	}
-	if numOffset0 != 1 {
-		t.Errorf("The number of offset 0 parameter is %d, params: %#v", numOffset0, f.Parameters)
+
+		if _, err := proc.ContinueAndWait(); err != nil {
+			t.Fatalf("failed to continue and wait: %v", err)
+		}
+
+		f, err := proc.FindFunction(testdata)
+		if err != nil {
+			t.Fatalf("failed to find func: %v", err)
+		}
+
+		numNotExist := 0
+		numOffset0 := 0
+		for _, param := range f.Parameters {
+			if !param.Exist {
+				numNotExist++
+			}
+			if param.Offset == 0 {
+				numOffset0++
+			}
+		}
+		if numNotExist == 1 {
+			t.Errorf("The number of NonExist parameter is 1, params: %#v", f.Parameters)
+		}
+		if numOffset0 != 1 {
+			t.Errorf("The number of offset 0 parameter is %d, params: %#v", numOffset0, f.Parameters)
+		}
 	}
 }
 
