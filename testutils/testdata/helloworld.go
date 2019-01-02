@@ -30,9 +30,15 @@ func twoParameters(j, i int) { // intentionally inverse
 	fmt.Println(i, a)
 }
 
+//go:noinline
+func twoReturns() (int, int) {
+	return rand.Int(), rand.Int()
+}
+
 func main() {
 	noParameter()
 	oneParameter([]int{})
 	oneParameterAndOneVariable(1)
 	twoParameters(1, 1)
+	_, _ = twoReturns()
 }

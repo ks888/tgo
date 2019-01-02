@@ -26,6 +26,7 @@ var (
 	HelloworldAddrOneParameterAndVariable uint64
 	HelloworldAddrTwoParameters           uint64
 	HelloworldAddrFuncWithAbstractOrigin  uint64 // any function which corresponding DIE has the DW_AT_abstract_origin attribute.
+	HelloworldAddrTwoReturns              uint64
 	HelloworldAddrFmtPrintln              uint64
 	HelloworldAddrGoBuildID               uint64
 
@@ -139,6 +140,8 @@ func buildProgramHelloworld(srcDirname string) error {
 			HelloworldAddrNoParameter = value
 		case "main.twoParameters":
 			HelloworldAddrTwoParameters = value
+		case "main.twoReturns":
+			HelloworldAddrTwoReturns = value
 		case "fmt.Println":
 			HelloworldAddrFmtPrintln = value
 		case "reflect.Value.Kind":

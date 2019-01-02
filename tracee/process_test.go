@@ -236,7 +236,7 @@ func TestStackFrameAt_NoDwarfCase(t *testing.T) {
 	}
 }
 
-func TestFindFunction_FillInCheck(t *testing.T) {
+func TestFindFunction_FillInOneUnknownParameterOffset(t *testing.T) {
 	proc, err := LaunchProcess(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -271,6 +271,34 @@ func TestFindFunction_FillInCheck(t *testing.T) {
 	}
 	if numOffset0 != 1 {
 		t.Errorf("The number of offset 0 parameter is %d, params: %#v", numOffset0, f.Parameters)
+	}
+}
+
+func TestFindFunction_FillInOutputParametersOffset(t *testing.T) {
+	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	defer proc.Detach()
+
+	if err := proc.SetBreakpoint(testutils.HelloworldAddrMain); err != nil {
+		t.Fatalf("failed to set breakpoint: %v", err)
+	}
+
+	if _, err := proc.ContinueAndWait(); err != nil {
+		t.Fatalf("failed to continue and wait: %v", err)
+	}
+
+	f, err := proc.FindFunction(testutils.HelloworldAddrTwoReturns)
+	if err != nil {
+		t.Fatalf("failed to find func: %v", err)
+	}
+
+	if !f.Parameters[0].Exist || f.Parameters[0].Offset != 0 || f.Parameters[0].Name != "~r0" {
+		t.Errorf("Invalid parameter: %#v", f.Parameters[0])
+	}
+	if !f.Parameters[1].Exist || f.Parameters[1].Offset != 8 || f.Parameters[1].Name != "~r1" {
+		t.Errorf("Invalid parameter: %#v", f.Parameters[1])
 	}
 }
 

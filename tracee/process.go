@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
+	"sort"
+	"strings"
 
 	"github.com/ks888/tgo/debugapi"
 	"github.com/ks888/tgo/log"
@@ -260,33 +262,82 @@ func (p *Process) StackFrameAt(rsp, rip uint64) (*StackFrame, error) {
 func (p *Process) FindFunction(pc uint64) (*Function, error) {
 	function, err := p.Binary.FindFunction(pc)
 	if err == nil {
-		function.Parameters = p.fillInParameterOffset(pc, function.Parameters)
+		p.fillInOutputParameters(pc, function.Parameters)
+		p.fillInUnknownParameter(pc, function.Parameters)
+		sort.Slice(function.Parameters, func(i, j int) bool { return function.Parameters[i].Offset < function.Parameters[j].Offset })
 		return function, err
 	}
 
 	return p.findFunctionByModuleData(pc)
 }
 
-func (p *Process) fillInParameterOffset(pc uint64, params []Parameter) []Parameter {
-	if !p.canFillInSafely(pc, params) {
-		return params
+func (p *Process) fillInOutputParameters(pc uint64, params []Parameter) {
+	if !p.canFillInOutputParameters(pc, params) {
+		return
 	}
 
-	fillInIndex := -1
+	p.doFillInOutputParameters(pc, params)
+	return
+}
+
+func (p *Process) canFillInOutputParameters(pc uint64, params []Parameter) bool {
+	for _, param := range params {
+		if param.IsOutput {
+			if param.Exist || !strings.HasPrefix(param.Name, "~r") {
+				return false
+			}
+		}
+	}
+
+	if !p.noPadding(pc, params) {
+		// It may be dangerous to fill in the parameter's location due to the alignment.
+		return false
+	}
+	return true
+}
+
+func (p *Process) doFillInOutputParameters(pc uint64, params []Parameter) {
+	var outputIndexes []int
+	var totalSize, totalOutputSize int
+	for i, param := range params {
+		if param.IsOutput {
+			outputIndexes = append(outputIndexes, i)
+			totalOutputSize += int(param.Typ.Size())
+		}
+		totalSize += int(param.Typ.Size())
+	}
+
+	sort.Slice(outputIndexes, func(i, j int) bool { return params[outputIndexes[i]].Name < params[outputIndexes[j]].Name })
+
+	currOffset := totalSize - totalOutputSize
+	for _, outputIndex := range outputIndexes {
+		params[outputIndex].Exist = true
+		params[outputIndex].Offset = currOffset
+		currOffset += int(params[outputIndex].Typ.Size())
+	}
+	return
+}
+
+func (p *Process) fillInUnknownParameter(pc uint64, params []Parameter) {
+	if !p.canFillInUnknownParameter(pc, params) {
+		return
+	}
+
+	unknownParamIndex := -1
 	for i, param := range params {
 		if !param.Exist {
-			fillInIndex = i
+			unknownParamIndex = i
 			break
 		}
 	}
 
-	fillInValue := p.calculateFillInValue(params)
-	params[fillInIndex].Exist = true
-	params[fillInIndex].Offset = fillInValue
-	return params
+	offset := p.calculateUnknownParameterOffset(params)
+	params[unknownParamIndex].Exist = true
+	params[unknownParamIndex].Offset = offset
+	return
 }
 
-func (p *Process) canFillInSafely(pc uint64, params []Parameter) bool {
+func (p *Process) canFillInUnknownParameter(pc uint64, params []Parameter) bool {
 	numNonExistParams := 0
 	for _, param := range params {
 		if !param.Exist {
@@ -299,9 +350,17 @@ func (p *Process) canFillInSafely(pc uint64, params []Parameter) bool {
 		return false
 	}
 
+	if !p.noPadding(pc, params) {
+		// It may be dangerous to fill in the parameter's location due to the alignment.
+		return false
+	}
+	return true
+}
+
+func (p *Process) noPadding(pc uint64, params []Parameter) bool {
 	expectedArgsSize, err := p.findFunctionArgsSize(pc)
 	if err != nil {
-		log.Debugf("failed to fill in non exist parameters: %v", err)
+		log.Debugf("failed to find function args size: %v", err)
 		return false
 	}
 
@@ -309,11 +368,7 @@ func (p *Process) canFillInSafely(pc uint64, params []Parameter) bool {
 	for _, param := range params {
 		actualArgsSize += int(param.Typ.Size())
 	}
-	if actualArgsSize != expectedArgsSize {
-		// there may be some alignment. So it may be dangerous to fill in the parameter's location.
-		return false
-	}
-	return true
+	return actualArgsSize == expectedArgsSize
 }
 
 func (p *Process) findFunctionArgsSize(pc uint64) (int, error) {
@@ -336,7 +391,7 @@ func (p *Process) findFunctionArgsSize(pc uint64) (int, error) {
 	return 0, fmt.Errorf("failed to find args size at %#x", pc)
 }
 
-func (p *Process) calculateFillInValue(params []Parameter) int {
+func (p *Process) calculateUnknownParameterOffset(params []Parameter) int {
 	argsSize := 0
 	for _, param := range params {
 		argsSize += int(param.Typ.Size())
