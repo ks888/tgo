@@ -1,11 +1,12 @@
 package tracee
 
 import (
+	"bytes"
+	"compress/zlib"
 	"debug/dwarf"
 	"debug/elf"
+	"encoding/binary"
 	"io"
-
-	"github.com/ks888/tgo/log"
 )
 
 var locationListSectionNames = []string{
@@ -46,15 +47,40 @@ func findDWARF(elfFile *elf.File) (data *dwarf.Data, locList []byte, err error) 
 	}
 	// older go version doesn't create a location list section.
 
-	if locListSection != nil {
-		locList, err = locListSection.Data()
-		if err != nil {
-			log.Debugf("failed to read location list section: %v", err)
-		}
+	locList, err = buildLocationListData(locListSection)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	data, err = elfFile.DWARF()
 	return data, locList, err
+}
+
+func buildLocationListData(locListSection *elf.Section) ([]byte, error) {
+	if locListSection == nil {
+		return nil, nil
+	}
+
+	rawData, err := locListSection.Data()
+	if err != nil {
+		return nil, err
+	}
+
+	if string(rawData[:4]) != "ZLIB" || len(rawData) < 12 {
+		return rawData, nil
+	}
+
+	dlen := binary.BigEndian.Uint64(rawData[4:12])
+	uncompressedData := make([]byte, dlen)
+
+	r, err := zlib.NewReader(bytes.NewBuffer(rawData[12:]))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	_, err = io.ReadFull(r, uncompressedData)
+	return uncompressedData, err
 }
 
 func findSymbols(elfFile *elf.File) (symbols []symbol) {
