@@ -124,6 +124,7 @@ func (c *rawClient) LaunchProcess(name string, arg ...string) error {
 	}
 
 	c.killOnDetach = true
+	c.tracingProcessID = cmd.Process.Pid
 
 	// SIGTRAP signal is sent when execve is called.
 	return c.waitAndInitialize(cmd.Process.Pid)
