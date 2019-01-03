@@ -70,7 +70,7 @@ func Start() error {
 		if err != nil {
 			_ = terminateServer()
 		}
-		return err
+		return fmt.Errorf("failed to start tracer: %v", err)
 	}
 
 	reply := &struct{}{} // sometimes the nil reply value causes panic even if the reply is not written.
@@ -83,7 +83,7 @@ func Start() error {
 func initialize(startTracePoint, endTracePoint uint64) error {
 	addr, err := startServer()
 	if err != nil {
-		return fmt.Errorf("failed to enable tracer: %v", err)
+		return err
 	}
 
 	client, err = connectServer(addr)

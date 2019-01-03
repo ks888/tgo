@@ -145,9 +145,15 @@ func (c *rawClient) AttachProcess(pid int) error {
 	}
 
 	c.killOnDetach = false
+	c.tracingProcessID = pid
 
-	// SIGSTOP signal is sent when attached.
-	return c.waitAndInitialize(pid)
+	for _, member := range members {
+		// SIGSTOP signal is sent when attached.
+		if err := c.waitAndInitialize(member); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *rawClient) threadGroupMembers(pid int) ([]int, error) {
@@ -167,9 +173,9 @@ func (c *rawClient) threadGroupMembers(pid int) ([]int, error) {
 	return members, nil
 }
 
-func (c *rawClient) waitAndInitialize(pid int) error {
+func (c *rawClient) waitAndInitialize(threadID int) error {
 	var status unix.WaitStatus
-	if _, err := unix.Wait4(pid, &status, 0, nil); err != nil {
+	if _, err := unix.Wait4(threadID, &status, 0, nil); err != nil {
 		return err
 	}
 
@@ -179,11 +185,10 @@ func (c *rawClient) waitAndInitialize(pid int) error {
 		return fmt.Errorf("unexpected signal: %s", status.StopSignal())
 	}
 
-	unix.PtraceSetOptions(pid, unix.PTRACE_O_TRACECLONE)
+	unix.PtraceSetOptions(threadID, unix.PTRACE_O_TRACECLONE)
 
-	c.tracingProcessID = pid
-	c.tracingThreadIDs = append(c.tracingThreadIDs, pid)
-	c.trappedThreadIDs = append(c.trappedThreadIDs, pid)
+	c.tracingThreadIDs = append(c.tracingThreadIDs, threadID)
+	c.trappedThreadIDs = append(c.trappedThreadIDs, threadID)
 
 	return nil
 }

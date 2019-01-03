@@ -65,11 +65,33 @@ func main() {
 
 ### Install
 
-*Note: for now, tgo only supports Mac OS X and go 1.10 or later.*
+*Note: supported go version is 1.10 or later.*
+
+#### Mac OS X
+
+Install the `tgo` binary and its library:
 
 ```
 go get -u github.com/ks888/tgo/cmd/tgo
 ```
+
+#### Linux
+
+Install the `tgo` binary and its library:
+
+```
+go get -u github.com/ks888/tgo/cmd/tgo
+```
+
+tgo depends on the ptrace mechanism and needs to attach to the non-descendant process. For this, run the command below:
+
+```
+sudo sh -c 'echo 0 > /proc/sys/kernel/yama/ptrace_scope'
+```
+
+#### Windows
+
+Not supported yet.
 
 ### Usage
 
