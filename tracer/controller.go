@@ -255,7 +255,7 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 		return c.enterTracepoint(threadID, goRoutineInfo)
 
 	} else if c.tracingPoints.IsEndAddress(breakpointAddr) {
-		return c.exitTracepoint(threadID, goRoutineInfo)
+		return c.exitTracepoint(threadID, goRoutineInfo.ID, goRoutineInfo.CurrentPC-1)
 
 	} else if !c.tracingPoints.Inside(goRoutineInfo.ID) {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
@@ -292,9 +292,7 @@ func (c *Controller) enterTracepoint(threadID int, goRoutineInfo tracee.GoRoutin
 	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 }
 
-func (c *Controller) exitTracepoint(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	goRoutineID := goRoutineInfo.ID
-
+func (c *Controller) exitTracepoint(threadID int, goRoutineID int64, breakpointAddr uint64) error {
 	if c.tracingPoints.Inside(goRoutineID) {
 		if err := c.breakpoints.ClearAllByGoRoutineID(goRoutineID); err != nil {
 			return err
@@ -303,7 +301,6 @@ func (c *Controller) exitTracepoint(threadID int, goRoutineInfo tracee.GoRoutine
 		c.tracingPoints.Exit()
 	}
 
-	breakpointAddr := goRoutineInfo.CurrentPC - 1
 	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 }
 
@@ -377,6 +374,10 @@ func (c *Controller) handleTrapBeforeFunctionCall(threadID int, goRoutineInfo tr
 	goRoutineInfo, err := c.process.CurrentGoRoutineInfo(threadID)
 	if err != nil {
 		return err
+	}
+
+	if c.tracingPoints.IsEndAddress(goRoutineInfo.CurrentPC) {
+		return c.exitTracepoint(threadID, goRoutineInfo.ID, goRoutineInfo.CurrentPC)
 	}
 
 	return c.handleTrapAtFunctionCall(threadID, goRoutineInfo)

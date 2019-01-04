@@ -7,8 +7,9 @@ import (
 )
 
 //go:noinline
-func tracedFunc() {
+func tracedFunc() []int {
 	fmt.Println("traced")
+	return nil
 }
 
 func main() {
@@ -23,12 +24,12 @@ func main() {
 		panic(err)
 	}
 
-	tracedFunc()
+	arr := tracedFunc()
+	arr = append(arr, 1)
 
 	tracer.Stop()
-	tracer.Stop() // stop again
 
-	fmt.Println("not traced")
+	fmt.Println("not traced", arr)
 
 	// start again
 	if err := tracer.Start(); err != nil {

@@ -6,8 +6,10 @@
 
 ### Example
 
-```
-% cat fib.go
+This example traces the functions called between `tracer.Start()` and `tracer.Stop()`.
+
+```golang
+% cat fibonacci.go
 package main
 
 import (
@@ -18,7 +20,7 @@ import (
 	"github.com/ks888/tgo/lib/tracer"
 )
 
-func fib(n int) (r int) {
+func fib(n int) int {
 	if n == 0 || n == 1 {
 		return n
 	}
@@ -36,28 +38,28 @@ func main() {
 
 	tracer.Stop()
 }
-% go build fib.go
-% ./fib 3
+% go build fibonacci.go
+% ./fibonacci 3
 \ (#01) main.fib(n = 3)
 |\ (#01) main.fib(n = 2)
 ||\ (#01) main.fib(n = 1)
-||/ (#01) main.fib() (r = 1)
+||/ (#01) main.fib() (~r1 = 1)
 ||\ (#01) main.fib(n = 0)
-||/ (#01) main.fib() (r = 0)
-|/ (#01) main.fib() (r = 1)
+||/ (#01) main.fib() (~r1 = 0)
+|/ (#01) main.fib() (~r1 = 1)
 |\ (#01) main.fib(n = 1)
-|/ (#01) main.fib() (r = 1)
-/ (#01) main.fib() (r = 2)
-\ (#01) fmt.Println(a = -)
+|/ (#01) main.fib() (~r1 = 1)
+/ (#01) main.fib() (~r1 = 2)
+\ (#01) fmt.Println(a = []{int(2)})
 |\ (#01) fmt.Fprintln(a = -, w = -)
 ||\ (#01) fmt.newPrinter()
-||/ (#01) fmt.newPrinter() (~r0 = -)
-||\ (#01) fmt.(*pp).doPrintln(a = -, p = &{reordered: false, goodArgNum: true, panicking: false, erroring: false, buf: {...}, arg: nil, value: {...}, fmt: {...}})
+||/ (#01) fmt.newPrinter() (~r0 = &{arg: nil, value: {...}, fmt: {...}, reordered: false, goodArgNum: false, panicking: false, erroring: false, buf: {...}})
+||\ (#01) fmt.(*pp).doPrintln(p = &{arg: nil, value: {...}, fmt: {...}, reordered: false, goodArgNum: false, panicking: false, erroring: false, buf: {...}}, a = []{int(2)})
 ||/ (#01) fmt.(*pp).doPrintln() ()
 ||\ (#01) os.(*File).Write(f = &{file: &{...}}, b = []{50, 10})
 2
 ||/ (#01) os.(*File).Write() (n = 2, err = nil)
-||\ (#01) fmt.(*pp).free(p = &{reordered: false, goodArgNum: true, panicking: false, erroring: false, buf: {...}, arg: int(2), value: {...}, fmt: {...}})
+||\ (#01) fmt.(*pp).free(p = &{arg: int(2), value: {...}, fmt: {...}, reordered: false, goodArgNum: false, panicking: false, erroring: false, buf: {...}})
 ||/ (#01) fmt.(*pp).free() ()
 |/ (#01) fmt.Fprintln() (n = 2, err = nil)
 / (#01) fmt.Println() (n = 2, err = nil)
