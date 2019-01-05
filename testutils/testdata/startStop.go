@@ -19,6 +19,8 @@ func main() {
 		panic(err)
 	}
 
+	fmt.Println("traced")
+
 	// start again (should be no-op)
 	if err := tracer.Start(); err != nil {
 		panic(err)

@@ -26,6 +26,7 @@ const (
 	breakpointTypeCall
 	breakpointTypeDeferredFunc
 	breakpointTypeReturn
+	breakpointTypeReturnAndCall
 )
 
 // Controller controls the associated tracee process.
@@ -251,18 +252,24 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 
-	if c.tracingPoints.IsStartAddress(breakpointAddr) {
-		return c.enterTracepoint(threadID, goRoutineInfo)
-
-	} else if c.tracingPoints.IsEndAddress(breakpointAddr) {
-		return c.exitTracepoint(threadID, goRoutineInfo.ID, goRoutineInfo.CurrentPC-1)
-
-	} else if !c.tracingPoints.Inside(goRoutineInfo.ID) {
+	if !c.tracingPoints.Inside(goRoutineInfo.ID) {
+		if c.tracingPoints.IsStartAddress(breakpointAddr) {
+			return c.enterTracepoint(threadID, goRoutineInfo)
+		}
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 
+	if c.tracingPoints.IsEndAddress(breakpointAddr) {
+		return c.exitTracepoint(threadID, goRoutineInfo.ID, goRoutineInfo.CurrentPC-1)
+	} else if c.tracingPoints.IsStartAddress(breakpointAddr) {
+		// the tracing point may be used as the break point as well. If not, return here.
+		if _, ok := c.breakpointTypes[breakpointAddr]; !ok {
+			return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
+		}
+	}
+
 	switch c.breakpointTypes[breakpointAddr] {
-	case breakpointTypeCall:
+	case breakpointTypeCall, breakpointTypeReturnAndCall:
 		return c.handleTrapBeforeFunctionCall(threadID, goRoutineInfo)
 	case breakpointTypeDeferredFunc:
 		return c.handleTrapAtDeferredFuncCall(threadID, goRoutineInfo)
@@ -366,12 +373,20 @@ func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, breakpointAdd
 }
 
 func (c *Controller) handleTrapBeforeFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	if err := c.process.SingleStep(threadID, goRoutineInfo.CurrentPC-1); err != nil {
+	breakpointAddr := goRoutineInfo.CurrentPC - 1
+
+	var err error
+	if c.breakpointTypes[breakpointAddr] == breakpointTypeReturnAndCall {
+		err = c.handleTrapAfterFunctionReturn(threadID, goRoutineInfo)
+	} else {
+		err = c.process.SingleStep(threadID, breakpointAddr)
+	}
+	if err != nil {
 		return err
 	}
 
 	// Now the go routine jumped to the beginning of the function.
-	goRoutineInfo, err := c.process.CurrentGoRoutineInfo(threadID)
+	goRoutineInfo, err = c.process.CurrentGoRoutineInfo(threadID)
 	if err != nil {
 		return err
 	}
@@ -479,7 +494,11 @@ func (c *Controller) appendFunction(callingFuncs []callingFunction, newFunc call
 	if err := c.breakpoints.SetConditional(newFunc.returnAddress, goRoutineID); err != nil {
 		return nil, err
 	}
-	c.breakpointTypes[newFunc.returnAddress] = breakpointTypeReturn
+	if typ, ok := c.breakpointTypes[newFunc.returnAddress]; ok && typ == breakpointTypeCall {
+		c.breakpointTypes[newFunc.returnAddress] = breakpointTypeReturnAndCall
+	} else {
+		c.breakpointTypes[newFunc.returnAddress] = breakpointTypeReturn
+	}
 
 	if newFunc.setCallInstBreakpoints {
 		if err := c.setCallInstBreakpoints(goRoutineID, newFunc.StartAddr); err != nil {
