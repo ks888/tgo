@@ -234,6 +234,28 @@ func TestMainLoop_Panic(t *testing.T) {
 	}
 }
 
+func TestMainLoop_SpecialFuncs(t *testing.T) {
+	controller := NewController()
+	buff := &bytes.Buffer{}
+	controller.outputWriter = buff
+	if err := controller.LaunchTracee(testutils.ProgramSpecialFuncs); err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	if err := controller.AddStartTracePoint(testutils.SpecialFuncsAddrMain); err != nil {
+		t.Fatalf("failed to set tracing point: %v", err)
+	}
+	controller.SetTraceLevel(3)
+
+	if err := controller.MainLoop(); err != nil {
+		t.Errorf("failed to run main loop: %v", err)
+	}
+
+	output := buff.String()
+	if strings.Count(output, "reflect.DeepEqual") != 2 {
+		t.Errorf("wrong number of reflect.DeepEqual: %d\n%s", strings.Count(output, "reflect.DeepEqual"), output)
+	}
+}
+
 func TestInterrupt(t *testing.T) {
 	controller := NewController()
 	controller.outputWriter = ioutil.Discard

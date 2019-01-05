@@ -691,6 +691,7 @@ func (c *Client) handleTPacket(packet string) (Event, error) {
 		return Event{}, err
 	}
 	if syscall.Signal(signalNumber) == excBadAccess {
+		log.Debugf("bad memory access: %s", packet)
 		return Event{}, fmt.Errorf("bad memory access")
 	}
 

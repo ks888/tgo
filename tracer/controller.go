@@ -380,10 +380,14 @@ func (c *Controller) handleTrapBeforeFunctionCall(threadID int, goRoutineInfo tr
 		return c.exitTracepoint(threadID, goRoutineInfo.ID, goRoutineInfo.CurrentPC)
 	}
 
-	return c.handleTrapAtFunctionCall(threadID, goRoutineInfo)
+	return c.handleTrapAtFunctionCall(threadID, goRoutineInfo.CurrentPC, goRoutineInfo)
 }
 
-func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
+// handleTrapAtFunctionCall handles the trapped event at the function call.
+// It needs `breakpointAddr` though it's usually same as the function's start address.
+// It is because some function, such as runtime.duffzero, directly jumps to the middle of the function and
+// the breakpoint address is not explicit in that case.
+func (c *Controller) handleTrapAtFunctionCall(threadID int, breakpointAddr uint64, goRoutineInfo tracee.GoRoutineInfo) error {
 	status, _ := c.statusStore[goRoutineInfo.ID]
 	stackFrame, err := c.currentStackFrame(goRoutineInfo)
 	if err != nil {
@@ -424,7 +428,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, goRoutineInfo tracee
 		}
 	}
 
-	if err := c.process.SingleStep(threadID, stackFrame.Function.StartAddr); err != nil {
+	if err := c.process.SingleStep(threadID, breakpointAddr); err != nil {
 		return err
 	}
 
@@ -487,7 +491,7 @@ func (c *Controller) appendFunction(callingFuncs []callingFunction, newFunc call
 }
 
 func (c *Controller) handleTrapAtDeferredFuncCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	if err := c.handleTrapAtFunctionCall(threadID, goRoutineInfo); err != nil {
+	if err := c.handleTrapAtFunctionCall(threadID, goRoutineInfo.CurrentPC-1, goRoutineInfo); err != nil {
 		return err
 	}
 

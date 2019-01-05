@@ -83,6 +83,9 @@ var (
 	StartStopAddrTracerOff  uint64
 
 	ProgramStartOnly string
+
+	ProgramSpecialFuncs  string
+	SpecialFuncsAddrMain uint64
 )
 
 func init() {
@@ -111,6 +114,9 @@ func init() {
 		panic(err)
 	}
 	if err := buildProgramStartOnly(srcDirname); err != nil {
+		panic(err)
+	}
+	if err := buildProgramSpecialFuncs(srcDirname); err != nil {
 		panic(err)
 	}
 
@@ -339,6 +345,24 @@ func buildProgramStartOnly(srcDirname string) error {
 	ProgramStartOnly = srcDirname + "/testdata/startOnly"
 
 	return buildProgram(ProgramStartOnly)
+}
+
+func buildProgramSpecialFuncs(srcDirname string) error {
+	ProgramSpecialFuncs = srcDirname + "/testdata/specialFuncs"
+
+	if err := buildProgram(ProgramSpecialFuncs); err != nil {
+		return err
+	}
+
+	updateAddressIfMatched := func(name string, value uint64) error {
+		switch name {
+		case "main.main":
+			SpecialFuncsAddrMain = value
+		}
+		return nil
+	}
+
+	return walkSymbols(ProgramSpecialFuncs, updateAddressIfMatched)
 }
 
 func buildProgram(programName string) error {
