@@ -6,10 +6,9 @@
 
 ### Example
 
-This example traces the functions called between `tracer.Start()` and `tracer.Stop()`.
+In this example, the functions called between `tracer.Start()` and `tracer.Stop()` are traced.
 
 ```golang
-% cat fibonacci.go
 package main
 
 import (
@@ -28,39 +27,38 @@ func fib(n int) int {
 }
 
 func main() {
-	n, _ := strconv.ParseInt(os.Args[1], 10, 64)
-
-	tracer.SetTraceLevel(3)
+	tracer.SetTraceLevel(2)
 	tracer.Start()
 
+	var n int64
+	if len(os.Args) > 1 {
+		n, _ = strconv.ParseInt(os.Args[1], 10, 64)
+	}
 	val := fib(int(n))
 	fmt.Println(val)
 
 	tracer.Stop()
 }
+```
+
+When you run the program, the trace logs are printed:
+
+```shell
 % go build fibonacci.go
 % ./fibonacci 3
+\ (#01) strconv.ParseInt(s = "3", base = 10, bitSize = 64)
+|\ (#01) strconv.ParseUint(s = "3", base = 10, bitSize = 64)
+|/ (#01) strconv.ParseUint() (~r3 = 3, ~r4 = nil)
+/ (#01) strconv.ParseInt() (i = 3, err = nil)
 \ (#01) main.fib(n = 3)
 |\ (#01) main.fib(n = 2)
-||\ (#01) main.fib(n = 1)
-||/ (#01) main.fib() (~r1 = 1)
-||\ (#01) main.fib(n = 0)
-||/ (#01) main.fib() (~r1 = 0)
 |/ (#01) main.fib() (~r1 = 1)
 |\ (#01) main.fib(n = 1)
 |/ (#01) main.fib() (~r1 = 1)
 / (#01) main.fib() (~r1 = 2)
 \ (#01) fmt.Println(a = []{int(2)})
 |\ (#01) fmt.Fprintln(a = -, w = -)
-||\ (#01) fmt.newPrinter()
-||/ (#01) fmt.newPrinter() (~r0 = &{arg: nil, value: {...}, fmt: {...}, reordered: false, goodArgNum: false, panicking: false, erroring: false, buf: {...}})
-||\ (#01) fmt.(*pp).doPrintln(p = &{arg: nil, value: {...}, fmt: {...}, reordered: false, goodArgNum: false, panicking: false, erroring: false, buf: {...}}, a = []{int(2)})
-||/ (#01) fmt.(*pp).doPrintln() ()
-||\ (#01) os.(*File).Write(f = &{file: &{...}}, b = []{50, 10})
 2
-||/ (#01) os.(*File).Write() (n = 2, err = nil)
-||\ (#01) fmt.(*pp).free(p = &{arg: int(2), value: {...}, fmt: {...}, reordered: false, goodArgNum: false, panicking: false, erroring: false, buf: {...}})
-||/ (#01) fmt.(*pp).free() ()
 |/ (#01) fmt.Fprintln() (n = 2, err = nil)
 / (#01) fmt.Println() (n = 2, err = nil)
 ```
@@ -85,15 +83,21 @@ Install the `tgo` binary and its library:
 go get -u github.com/ks888/tgo/cmd/tgo
 ```
 
-tgo depends on the ptrace mechanism and needs to attach to the non-descendant process. For this, run the command below:
+tgo depends on the ptrace mechanism and attaches to the non-descendant process. For this, run the command below:
 
 ```
 sudo sh -c 'echo 0 > /proc/sys/kernel/yama/ptrace_scope'
 ```
 
+If you run the program in the docker container, add the `--cap-add sys_ptrace` option. For example:
+
+```
+docker run --cap-add sys_ptrace -it golang:1 /bin/bash
+```
+
 #### Windows
 
-Not supported yet.
+Not supported.
 
 ### Usage
 

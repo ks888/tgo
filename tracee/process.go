@@ -487,6 +487,11 @@ func (p *Process) findFunctionByModuleData(pc uint64) (*Function, error) {
 			nameoff = int32(binary.LittleEndian.Uint32(rawData))
 		case "args":
 			args = int32(binary.LittleEndian.Uint32(rawData))
+			if args < 0 {
+				// In Go's Assembler, the args size declared in the TEXT directive can be omitted.
+				// In that case, `args` here may be negative.
+				args = 0
+			}
 		}
 	}
 
