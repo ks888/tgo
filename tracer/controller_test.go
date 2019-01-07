@@ -11,20 +11,32 @@ import (
 	"github.com/ks888/tgo/testutils"
 )
 
+var helloworldAttrs = Attributes{
+	ProgramPath:         testutils.ProgramHelloworld,
+	FirstModuleDataAddr: testutils.HelloworldAddrFirstModuleData,
+	CompiledGoVersion:   runtime.Version(),
+}
+
 func TestLaunchProcess(t *testing.T) {
-	controller := NewController(testutils.HelloworldAddrFirstModuleData)
-	err := controller.LaunchTracee(testutils.ProgramHelloworld)
+	controller := NewController()
+	err := controller.LaunchTracee(testutils.ProgramHelloworld, nil, helloworldAttrs)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
+}
+
+var infloopAttrs = Attributes{
+	ProgramPath:         testutils.ProgramInfloop,
+	FirstModuleDataAddr: testutils.InfloopAddrFirstModuleData,
+	CompiledGoVersion:   runtime.Version(),
 }
 
 func TestAttachProcess(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
 
-	controller := NewController(testutils.InfloopAddrFirstModuleData)
-	err := controller.AttachTracee(cmd.Process.Pid, testutils.ProgramInfloop, runtime.Version())
+	controller := NewController()
+	err := controller.AttachTracee(cmd.Process.Pid, infloopAttrs)
 	if err != nil {
 		t.Fatalf("failed to attch to the process: %v", err)
 	}
@@ -34,9 +46,15 @@ func TestAttachProcess(t *testing.T) {
 	cmd.Process.Wait()
 }
 
+var startStopAttrs = Attributes{
+	ProgramPath:         testutils.ProgramStartStop,
+	FirstModuleDataAddr: testutils.StartStopAddrFirstModuleData,
+	CompiledGoVersion:   runtime.Version(),
+}
+
 func TestAddStartTracePoint(t *testing.T) {
-	controller := NewController(testutils.StartStopAddrFirstModuleData)
-	err := controller.LaunchTracee(testutils.ProgramStartStop)
+	controller := NewController()
+	err := controller.LaunchTracee(testutils.ProgramStartStop, nil, startStopAttrs)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -57,8 +75,8 @@ func TestAddStartTracePoint(t *testing.T) {
 }
 
 func TestAddEndTracePoint(t *testing.T) {
-	controller := NewController(testutils.StartStopAddrFirstModuleData)
-	err := controller.LaunchTracee(testutils.ProgramStartStop)
+	controller := NewController()
+	err := controller.LaunchTracee(testutils.ProgramStartStop, nil, startStopAttrs)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -79,11 +97,11 @@ func TestAddEndTracePoint(t *testing.T) {
 }
 
 func TestMainLoop_MainMain(t *testing.T) {
-	controller := NewController(testutils.HelloworldAddrFirstModuleData)
+	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	controller.SetTraceLevel(1)
-	if err := controller.LaunchTracee(testutils.ProgramHelloworld); err != nil {
+	if err := controller.LaunchTracee(testutils.ProgramHelloworld, nil, helloworldAttrs); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	if err := controller.AddStartTracePoint(testutils.HelloworldAddrMain); err != nil {
@@ -104,11 +122,11 @@ func TestMainLoop_MainMain(t *testing.T) {
 }
 
 func TestMainLoop_NoDWARFBinary(t *testing.T) {
-	controller := NewController(testutils.HelloworldAddrFirstModuleData)
+	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	controller.SetTraceLevel(1)
-	if err := controller.LaunchTracee(testutils.ProgramHelloworldNoDwarf); err != nil {
+	if err := controller.LaunchTracee(testutils.ProgramHelloworldNoDwarf, nil, helloworldAttrs); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	if err := controller.AddStartTracePoint(testutils.HelloworldAddrMain); err != nil {
@@ -126,11 +144,11 @@ func TestMainLoop_NoDWARFBinary(t *testing.T) {
 }
 
 func TestMainLoop_MainNoParameter(t *testing.T) {
-	controller := NewController(testutils.HelloworldAddrFirstModuleData)
+	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	controller.SetTraceLevel(1)
-	if err := controller.LaunchTracee(testutils.ProgramHelloworld); err != nil {
+	if err := controller.LaunchTracee(testutils.ProgramHelloworld, nil, helloworldAttrs); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	if err := controller.AddStartTracePoint(testutils.HelloworldAddrNoParameter); err != nil {
@@ -156,12 +174,18 @@ func TestMainLoop_MainNoParameter(t *testing.T) {
 	}
 }
 
+var goRoutinesAttrs = Attributes{
+	ProgramPath:         testutils.ProgramGoRoutines,
+	FirstModuleDataAddr: testutils.GoRoutinesAddrFirstModuleData,
+	CompiledGoVersion:   runtime.Version(),
+}
+
 func TestMainLoop_GoRoutines(t *testing.T) {
-	controller := NewController(testutils.GoRoutinesAddrFirstModuleData)
+	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	controller.SetTraceLevel(1)
-	if err := controller.LaunchTracee(testutils.ProgramGoRoutines); err != nil {
+	if err := controller.LaunchTracee(testutils.ProgramGoRoutines, nil, goRoutinesAttrs); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	if err := controller.AddStartTracePoint(testutils.GoRoutinesAddrInc); err != nil {
@@ -181,11 +205,17 @@ func TestMainLoop_GoRoutines(t *testing.T) {
 	}
 }
 
+var recursiveAttrs = Attributes{
+	ProgramPath:         testutils.ProgramRecursive,
+	FirstModuleDataAddr: testutils.RecursiveAddrFirstModuleData,
+	CompiledGoVersion:   runtime.Version(),
+}
+
 func TestMainLoop_Recursive(t *testing.T) {
-	controller := NewController(testutils.RecursiveAddrFirstModuleData)
+	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
-	if err := controller.LaunchTracee(testutils.ProgramRecursive); err != nil {
+	if err := controller.LaunchTracee(testutils.ProgramRecursive, nil, recursiveAttrs); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	if err := controller.AddStartTracePoint(testutils.RecursiveAddrMain); err != nil {
@@ -203,11 +233,17 @@ func TestMainLoop_Recursive(t *testing.T) {
 	}
 }
 
+var panicAttrs = Attributes{
+	ProgramPath:         testutils.ProgramPanic,
+	FirstModuleDataAddr: testutils.PanicAddrFirstModuleData,
+	CompiledGoVersion:   runtime.Version(),
+}
+
 func TestMainLoop_Panic(t *testing.T) {
-	controller := NewController(testutils.PanicAddrFirstModuleData)
+	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
-	if err := controller.LaunchTracee(testutils.ProgramPanic); err != nil {
+	if err := controller.LaunchTracee(testutils.ProgramPanic, nil, panicAttrs); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	if err := controller.AddStartTracePoint(testutils.PanicAddrMain); err != nil {
@@ -225,11 +261,17 @@ func TestMainLoop_Panic(t *testing.T) {
 	}
 }
 
+var specialFuncsAttrs = Attributes{
+	ProgramPath:         testutils.ProgramSpecialFuncs,
+	FirstModuleDataAddr: testutils.SpecialFuncsAddrFirstModuleData,
+	CompiledGoVersion:   runtime.Version(),
+}
+
 func TestMainLoop_SpecialFuncs(t *testing.T) {
-	controller := NewController(testutils.SpecialFuncsAddrFirstModuleData)
+	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
-	if err := controller.LaunchTracee(testutils.ProgramSpecialFuncs); err != nil {
+	if err := controller.LaunchTracee(testutils.ProgramSpecialFuncs, nil, specialFuncsAttrs); err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
 	if err := controller.AddStartTracePoint(testutils.SpecialFuncsAddrMain); err != nil {
@@ -248,9 +290,9 @@ func TestMainLoop_SpecialFuncs(t *testing.T) {
 }
 
 func TestInterrupt(t *testing.T) {
-	controller := NewController(testutils.InfloopAddrFirstModuleData)
+	controller := NewController()
 	controller.outputWriter = ioutil.Discard
-	err := controller.LaunchTracee(testutils.ProgramInfloop)
+	err := controller.LaunchTracee(testutils.ProgramInfloop, nil, infloopAttrs)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}

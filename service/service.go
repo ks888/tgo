@@ -48,8 +48,13 @@ func (t *Tracer) Attach(args AttachArgs, reply *struct{}) error {
 		return errors.New("already attached")
 	}
 
-	t.controller = tracer.NewController(uint64(args.FirstModuleDataAddr))
-	if err := t.controller.AttachTracee(args.Pid, args.ProgramPath, args.GoVersion); err != nil {
+	t.controller = tracer.NewController()
+	attrs := tracer.Attributes{
+		ProgramPath:         args.ProgramPath,
+		CompiledGoVersion:   args.GoVersion,
+		FirstModuleDataAddr: uint64(args.FirstModuleDataAddr),
+	}
+	if err := t.controller.AttachTracee(args.Pid, attrs); err != nil {
 		return err
 	}
 	t.controller.SetTraceLevel(args.TraceLevel)

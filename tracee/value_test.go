@@ -2,14 +2,20 @@ package tracee
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/ks888/tgo/testutils"
 )
 
+var typePrintAttr = Attributes{
+	FirstModuleDataAddr: testutils.TypePrintAddrFirstModuleData,
+	CompiledGoVersion:   runtime.Version(),
+}
+
 func TestParseValue(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramTypePrint, testutils.TypePrintAddrFirstModuleData)
+	proc, err := LaunchProcess(testutils.ProgramTypePrint, nil, typePrintAttr)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -73,7 +79,7 @@ func TestParseValue(t *testing.T) {
 }
 
 func TestParseValue_NotFixedStringCase(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramTypePrint, testutils.TypePrintAddrFirstModuleData)
+	proc, err := LaunchProcess(testutils.ProgramTypePrint, nil, typePrintAttr)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}

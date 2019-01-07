@@ -4,7 +4,6 @@ import (
 	"debug/dwarf"
 	"encoding/binary"
 	"fmt"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -40,16 +39,24 @@ type StackFrame struct {
 	ReturnAddress   uint64
 }
 
-// TODO: Launch/AttachPorcess receives too many args. Separate to NewProcess + Launch/Attach.
+// Attributes specifies the set of tracee's attributes.
+type Attributes struct {
+	ProgramPath         string
+	CompiledGoVersion   string
+	FirstModuleDataAddr uint64
+}
 
 // LaunchProcess launches new tracee process.
-func LaunchProcess(name string, firstModuleDataAddr uint64, arg ...string) (*Process, error) {
+func LaunchProcess(name string, arg []string, attrs Attributes) (*Process, error) {
 	debugapiClient := debugapi.NewClient()
 	if err := debugapiClient.LaunchProcess(name, arg...); err != nil {
 		return nil, err
 	}
 
-	proc, err := newProcess(debugapiClient, name, runtime.Version(), firstModuleDataAddr)
+	if attrs.ProgramPath == "" {
+		attrs.ProgramPath = name
+	}
+	proc, err := newProcess(debugapiClient, attrs)
 	if err != nil {
 		debugapiClient.DetachProcess()
 	}
@@ -57,30 +64,30 @@ func LaunchProcess(name string, firstModuleDataAddr uint64, arg ...string) (*Pro
 }
 
 // AttachProcess attaches to the existing tracee process.
-func AttachProcess(pid int, programPath, goVersion string, firstModuleDataAddr uint64) (*Process, error) {
+func AttachProcess(pid int, attrs Attributes) (*Process, error) {
 	debugapiClient := debugapi.NewClient()
 	err := debugapiClient.AttachProcess(pid)
 	if err != nil {
 		return nil, err
 	}
 
-	proc, err := newProcess(debugapiClient, programPath, goVersion, firstModuleDataAddr)
+	proc, err := newProcess(debugapiClient, attrs)
 	if err != nil {
 		debugapiClient.DetachProcess() // keep the attached process running
 	}
 	return proc, err
 }
 
-func newProcess(debugapiClient *debugapi.Client, programPath, rawGoVersion string, firstModuleDataAddr uint64) (*Process, error) {
+func newProcess(debugapiClient *debugapi.Client, attrs Attributes) (*Process, error) {
 	proc := &Process{debugapiClient: debugapiClient, breakpoints: make(map[uint64]breakpoint)}
 
-	proc.GoVersion = ParseGoVersion(rawGoVersion)
+	proc.GoVersion = ParseGoVersion(attrs.CompiledGoVersion)
 	var err error
-	proc.Binary, err = OpenBinaryFile(programPath, proc.GoVersion)
+	proc.Binary, err = OpenBinaryFile(attrs.ProgramPath, proc.GoVersion)
 	if err != nil {
 		return nil, err
 	}
-	proc.moduleDataList = parseModuleDataList(firstModuleDataAddr, proc.Binary.moduleDataType(), debugapiClient)
+	proc.moduleDataList = parseModuleDataList(attrs.FirstModuleDataAddr, proc.Binary.moduleDataType(), debugapiClient)
 	proc.valueParser = valueParser{reader: debugapiClient, mapRuntimeType: proc.mapRuntimeType}
 	return proc, nil
 }
