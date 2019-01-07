@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseValue(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramTypePrint)
+	proc, err := LaunchProcess(testutils.ProgramTypePrint, testutils.TypePrintAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestParseValue(t *testing.T) {
 }
 
 func TestParseValue_NotFixedStringCase(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramTypePrint)
+	proc, err := LaunchProcess(testutils.ProgramTypePrint, testutils.TypePrintAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}

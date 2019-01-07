@@ -29,26 +29,32 @@ var (
 	HelloworldAddrTwoReturns              uint64
 	HelloworldAddrFmtPrintln              uint64
 	HelloworldAddrGoBuildID               uint64
+	HelloworldAddrFirstModuleData         uint64
 
-	ProgramInfloop  string
-	InfloopAddrMain uint64
+	ProgramInfloop             string
+	InfloopAddrMain            uint64
+	InfloopAddrFirstModuleData uint64
 
-	ProgramGoRoutines        string
-	ProgramGoRoutinesNoDwarf string
-	GoRoutinesAddrMain       uint64
-	GoRoutinesAddrInc        uint64
+	ProgramGoRoutines             string
+	ProgramGoRoutinesNoDwarf      string
+	GoRoutinesAddrMain            uint64
+	GoRoutinesAddrInc             uint64
+	GoRoutinesAddrFirstModuleData uint64
 
-	ProgramRecursive  string
-	RecursiveAddrMain uint64
+	ProgramRecursive             string
+	RecursiveAddrMain            uint64
+	RecursiveAddrFirstModuleData uint64
 
-	ProgramPanic           string
-	ProgramPanicNoDwarf    string
-	PanicAddrMain          uint64
-	PanicAddrThrow         uint64
-	PanicAddrInsideThrough uint64
-	PanicAddrCatch         uint64
+	ProgramPanic             string
+	ProgramPanicNoDwarf      string
+	PanicAddrMain            uint64
+	PanicAddrThrow           uint64
+	PanicAddrInsideThrough   uint64
+	PanicAddrCatch           uint64
+	PanicAddrFirstModuleData uint64
 
 	ProgramTypePrint                    string
+	TypePrintAddrFirstModuleData        uint64
 	TypePrintAddrPrintBool              uint64
 	TypePrintAddrPrintInt8              uint64
 	TypePrintAddrPrintInt16             uint64
@@ -78,14 +84,16 @@ var (
 	TypePrintAddrPrintNilMap            uint64
 	TypePrintAddrPrintChan              uint64
 
-	ProgramStartStop        string
-	StartStopAddrTracedFunc uint64
-	StartStopAddrTracerOff  uint64
+	ProgramStartStop             string
+	StartStopAddrTracedFunc      uint64
+	StartStopAddrTracerOff       uint64
+	StartStopAddrFirstModuleData uint64
 
 	ProgramStartOnly string
 
-	ProgramSpecialFuncs  string
-	SpecialFuncsAddrMain uint64
+	ProgramSpecialFuncs             string
+	SpecialFuncsAddrMain            uint64
+	SpecialFuncsAddrFirstModuleData uint64
 )
 
 func init() {
@@ -154,6 +162,8 @@ func buildProgramHelloworld(srcDirname string) error {
 			HelloworldAddrFuncWithAbstractOrigin = value
 		case "go.buildid":
 			HelloworldAddrGoBuildID = value
+		case "runtime.firstmoduledata":
+			HelloworldAddrFirstModuleData = value
 		}
 		return nil
 	}
@@ -172,6 +182,8 @@ func buildProgramInfloop(srcDirname string) error {
 		switch name {
 		case "main.main":
 			InfloopAddrMain = value
+		case "runtime.firstmoduledata":
+			InfloopAddrFirstModuleData = value
 		}
 		return nil
 	}
@@ -196,6 +208,8 @@ func buildProgramGoRoutines(srcDirname string) error {
 			GoRoutinesAddrMain = value
 		case "main.inc":
 			GoRoutinesAddrInc = value
+		case "runtime.firstmoduledata":
+			GoRoutinesAddrFirstModuleData = value
 		}
 		return nil
 	}
@@ -214,6 +228,8 @@ func buildProgramRecursive(srcDirname string) error {
 		switch name {
 		case "main.main":
 			RecursiveAddrMain = value
+		case "runtime.firstmoduledata":
+			RecursiveAddrFirstModuleData = value
 		}
 		return nil
 	}
@@ -242,6 +258,8 @@ func buildProgramPanic(srcDirname string) error {
 			PanicAddrInsideThrough = value
 		case "main.catch":
 			PanicAddrCatch = value
+		case "runtime.firstmoduledata":
+			PanicAddrFirstModuleData = value
 		}
 		return nil
 	}
@@ -258,6 +276,8 @@ func buildProgramTypePrint(srcDirname string) error {
 
 	updateAddressIfMatched := func(name string, value uint64) error {
 		switch name {
+		case "runtime.firstmoduledata":
+			TypePrintAddrFirstModuleData = value
 		case "main.printBool":
 			TypePrintAddrPrintBool = value
 		case "main.printInt8":
@@ -334,6 +354,8 @@ func buildProgramStartStop(srcDirname string) error {
 			StartStopAddrTracedFunc = value
 		case "github.com/ks888/tgo/lib/tracer.Off":
 			StartStopAddrTracerOff = value
+		case "runtime.firstmoduledata":
+			StartStopAddrFirstModuleData = value
 		}
 		return nil
 	}
@@ -358,6 +380,8 @@ func buildProgramSpecialFuncs(srcDirname string) error {
 		switch name {
 		case "main.main":
 			SpecialFuncsAddrMain = value
+		case "runtime.firstmoduledata":
+			SpecialFuncsAddrFirstModuleData = value
 		}
 		return nil
 	}
@@ -379,7 +403,7 @@ func buildProgram(programName string) error {
 }
 
 func buildProgramWithoutDWARF(srcName, programName string) error {
-	if out, err := exec.Command(goBinaryPath, "build", "-ldflags", "-w", "-o", programName, srcName).CombinedOutput(); err != nil {
+	if out, err := exec.Command(goBinaryPath, "build", "-ldflags", "-w -s", "-o", programName, srcName).CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to build %s: %v\n%v", srcName, err, string(out))
 	}
 	return nil

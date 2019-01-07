@@ -31,9 +31,10 @@ const (
 
 // Controller controls the associated tracee process.
 type Controller struct {
-	process           *tracee.Process
-	statusStore       map[int64]goRoutineStatus
-	callInstAddrCache map[uint64][]uint64
+	process             *tracee.Process
+	firstModuleDataAddr uint64
+	statusStore         map[int64]goRoutineStatus
+	callInstAddrCache   map[uint64][]uint64
 
 	breakpointTypes map[uint64]breakpointType
 	breakpoints     Breakpoints
@@ -80,8 +81,9 @@ type callingFunction struct {
 }
 
 // NewController returns the new controller.
-func NewController() *Controller {
+func NewController(firstModuleDataAddr uint64) *Controller {
 	return &Controller{
+		firstModuleDataAddr:    firstModuleDataAddr,
 		outputWriter:           os.Stdout,
 		statusStore:            make(map[int64]goRoutineStatus),
 		breakpointTypes:        make(map[uint64]breakpointType),
@@ -95,7 +97,7 @@ func NewController() *Controller {
 // LaunchTracee launches the new tracee process to be controlled.
 func (c *Controller) LaunchTracee(name string, arg ...string) error {
 	var err error
-	c.process, err = tracee.LaunchProcess(name, arg...)
+	c.process, err = tracee.LaunchProcess(name, c.firstModuleDataAddr, arg...)
 	c.breakpoints = NewBreakpoints(c.process.SetBreakpoint, c.process.ClearBreakpoint)
 	return err
 }
@@ -103,7 +105,7 @@ func (c *Controller) LaunchTracee(name string, arg ...string) error {
 // AttachTracee attaches to the existing process.
 func (c *Controller) AttachTracee(pid int, programPath, goVersion string) error {
 	var err error
-	c.process, err = tracee.AttachProcess(pid, programPath, goVersion)
+	c.process, err = tracee.AttachProcess(pid, programPath, goVersion, c.firstModuleDataAddr)
 	c.breakpoints = NewBreakpoints(c.process.SetBreakpoint, c.process.ClearBreakpoint)
 	return err
 }

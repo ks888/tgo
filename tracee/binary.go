@@ -21,6 +21,8 @@ const (
 	dwarfOpFbreg          = 0x91   // DW_OP_fbreg
 )
 
+// TODO: remove Functions() and firstModuleDataAddress() if possible.
+
 // BinaryFile represents the program the tracee process is executing.
 type BinaryFile interface {
 	// FindFunction returns the function info to which the given pc specifies.
@@ -688,13 +690,11 @@ type symbol struct {
 
 // nonDebuggableBinaryFile represents the binary file WITHOUT DWARF sections.
 type nonDebuggableBinaryFile struct {
-	closer              io.Closer
-	symbols             []symbol
-	firstModuleDataAddr uint64
+	closer io.Closer
 }
 
-func newNonDebuggableBinaryFile(symbols []symbol, firstModuleDataAddr uint64, closer io.Closer) (nonDebuggableBinaryFile, error) {
-	return nonDebuggableBinaryFile{closer: closer, firstModuleDataAddr: firstModuleDataAddr, symbols: symbols}, nil
+func newNonDebuggableBinaryFile(closer io.Closer) (nonDebuggableBinaryFile, error) {
+	return nonDebuggableBinaryFile{closer: closer}, nil
 }
 
 // FindFunction always returns error because it's difficult to get function info using non-DWARF binary.
@@ -702,11 +702,8 @@ func (b nonDebuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
 	return nil, errors.New("no DWARF info")
 }
 
-func (b nonDebuggableBinaryFile) Functions() (funcs []*Function) {
-	for _, sym := range b.symbols {
-		funcs = append(funcs, &Function{Name: sym.Name, StartAddr: sym.Value})
-	}
-	return funcs
+func (b nonDebuggableBinaryFile) Functions() []*Function {
+	return nil
 }
 
 func (b nonDebuggableBinaryFile) Close() error {
@@ -718,7 +715,7 @@ func (b nonDebuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Typ
 }
 
 func (b nonDebuggableBinaryFile) firstModuleDataAddress() uint64 {
-	return b.firstModuleDataAddr
+	return 0
 }
 
 // Assume this dwarf.Type represents a subset of the module data type in the case DWARF is not available.

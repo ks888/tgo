@@ -12,6 +12,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe" // For go:linkname
 
 	"github.com/ks888/tgo/service"
 )
@@ -30,6 +31,9 @@ var (
 	// Protects the server command and its rpc client
 	serverMtx sync.Mutex
 )
+
+//go:linkname FirstModuleData runtime.firstmoduledata
+var FirstModuleData interface{}
 
 // SetTraceLevel sets the trace level. Functions are traced if the stack depth is within this trace level. The stack depth here is based on the point tracing is enabled. The default is 1.
 func SetTraceLevel(option int) {
@@ -63,7 +67,7 @@ func Start() error {
 
 	pcs := make([]uintptr, 2)
 	_ = runtime.Callers(2, pcs)
-	startTracePoint, endTracePoint := uint64(pcs[0]), uint64(pcs[1])
+	startTracePoint, endTracePoint := pcs[0], pcs[1]
 
 	if serverCmd == nil {
 		err := initialize(startTracePoint, endTracePoint)
@@ -81,7 +85,7 @@ func Start() error {
 	return client.Call("Tracer.AddEndTracePoint", endTracePoint, reply)
 }
 
-func initialize(startTracePoint, endTracePoint uint64) error {
+func initialize(startTracePoint, endTracePoint uintptr) error {
 	addr, err := startServer()
 	if err != nil {
 		return err
@@ -108,6 +112,7 @@ func initialize(startTracePoint, endTracePoint uint64) error {
 		InitialStartTracePoint: startTracePoint,
 		GoVersion:              runtime.Version(),
 		ProgramPath:            programPath,
+		FirstModuleDataAddr:    uintptr(unsafe.Pointer(&FirstModuleData)),
 	}
 	reply := &struct{}{}
 	if err := client.Call("Tracer.Attach", attachArgs, reply); err != nil {

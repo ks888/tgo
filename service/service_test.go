@@ -18,7 +18,7 @@ func TestAttachAndDetach(t *testing.T) {
 	tracer := &Tracer{}
 	args := AttachArgs{
 		Pid:                    cmd.Process.Pid,
-		InitialStartTracePoint: testutils.InfloopAddrMain,
+		InitialStartTracePoint: uintptr(testutils.InfloopAddrMain),
 		ProgramPath:            testutils.ProgramInfloop,
 		GoVersion:              runtime.Version(),
 	}

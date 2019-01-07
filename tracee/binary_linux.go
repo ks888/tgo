@@ -23,7 +23,7 @@ func openBinaryFile(pathToProgram string, goVersion GoVersion) (BinaryFile, erro
 
 	data, locList, err := findDWARF(elfFile)
 	if err != nil {
-		binaryFile, err := newNonDebuggableBinaryFile(findSymbols(elfFile), findFirstModuleData(elfFile), closer)
+		binaryFile, err := newNonDebuggableBinaryFile(closer)
 		if err != nil {
 			closer.Close()
 		}
@@ -81,30 +81,4 @@ func buildLocationListData(locListSection *elf.Section) ([]byte, error) {
 
 	_, err = io.ReadFull(r, uncompressedData)
 	return uncompressedData, err
-}
-
-func findSymbols(elfFile *elf.File) (symbols []symbol) {
-	elfSymbols, err := elfFile.Symbols()
-	if err != nil {
-		return nil
-	}
-
-	for _, sym := range elfSymbols {
-		symbols = append(symbols, symbol{Name: sym.Name, Value: sym.Value})
-	}
-	return symbols
-}
-
-func findFirstModuleData(elfFile *elf.File) uint64 {
-	symbols, err := elfFile.Symbols()
-	if err != nil {
-		return 0
-	}
-
-	for _, sym := range symbols {
-		if sym.Name == firstModuleDataName {
-			return sym.Value
-		}
-	}
-	return 0
 }

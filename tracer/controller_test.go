@@ -12,7 +12,7 @@ import (
 )
 
 func TestLaunchProcess(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.HelloworldAddrFirstModuleData)
 	err := controller.LaunchTracee(testutils.ProgramHelloworld)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -23,7 +23,7 @@ func TestAttachProcess(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
 
-	controller := NewController()
+	controller := NewController(testutils.InfloopAddrFirstModuleData)
 	err := controller.AttachTracee(cmd.Process.Pid, testutils.ProgramInfloop, runtime.Version())
 	if err != nil {
 		t.Fatalf("failed to attch to the process: %v", err)
@@ -35,7 +35,7 @@ func TestAttachProcess(t *testing.T) {
 }
 
 func TestAddStartTracePoint(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.StartStopAddrFirstModuleData)
 	err := controller.LaunchTracee(testutils.ProgramStartStop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -57,7 +57,7 @@ func TestAddStartTracePoint(t *testing.T) {
 }
 
 func TestAddEndTracePoint(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.StartStopAddrFirstModuleData)
 	err := controller.LaunchTracee(testutils.ProgramStartStop)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
@@ -88,7 +88,7 @@ func hasBreakpointAt(controller *Controller, functionName string) bool {
 }
 
 func TestMainLoop_MainMain(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.HelloworldAddrFirstModuleData)
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	controller.SetTraceLevel(1)
@@ -113,7 +113,7 @@ func TestMainLoop_MainMain(t *testing.T) {
 }
 
 func TestMainLoop_NoDWARFBinary(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.HelloworldAddrFirstModuleData)
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	controller.SetTraceLevel(1)
@@ -135,7 +135,7 @@ func TestMainLoop_NoDWARFBinary(t *testing.T) {
 }
 
 func TestMainLoop_MainNoParameter(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.HelloworldAddrFirstModuleData)
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	controller.SetTraceLevel(1)
@@ -166,7 +166,7 @@ func TestMainLoop_MainNoParameter(t *testing.T) {
 }
 
 func TestMainLoop_GoRoutines(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.GoRoutinesAddrFirstModuleData)
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	controller.SetTraceLevel(1)
@@ -191,7 +191,7 @@ func TestMainLoop_GoRoutines(t *testing.T) {
 }
 
 func TestMainLoop_Recursive(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.RecursiveAddrFirstModuleData)
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	if err := controller.LaunchTracee(testutils.ProgramRecursive); err != nil {
@@ -213,7 +213,7 @@ func TestMainLoop_Recursive(t *testing.T) {
 }
 
 func TestMainLoop_Panic(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.PanicAddrFirstModuleData)
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	if err := controller.LaunchTracee(testutils.ProgramPanic); err != nil {
@@ -235,7 +235,7 @@ func TestMainLoop_Panic(t *testing.T) {
 }
 
 func TestMainLoop_SpecialFuncs(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.SpecialFuncsAddrFirstModuleData)
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
 	if err := controller.LaunchTracee(testutils.ProgramSpecialFuncs); err != nil {
@@ -257,7 +257,7 @@ func TestMainLoop_SpecialFuncs(t *testing.T) {
 }
 
 func TestInterrupt(t *testing.T) {
-	controller := NewController()
+	controller := NewController(testutils.InfloopAddrFirstModuleData)
 	controller.outputWriter = ioutil.Discard
 	err := controller.LaunchTracee(testutils.ProgramInfloop)
 	if err != nil {

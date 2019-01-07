@@ -2,11 +2,11 @@ package service
 
 import (
 	"errors"
-	"log"
 	"net"
 	"net/rpc"
 	"sync"
 
+	"github.com/ks888/tgo/log"
 	"github.com/ks888/tgo/tracer"
 )
 
@@ -28,9 +28,10 @@ type AttachArgs struct {
 	TraceLevel, ParseLevel int
 	// This parameter is required because the tracer may not have a chance to set the new trace points
 	// after the attached tracee starts running without trace points.
-	InitialStartTracePoint uint64
+	InitialStartTracePoint uintptr
 	Verbose                bool
 	GoVersion, ProgramPath string
+	FirstModuleDataAddr    uintptr
 }
 
 // Version returns the service version. The backward compatibility may be broken if the version is not same as the expected one.
@@ -47,15 +48,21 @@ func (t *Tracer) Attach(args AttachArgs, reply *struct{}) error {
 		return errors.New("already attached")
 	}
 
-	t.controller = tracer.NewController()
+	t.controller = tracer.NewController(uint64(args.FirstModuleDataAddr))
 	if err := t.controller.AttachTracee(args.Pid, args.ProgramPath, args.GoVersion); err != nil {
 		return err
 	}
 	t.controller.SetTraceLevel(args.TraceLevel)
 	t.controller.SetParseLevel(args.ParseLevel)
-	t.controller.AddStartTracePoint(args.InitialStartTracePoint)
+	t.controller.AddStartTracePoint(uint64(args.InitialStartTracePoint))
 
-	go func() { t.errCh <- t.controller.MainLoop() }()
+	go func() {
+		err := t.controller.MainLoop()
+		if err != nil && err != tracer.ErrInterrupted {
+			log.Debug(err)
+		}
+		t.errCh <- err
+	}()
 	return nil
 }
 
@@ -82,25 +89,25 @@ func (t *Tracer) Detach(args struct{}, reply *struct{}) error {
 }
 
 // AddStartTracePoint adds a new start trace point.
-func (t *Tracer) AddStartTracePoint(args uint64, reply *struct{}) error {
+func (t *Tracer) AddStartTracePoint(args uintptr, reply *struct{}) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
 	if t.controller == nil {
 		return nil
 	}
-	return t.controller.AddStartTracePoint(args)
+	return t.controller.AddStartTracePoint(uint64(args))
 }
 
 // AddEndTracePoint adds a new end trace point.
-func (t *Tracer) AddEndTracePoint(args uint64, reply *struct{}) error {
+func (t *Tracer) AddEndTracePoint(args uintptr, reply *struct{}) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
 	if t.controller == nil {
 		return nil
 	}
-	return t.controller.AddEndTracePoint(args)
+	return t.controller.AddEndTracePoint(uint64(args))
 }
 
 // Serve serves the tracer service.

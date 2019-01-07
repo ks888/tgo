@@ -40,14 +40,16 @@ type StackFrame struct {
 	ReturnAddress   uint64
 }
 
+// TODO: Launch/AttachPorcess receives too many args. Separate to NewProcess + Launch/Attach.
+
 // LaunchProcess launches new tracee process.
-func LaunchProcess(name string, arg ...string) (*Process, error) {
+func LaunchProcess(name string, firstModuleDataAddr uint64, arg ...string) (*Process, error) {
 	debugapiClient := debugapi.NewClient()
 	if err := debugapiClient.LaunchProcess(name, arg...); err != nil {
 		return nil, err
 	}
 
-	proc, err := newProcess(debugapiClient, name, runtime.Version())
+	proc, err := newProcess(debugapiClient, name, runtime.Version(), firstModuleDataAddr)
 	if err != nil {
 		debugapiClient.DetachProcess()
 	}
@@ -55,21 +57,21 @@ func LaunchProcess(name string, arg ...string) (*Process, error) {
 }
 
 // AttachProcess attaches to the existing tracee process.
-func AttachProcess(pid int, programPath, goVersion string) (*Process, error) {
+func AttachProcess(pid int, programPath, goVersion string, firstModuleDataAddr uint64) (*Process, error) {
 	debugapiClient := debugapi.NewClient()
 	err := debugapiClient.AttachProcess(pid)
 	if err != nil {
 		return nil, err
 	}
 
-	proc, err := newProcess(debugapiClient, programPath, goVersion)
+	proc, err := newProcess(debugapiClient, programPath, goVersion, firstModuleDataAddr)
 	if err != nil {
 		debugapiClient.DetachProcess() // keep the attached process running
 	}
 	return proc, err
 }
 
-func newProcess(debugapiClient *debugapi.Client, programPath, rawGoVersion string) (*Process, error) {
+func newProcess(debugapiClient *debugapi.Client, programPath, rawGoVersion string, firstModuleDataAddr uint64) (*Process, error) {
 	proc := &Process{debugapiClient: debugapiClient, breakpoints: make(map[uint64]breakpoint)}
 
 	proc.GoVersion = ParseGoVersion(rawGoVersion)
@@ -78,15 +80,15 @@ func newProcess(debugapiClient *debugapi.Client, programPath, rawGoVersion strin
 	if err != nil {
 		return nil, err
 	}
-	proc.moduleDataList = parseModuleDataList(proc.Binary, debugapiClient)
+	proc.moduleDataList = parseModuleDataList(firstModuleDataAddr, proc.Binary.moduleDataType(), debugapiClient)
 	proc.valueParser = valueParser{reader: debugapiClient, mapRuntimeType: proc.mapRuntimeType}
 	return proc, nil
 }
 
-func parseModuleDataList(binary BinaryFile, reader memoryReader) (moduleDataList []*moduleData) {
-	moduleDataAddr := binary.firstModuleDataAddress()
+func parseModuleDataList(firstModuleDataAddr uint64, moduleDataType dwarf.Type, reader memoryReader) (moduleDataList []*moduleData) {
+	moduleDataAddr := firstModuleDataAddr
 	for moduleDataAddr != 0 {
-		md := newModuleData(moduleDataAddr, binary.moduleDataType())
+		md := newModuleData(moduleDataAddr, moduleDataType)
 		moduleDataList = append(moduleDataList, md)
 
 		moduleDataAddr = md.next(reader)

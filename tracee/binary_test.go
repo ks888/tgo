@@ -36,11 +36,11 @@ func TestOpenNonDwarfBinaryFile(t *testing.T) {
 	if _, err := binary.FindFunction(0); err == nil {
 		t.Errorf("FindFunction doesn't return error")
 	}
-	if funcs := binary.Functions(); len(funcs) == 0 {
-		t.Errorf("Functions return empty list")
+	if funcs := binary.Functions(); len(funcs) != 0 {
+		t.Errorf("Functions return non-empty list")
 	}
-	if binary.firstModuleDataAddress() == 0 {
-		t.Errorf("runtime.firstmoduledata address is 0")
+	if binary.firstModuleDataAddress() != 0 {
+		t.Errorf("runtime.firstmoduledata address is not 0")
 	}
 	if _, err := binary.findDwarfTypeByAddr(0); err == nil {
 		t.Errorf("findDwarfTypeByAddr doesn't return error")

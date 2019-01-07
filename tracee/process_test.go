@@ -10,7 +10,7 @@ import (
 )
 
 func TestLaunchProcess(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld, testutils.HelloworldAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestAttachProcess(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramInfloop)
 	_ = cmd.Start()
 
-	proc, err := AttachProcess(cmd.Process.Pid, testutils.ProgramInfloop, runtime.Version())
+	proc, err := AttachProcess(cmd.Process.Pid, testutils.ProgramInfloop, runtime.Version(), testutils.InfloopAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to attach process: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestAttachProcess(t *testing.T) {
 }
 
 func TestDetach(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld, testutils.HelloworldAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestDetach(t *testing.T) {
 }
 
 func TestContinueAndWait(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld, testutils.HelloworldAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestContinueAndWait(t *testing.T) {
 }
 
 func TestSingleStep(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld, testutils.HelloworldAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestSingleStep(t *testing.T) {
 }
 
 func TestSingleStep_NoBreakpoint(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld, testutils.HelloworldAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestSingleStep_NoBreakpoint(t *testing.T) {
 }
 
 func TestStackFrameAt(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld, testutils.HelloworldAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestStackFrameAt(t *testing.T) {
 }
 
 func TestStackFrameAt_NoDwarfCase(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworldNoDwarf)
+	proc, err := LaunchProcess(testutils.ProgramHelloworldNoDwarf, testutils.HelloworldAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestFindFunction_FillInOneUnknownParameterOffset(t *testing.T) {
 		testutils.HelloworldAddrOneParameter,
 		testutils.HelloworldAddrFmtPrintln,
 	} {
-		proc, err := LaunchProcess(testutils.ProgramHelloworld)
+		proc, err := LaunchProcess(testutils.ProgramHelloworld, testutils.HelloworldAddrFirstModuleData)
 		if err != nil {
 			t.Fatalf("failed to launch process: %v", err)
 		}
@@ -286,7 +286,7 @@ func TestFindFunction_FillInOneUnknownParameterOffset(t *testing.T) {
 }
 
 func TestFindFunction_FillInOutputParametersOffset(t *testing.T) {
-	proc, err := LaunchProcess(testutils.ProgramHelloworld)
+	proc, err := LaunchProcess(testutils.ProgramHelloworld, testutils.HelloworldAddrFirstModuleData)
 	if err != nil {
 		t.Fatalf("failed to launch process: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestReadInstructions(t *testing.T) {
 		if testdata.targetOS != "" && testdata.targetOS != runtime.GOOS {
 			continue
 		}
-		proc, err := LaunchProcess(testdata.program)
+		proc, err := LaunchProcess(testdata.program, testutils.HelloworldAddrFirstModuleData)
 		if err != nil {
 			t.Fatalf("failed to launch process: %v", err)
 		}
@@ -425,7 +425,7 @@ func TestReadInstructions(t *testing.T) {
 
 func TestCurrentGoRoutineInfo(t *testing.T) {
 	for i, testProgram := range []string{testutils.ProgramHelloworld, testutils.ProgramHelloworldNoDwarf} {
-		proc, err := LaunchProcess(testProgram)
+		proc, err := LaunchProcess(testProgram, testutils.HelloworldAddrFirstModuleData)
 		if err != nil {
 			t.Fatalf("[%d] failed to launch process: %v", i, err)
 		}
@@ -472,7 +472,7 @@ func TestCurrentGoRoutineInfo(t *testing.T) {
 
 func TestCurrentGoRoutineInfo_Panicking(t *testing.T) {
 	for _, testProgram := range []string{testutils.ProgramPanic, testutils.ProgramPanicNoDwarf} {
-		proc, err := LaunchProcess(testProgram)
+		proc, err := LaunchProcess(testProgram, testutils.HelloworldAddrFirstModuleData)
 		if err != nil {
 			t.Fatalf("failed to launch process: %v", err)
 		}
