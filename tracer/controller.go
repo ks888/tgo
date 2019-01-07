@@ -132,15 +132,6 @@ func (c *Controller) AddEndTracePoint(endAddr uint64) error {
 	return nil
 }
 
-func (c *Controller) findFunction(functionName string) (*tracee.Function, error) {
-	for _, function := range c.process.Binary.Functions() {
-		if function.Name == functionName {
-			return function, nil
-		}
-	}
-	return nil, fmt.Errorf("failed to find function %s", functionName)
-}
-
 // SetTraceLevel set the tracing level, which determines whether to print the traced info of the functions.
 // The traced info is printed if the function is (directly or indirectly) called by the trace point function AND
 // the stack depth is within the `level`.

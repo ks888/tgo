@@ -47,7 +47,7 @@ func TestAddStartTracePoint(t *testing.T) {
 	if err := controller.setPendingTracePoints(); err != nil {
 		t.Errorf("failed to set pending trace points: %v", err)
 	}
-	if !hasBreakpointAt(controller, "main.tracedFunc") {
+	if !controller.breakpoints.Exist(testutils.StartStopAddrTracedFunc) {
 		t.Errorf("breakpoint is not set at main.tracedFunc")
 	}
 
@@ -69,22 +69,13 @@ func TestAddEndTracePoint(t *testing.T) {
 	if err := controller.setPendingTracePoints(); err != nil {
 		t.Errorf("failed to set pending trace points: %v", err)
 	}
-	if !hasBreakpointAt(controller, "main.tracedFunc") {
+	if !controller.breakpoints.Exist(testutils.StartStopAddrTracedFunc) {
 		t.Errorf("breakpoint is not set at main.tracedFunc")
 	}
 
 	if err := controller.AddEndTracePoint(testutils.StartStopAddrTracedFunc); err != nil {
 		t.Errorf("failed to set tracing point: %v", err)
 	}
-}
-
-func hasBreakpointAt(controller *Controller, functionName string) bool {
-	f, err := controller.findFunction(functionName)
-	if err != nil {
-		return false
-	}
-
-	return controller.breakpoints.Exist(f.StartAddr)
 }
 
 func TestMainLoop_MainMain(t *testing.T) {

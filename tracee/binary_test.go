@@ -17,9 +17,6 @@ func TestOpenBinaryFile(t *testing.T) {
 		t.Fatalf("failed to create new binary: %v", err)
 	}
 
-	if binary.firstModuleDataAddress() == 0 {
-		t.Errorf("runtime.firstmoduledata address is 0")
-	}
 	if binary.moduleDataType() == nil {
 		t.Errorf("runtime.moduledata type is nil")
 	}
@@ -35,12 +32,6 @@ func TestOpenNonDwarfBinaryFile(t *testing.T) {
 	}
 	if _, err := binary.FindFunction(0); err == nil {
 		t.Errorf("FindFunction doesn't return error")
-	}
-	if funcs := binary.Functions(); len(funcs) != 0 {
-		t.Errorf("Functions return non-empty list")
-	}
-	if binary.firstModuleDataAddress() != 0 {
-		t.Errorf("runtime.firstmoduledata address is not 0")
 	}
 	if _, err := binary.findDwarfTypeByAddr(0); err == nil {
 		t.Errorf("findDwarfTypeByAddr doesn't return error")
@@ -73,24 +64,6 @@ func TestFindFunction(t *testing.T) {
 
 	if function.Parameters == nil {
 		t.Fatal("parameters field is nil")
-	}
-}
-
-func TestListFunctions(t *testing.T) {
-	binary, _ := OpenBinaryFile(testutils.ProgramHelloworld, GoVersion{})
-	functions := binary.Functions()
-	if functions == nil {
-		t.Fatalf("functions is nil")
-	}
-	hasMain := false
-	for _, function := range functions {
-		if function.Name == "main.main" {
-			hasMain = true
-			break
-		}
-	}
-	if !hasMain {
-		t.Errorf("no main.main")
 	}
 }
 

@@ -21,22 +21,16 @@ const (
 	dwarfOpFbreg          = 0x91   // DW_OP_fbreg
 )
 
-// TODO: remove Functions() and firstModuleDataAddress() if possible.
-
 // BinaryFile represents the program the tracee process is executing.
 type BinaryFile interface {
 	// FindFunction returns the function info to which the given pc specifies.
 	FindFunction(pc uint64) (*Function, error)
-	// Functions returns all the functions defined in the binary.
-	Functions() []*Function
 	// Close closes the binary file.
 	Close() error
 	// findDwarfTypeByAddr finds the dwarf.Type to which the given address specifies.
 	// The given address must be the address of the type (not value) and need to be adjusted
 	// using the moduledata.
 	findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error)
-	// firstModuleDataAddress returns the address of runtime.firstmoduledata.
-	firstModuleDataAddress() uint64
 	// moduleDataType returns the dwarf.Type of runtime.moduledata struct type.
 	moduleDataType() dwarf.Type
 	// runtimeGType returns the dwarf.Type of runtime.g struct type.
@@ -45,13 +39,11 @@ type BinaryFile interface {
 
 // debuggableBinaryFile represents the binary file with DWARF sections.
 type debuggableBinaryFile struct {
-	functions                    []*Function
-	dwarf                        dwarfData
-	closer                       io.Closer
-	types                        map[uint64]dwarf.Offset
-	cachedRuntimeGType           dwarf.Type
-	cachedFirstModuleDataAddress uint64
-	cachedModuleDataType         dwarf.Type
+	dwarf                dwarfData
+	closer               io.Closer
+	types                map[uint64]dwarf.Offset
+	cachedRuntimeGType   dwarf.Type
+	cachedModuleDataType dwarf.Type
 }
 
 type dwarfData struct {
@@ -90,17 +82,7 @@ func newDebuggableBinaryFile(data dwarfData, goVersion GoVersion, closer io.Clos
 	binary := debuggableBinaryFile{dwarf: data, closer: closer}
 
 	var err error
-	binary.functions, err = binary.listFunctions()
-	if err != nil {
-		return debuggableBinaryFile{}, err
-	}
-
 	binary.types, err = binary.buildTypes(goVersion)
-	if err != nil {
-		return debuggableBinaryFile{}, err
-	}
-
-	binary.cachedFirstModuleDataAddress, err = binary.findFirstModuleDataAddress()
 	if err != nil {
 		return debuggableBinaryFile{}, err
 	}
@@ -116,22 +98,6 @@ func newDebuggableBinaryFile(data dwarfData, goVersion GoVersion, closer io.Clos
 	}
 
 	return binary, nil
-}
-
-func (b debuggableBinaryFile) listFunctions() ([]*Function, error) {
-	reader := subprogramReader{raw: b.dwarf.Reader(), dwarfData: b.dwarf}
-
-	var funcs []*Function
-	for {
-		function, err := reader.Next(false)
-		if err != nil {
-			return nil, err
-		}
-		if function == nil {
-			return funcs, nil
-		}
-		funcs = append(funcs, function)
-	}
 }
 
 func (b debuggableBinaryFile) buildTypes(goVersion GoVersion) (map[uint64]dwarf.Offset, error) {
@@ -157,27 +123,6 @@ func (b debuggableBinaryFile) buildTypes(goVersion GoVersion) (map[uint64]dwarf.
 			types[val] = entry.Offset
 		}
 	}
-}
-
-const firstModuleDataName = "runtime.firstmoduledata"
-
-func (b debuggableBinaryFile) findFirstModuleDataAddress() (uint64, error) {
-	entry, err := b.findDWARFEntryByName(func(entry *dwarf.Entry) bool {
-		name, err := stringClassAttr(entry, dwarf.AttrName)
-		return name == firstModuleDataName && err == nil
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	loc, err := locationClassAttr(entry, dwarf.AttrLocation)
-	if err != nil {
-		return 0, err
-	}
-	if len(loc) == 0 || loc[0] != 0x3 {
-		return 0, fmt.Errorf("unexpected location format: %v", loc)
-	}
-	return binary.LittleEndian.Uint64(loc[1:]), nil
 }
 
 const moduleDataTypeName = "runtime.moduledata"
@@ -229,11 +174,6 @@ func (b debuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
 	return reader.Seek(pc)
 }
 
-// Functions lists the subprograms in the debug info section. They don't include parameters info.
-func (b debuggableBinaryFile) Functions() []*Function {
-	return b.functions
-}
-
 // Close releases the resources associated with the binary.
 func (b debuggableBinaryFile) Close() error {
 	return b.closer.Close()
@@ -242,10 +182,6 @@ func (b debuggableBinaryFile) Close() error {
 func (b debuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error) {
 	implTypOffset := b.types[typeAddr]
 	return b.dwarf.Type(implTypOffset)
-}
-
-func (b debuggableBinaryFile) firstModuleDataAddress() uint64 {
-	return b.cachedFirstModuleDataAddress
 }
 
 func (b debuggableBinaryFile) moduleDataType() dwarf.Type {
@@ -702,20 +638,12 @@ func (b nonDebuggableBinaryFile) FindFunction(pc uint64) (*Function, error) {
 	return nil, errors.New("no DWARF info")
 }
 
-func (b nonDebuggableBinaryFile) Functions() []*Function {
-	return nil
-}
-
 func (b nonDebuggableBinaryFile) Close() error {
 	return b.closer.Close()
 }
 
 func (b nonDebuggableBinaryFile) findDwarfTypeByAddr(typeAddr uint64) (dwarf.Type, error) {
 	return nil, errors.New("no DWARF info")
-}
-
-func (b nonDebuggableBinaryFile) firstModuleDataAddress() uint64 {
-	return 0
 }
 
 // Assume this dwarf.Type represents a subset of the module data type in the case DWARF is not available.
