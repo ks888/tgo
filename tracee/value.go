@@ -223,7 +223,14 @@ func (v interfaceValue) String() string {
 	if v.implType == nil {
 		return "nil"
 	}
-	return fmt.Sprintf("%s(%s)", v.implType, v.implVal)
+
+	typeName := v.implType.String()
+	const structPrefix = "struct "
+	if strings.HasPrefix(typeName, structPrefix) {
+		// just to make the logs cleaner
+		typeName = strings.TrimPrefix(typeName, structPrefix)
+	}
+	return fmt.Sprintf("%s(%s)", typeName, v.implVal)
 }
 
 type arrayValue struct {

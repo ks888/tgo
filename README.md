@@ -1,4 +1,4 @@
-# tgo: the function tracer for Go programs.
+# tgo: a function tracer to boost your print debug
 
 [![GoDoc](https://godoc.org/github.com/ks888/tgo?status.svg)](https://godoc.org/github.com/ks888/tgo/lib/tracer)
 [![Build Status](https://travis-ci.com/ks888/tgo.svg?branch=master)](https://travis-ci.com/ks888/tgo)

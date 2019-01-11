@@ -47,6 +47,11 @@ func (md *moduleData) functab(reader memoryReader, index int) (entry, funcoff ui
 		return
 	}
 
+	if innerFtabType, ok := ftabType.(*dwarf.TypedefType); ok {
+		// some go version wraps the ftab.
+		ftabType = innerFtabType.Type
+	}
+
 	for _, field := range ftabType.(*dwarf.StructType).Field {
 		val := binary.LittleEndian.Uint64(buff[field.ByteOffset : field.ByteOffset+field.Type.Size()])
 		switch field.Name {

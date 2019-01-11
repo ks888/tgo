@@ -27,7 +27,7 @@ var (
 	HelloworldAddrTwoParameters           uint64
 	HelloworldAddrFuncWithAbstractOrigin  uint64 // any function which corresponding DIE has the DW_AT_abstract_origin attribute.
 	HelloworldAddrTwoReturns              uint64
-	HelloworldAddrFmtPrintln              uint64
+	HelloworldAddrErrorsNew               uint64
 	HelloworldAddrGoBuildID               uint64
 	HelloworldAddrFirstModuleData         uint64
 
@@ -156,8 +156,8 @@ func buildProgramHelloworld(srcDirname string) error {
 			HelloworldAddrTwoParameters = value
 		case "main.twoReturns":
 			HelloworldAddrTwoReturns = value
-		case "fmt.Println":
-			HelloworldAddrFmtPrintln = value
+		case "errors.New":
+			HelloworldAddrErrorsNew = value
 		case "reflect.Value.Kind":
 			HelloworldAddrFuncWithAbstractOrigin = value
 		case "go.buildid":
@@ -392,7 +392,7 @@ func buildProgramSpecialFuncs(srcDirname string) error {
 func buildProgram(programName string) error {
 	// Optimization is enabled, because the tool aims to work well even if the binary is optimized.
 	linkOptions := ""
-	if strings.HasPrefix(runtime.Version(), "go1.11") {
+	if strings.HasPrefix(runtime.Version(), "go1.11") || strings.HasPrefix(runtime.Version(), "go1.12") || strings.Contains(runtime.Version(), "devel") {
 		linkOptions = "-compressdwarf=false" // not required, but useful for debugging.
 	}
 	src := programName + ".go"

@@ -163,7 +163,7 @@ func TestMainLoop_MainNoParameter(t *testing.T) {
 	}
 
 	output := buff.String()
-	if strings.Count(output, "fmt.Println") != 2 {
+	if strings.Count(output, "fmt.Println") != 2 && strings.Count(output, "fmt.Fprintln") != 2 {
 		t.Errorf("unexpected output: %s", output)
 	}
 	if strings.Count(output, "main.noParameter") != 0 {

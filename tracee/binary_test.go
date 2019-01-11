@@ -152,17 +152,17 @@ func TestSeek_DIEHasAbstractOrigin(t *testing.T) {
 	if function.Name != "reflect.Value.Kind" {
 		t.Fatalf("invalid function name: %s", function.Name)
 	}
-	if len(function.Parameters) == 0 {
-		t.Fatalf("parameter is empty")
+	if len(function.Parameters) != 2 {
+		t.Fatalf("invalid num of parameters: %d", len(function.Parameters))
 	}
-	if function.Parameters[0].Name != "v" {
+	if function.Parameters[0].Name != "v" && function.Parameters[0].Name != "~r0" {
 		t.Errorf("invalid parameter name: %s", function.Parameters[0].Name)
 	}
 	if function.Parameters[0].Typ == nil {
 		t.Errorf("empty type")
 	}
-	if function.Parameters[0].IsOutput {
-		t.Errorf("wrong flag")
+	if function.Parameters[0].IsOutput && function.Parameters[1].IsOutput {
+		t.Errorf("wrong flag: %v, %v", function.Parameters[0].IsOutput, function.Parameters[1].IsOutput)
 	}
 }
 
@@ -229,8 +229,7 @@ func TestSeek_HasTwoParameters(t *testing.T) {
 func TestAddressClassAttr(t *testing.T) {
 	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
-	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
-	subprogram, _ := reader.raw.Next()
+	subprogram, _ := reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 
 	addr, err := addressClassAttr(subprogram, dwarf.AttrLowpc)
 	if err != nil {
@@ -244,8 +243,7 @@ func TestAddressClassAttr(t *testing.T) {
 func TestAddressClassAttr_InvalidAttr(t *testing.T) {
 	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
-	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
-	subprogram, _ := reader.raw.Next()
+	subprogram, _ := reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 
 	_, err := addressClassAttr(subprogram, 0x0)
 	if err == nil {
@@ -256,8 +254,7 @@ func TestAddressClassAttr_InvalidAttr(t *testing.T) {
 func TestAddressClassAttr_InvalidClass(t *testing.T) {
 	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
-	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
-	subprogram, _ := reader.raw.Next()
+	subprogram, _ := reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 
 	_, err := addressClassAttr(subprogram, dwarf.AttrName)
 	if err == nil {
@@ -268,14 +265,13 @@ func TestAddressClassAttr_InvalidClass(t *testing.T) {
 func TestStringClassAttr(t *testing.T) {
 	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
-	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
-	subprogram, _ := reader.raw.Next()
+	subprogram, _ := reader.raw.SeekPC(testutils.HelloworldAddrNoParameter)
 
 	name, err := stringClassAttr(subprogram, dwarf.AttrName)
 	if err != nil {
 		t.Fatalf("failed to get string class: %v", err)
 	}
-	if name != "main.noParameter" {
+	if name != "main" {
 		t.Errorf("invalid name: %s", name)
 	}
 }
@@ -295,7 +291,7 @@ func TestReferenceClassAttr(t *testing.T) {
 	}
 }
 
-func TestLocClassAttr(t *testing.T) {
+func TestLocationClassAttr_Or_LocationListClassAttr(t *testing.T) {
 	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
 	_, _ = reader.Next(false)
@@ -303,7 +299,14 @@ func TestLocClassAttr(t *testing.T) {
 
 	loc, err := locationClassAttr(param, dwarf.AttrLocation)
 	if err != nil {
-		t.Fatalf("failed to get location class: %v", err)
+		loc, innerErr := locationListClassAttr(param, dwarf.AttrLocation)
+		if innerErr != nil {
+			t.Fatalf("failed to get location class: %v, %v", err, innerErr)
+		}
+		if loc == 0 {
+			t.Errorf("invalid loc")
+		}
+		return
 	}
 	if loc == nil {
 		t.Errorf("invalid loc")

@@ -254,9 +254,9 @@ func TestStackFrameAt_NoDwarfCase(t *testing.T) {
 }
 
 func TestFindFunction_FillInOneUnknownParameterOffset(t *testing.T) {
-	for _, testdata := range []uint64{
+	for i, testdata := range []uint64{
 		testutils.HelloworldAddrOneParameter,
-		testutils.HelloworldAddrFmtPrintln,
+		testutils.HelloworldAddrErrorsNew,
 	} {
 		proc, err := LaunchProcess(testutils.ProgramHelloworld, nil, helloworldAttr)
 		if err != nil {
@@ -274,7 +274,7 @@ func TestFindFunction_FillInOneUnknownParameterOffset(t *testing.T) {
 
 		f, err := proc.FindFunction(testdata)
 		if err != nil {
-			t.Fatalf("failed to find func: %v", err)
+			t.Fatalf("[%d] failed to find func for %x: %v", i, testdata, err)
 		}
 
 		numNotExist := 0
