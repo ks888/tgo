@@ -19,7 +19,7 @@ func TestStartStop(t *testing.T) {
 	if strings.Count(string(out), "main.tracedFunc") != 2 {
 		t.Errorf("unexpected output: %s", string(out))
 	}
-	if strings.Count(string(out), "fmt.Println") != 4 {
+	if strings.Count(string(out), "fmt.Println") != 4 && strings.Count(string(out), "fmt.Fprintln") != 4 /* inlined */ {
 		t.Errorf("unexpected output: %s", string(out))
 	}
 }
@@ -28,7 +28,7 @@ func TestStart(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramStartOnly)
 	out, _ := cmd.CombinedOutput()
 
-	if strings.Count(string(out), "fmt.Println") != 2 {
+	if strings.Count(string(out), "fmt.Println") != 2 && strings.Count(string(out), "fmt.Fprintln") != 2 /* inlined */ {
 		t.Errorf("unexpected output: %s", string(out))
 	}
 }

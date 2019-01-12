@@ -294,8 +294,9 @@ func TestReferenceClassAttr(t *testing.T) {
 func TestLocationClassAttr_Or_LocationListClassAttr(t *testing.T) {
 	dwarfData := findDwarfData(t, testutils.ProgramHelloworld)
 	reader := subprogramReader{raw: dwarfData.Reader(), dwarfData: dwarfData}
-	_, _ = reader.Next(false)
-	param, _ := reader.raw.Next()
+	_, _ = reader.raw.SeekPC(testutils.HelloworldAddrErrorsNew)
+	reader.raw.Next()
+	param, _ := reader.raw.Next() // get the input parameter of errors.New function
 
 	loc, err := locationClassAttr(param, dwarf.AttrLocation)
 	if err != nil {
