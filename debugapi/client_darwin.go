@@ -924,8 +924,8 @@ func calcChecksum(buff []byte) uint8 {
 }
 
 var debugServerPathList = []string{
-	"/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Resources/debugserver",
 	"/Library/Developer/CommandLineTools/Library/PrivateFrameworks/LLDB.framework/Versions/A/Resources/debugserver",
+	"/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Resources/debugserver",
 }
 
 func debugServerPath() (string, error) {
