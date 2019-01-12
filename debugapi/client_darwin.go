@@ -18,8 +18,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const debugServerPath = "/Library/Developer/CommandLineTools/Library/PrivateFrameworks/LLDB.framework/Versions/A/Resources/debugserver"
-
 // Assumes the packet size is not larger than this.
 const (
 	maxPacketSize = 4096
@@ -56,9 +54,14 @@ func (c *Client) LaunchProcess(name string, arg ...string) error {
 		return err
 	}
 
+	path, err := debugServerPath()
+	if err != nil {
+		return err
+	}
+
 	debugServerArgs := []string{"-F", "-R", listener.Addr().String(), "--", name}
 	debugServerArgs = append(debugServerArgs, arg...)
-	cmd := exec.Command(debugServerPath, debugServerArgs...)
+	cmd := exec.Command(path, debugServerArgs...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, the signal sent to all the group members.
 	if err := cmd.Start(); err != nil {
 		return err
@@ -314,8 +317,13 @@ func (c *Client) AttachProcess(pid int) error {
 		return err
 	}
 
+	path, err := debugServerPath()
+	if err != nil {
+		return err
+	}
+
 	debugServerArgs := []string{"-F", "-R", listener.Addr().String(), fmt.Sprintf("--attach=%d", pid)}
-	cmd := exec.Command(debugServerPath, debugServerArgs...)
+	cmd := exec.Command(path, debugServerArgs...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // Otherwise, the signal sent to all the group members.
 	if err := cmd.Start(); err != nil {
 		return err
@@ -913,4 +921,18 @@ func calcChecksum(buff []byte) uint8 {
 		sum += b
 	}
 	return sum
+}
+
+var debugServerPathList = []string{
+	"/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Resources/debugserver",
+	"/Library/Developer/CommandLineTools/Library/PrivateFrameworks/LLDB.framework/Versions/A/Resources/debugserver",
+}
+
+func debugServerPath() (string, error) {
+	for _, path := range debugServerPathList {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("debugserver is not found in these paths: %v", debugServerPathList)
 }
