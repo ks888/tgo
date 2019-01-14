@@ -147,6 +147,8 @@ func (p *Process) ContinueAndWait() (debugapi.Event, error) {
 }
 
 // SingleStep executes one instruction while clearing and setting breakpoints.
+// If not all the threads are stopped, there is some possibility that another thread
+// passes through the breakpoint while single-stepping.
 func (p *Process) SingleStep(threadID int, trappedAddr uint64) error {
 	if err := p.setPC(threadID, trappedAddr); err != nil {
 		return err

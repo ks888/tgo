@@ -3,6 +3,7 @@ package tracer
 import (
 	"bytes"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -181,6 +182,11 @@ var goRoutinesAttrs = Attributes{
 }
 
 func TestMainLoop_GoRoutines(t *testing.T) {
+	// Because this test case have many threads run the same function, one thread may pass through the breakpoint
+	// while another thread is single-stepping.
+	os.Setenv("GOMAXPROCS", "1")
+	defer os.Unsetenv("GOMAXPROCS")
+
 	controller := NewController()
 	buff := &bytes.Buffer{}
 	controller.outputWriter = buff
