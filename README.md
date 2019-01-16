@@ -93,7 +93,7 @@ Install the `tgo` binary and its library:
 go get -u github.com/ks888/tgo/cmd/tgo
 ```
 
-tgo depends on the ptrace mechanism and attaches to the non-descendant process. To enable this, run the command below:
+The `tgo` binary attaches to your process using the ptrace mechanism. To enable this, run the command below:
 
 ```
 sudo sh -c 'echo 0 > /proc/sys/kernel/yama/ptrace_scope'
@@ -139,7 +139,7 @@ func main() {
 }
 ```
 
-When you build and run this program, you can see the function trace logs of the 1st call of `fib()` and `fmt.Println()`. Though `fib()` is called recursively, only the 1st call's log is printed.
+When you build and run this program, you can see the function trace logs of `fib()` and `fmt.Println()`. Though `fib()` is called recursively, only the 1st call's log is printed.
 
 ```shell
 % go build simple.go
@@ -151,7 +151,7 @@ When you build and run this program, you can see the function trace logs of the 
 / (#01) fmt.Println() (n = 2, err = nil)
 ```
 
-If this example doesn't work, try to print the error value `tracer.Start()` returns.
+If this example doesn't work, check the error value `tracer.Start()` returns.
 
 In this example, you may omit the the `tracer.Stop()` line because tracing automatically ends when the caller function of `tracer.Start()` returns.
 
@@ -186,7 +186,7 @@ func main() {
 }
 ```
 
-In this example, the trace level is 2. Now the functions (1st call of) `fib()` and `fmt.Println()` calls internally are traced.
+In this example, the trace level is 2. Because the default level is 1, now the trace logs go one level deeper.
 
 ```shell
 % go build tracelevel.go
@@ -204,11 +204,13 @@ In this example, the trace level is 2. Now the functions (1st call of) `fib()` a
 / (#01) fmt.Println() (n = 2, err = nil)
 ```
 
+Note that the input args of `fmt.Fprintln` is `-` (not available) here. It's likely the debugging info are omitted due to optimization. To see the complete result, set `"-gcflags=-N"` (fast, but may not complete) or `"-gcflags=all=-N"` (slow, but complete) to `GOFLAGS` environment variable.
+
 #### Works with optimized binary
 
-Some debugging info, such as DWARF sections, are dropped if you run the program with `go run` or `go test`. Fortunately tgo works even in such a case, though the args part of trace logs are not perfect.
+As the last example above shows, the binary is optimized by default. Further, if you run the program with `go run` or `go test`, some debugging info, such as DWARF sections, are dropped. 
 
-Let's run the simple example above using `go run`:
+Fortunately, tgo works even in such a case. Let's run the simple example above using `go run`:
 
 ```
 % go run simple.go
@@ -219,7 +221,7 @@ Let's run the simple example above using `go run`:
 / (#01) fmt.Println() (0xc0000d1f78, 0x1, 0x1, 0x2, 0x0, 0x0)
 ```
 
-The call of / return from functions are traced as usual, but its args parts show the entire value of the args in the stack frame by pointer size. In this example, `\ (#01) main.fib(0x3, 0x0)` means the 1st 8 byte of args value is 0x3, which is the 1st input args of the `main.fib()`. Also, `/ (#01) main.fib() (0x3, 0x2)` means the 2nd 8 byte of args value is 0x2, which is the 1st return value. Actually, it's same format as the stack trace shown in the case of panic.
+Functions are traced as usual, but its args part is the entire args value in the stack frame, shown by pointer size. In this example, `\ (#01) main.fib(0x3, 0x0)` means the 1st 8 byte of args value is 0x3, which is the input args of the `main.fib()`. Also, the next 8 byte of args value is 0x0, which is the initial value of the return value. Because it's difficult to separate input args from the return args, all the args are shown in any case. Actually, this format is same as the stack trace shown in the case of panic.
 
 If you want to show the args as usual, set `"-ldflags=-w=false"` to `GOFLAGS` environment variable so that the debugging info is included in the binary. For example:
 
@@ -232,12 +234,11 @@ If you want to show the args as usual, set `"-ldflags=-w=false"` to `GOFLAGS` en
 / (#01) fmt.Println() (n = 2, err = nil)
 ```
 
-Note that GOFLAGS is not supported in go 1.10 or earlier. Also, some debugging info may be still insufficient (especially in `go run` case). Consider using `go build` or `go test -o` in that case.
+Note that GOFLAGS is not supported in go 1.10 or earlier. Also, some debugging info may be still insufficient especially in `go run` case. Consider using `go build` in that case.
 
 #### Tips
 
 There are some random tips:
-* The output writer of trace logs can be changed. See the [godoc](https://godoc.org/github.com/ks888/tgo/lib/tracer) for more info.
-* When a go routine calls `tracer.Start()`, it means just that go routine is traced and other go routines are not.
-* Builtin functions are not traced. These functions are usually `runtime` functions at runtime and it's difficult to determine which `runtime` functions correspond to which builtin functions.
-* If the value part of the args is `-`, for example `fmt.Fprintln(a = -, w = -)`, it's likely the debugging info are omitted due to optimization. To see the complete result, set `"-gcflags=all=-N -gcflags=-l"` to `GOFLAGS` environment variable.
+* There are more options to change the tgo's behaviors. See the [godoc](https://godoc.org/github.com/ks888/tgo/lib/tracer) for details.
+* When a go routine calls `tracer.Start()`, it means only the go routine is traced and other go routines are not.
+* Builtin functions are not traced. These functions are usually replaced with `runtime` package functions or assembly instructions.
