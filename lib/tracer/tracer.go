@@ -1,3 +1,5 @@
+// Package tracer provides functions to start and stop tracing, as well as the options to change
+// the tracer's behaviors.
 package tracer
 
 import (
@@ -32,8 +34,8 @@ var (
 	serverMtx sync.Mutex
 )
 
-//go:linkname FirstModuleData runtime.firstmoduledata
-var FirstModuleData interface{}
+//go:linkname firstModuleData runtime.firstmoduledata
+var firstModuleData interface{}
 
 // SetTraceLevel sets the trace level. Functions are traced if the stack depth is within this trace level. The stack depth here is based on the point tracing is enabled. The default is 1.
 func SetTraceLevel(option int) {
@@ -112,7 +114,7 @@ func initialize(startTracePoint, endTracePoint uintptr) error {
 		InitialStartTracePoint: startTracePoint,
 		GoVersion:              runtime.Version(),
 		ProgramPath:            programPath,
-		FirstModuleDataAddr:    uintptr(unsafe.Pointer(&FirstModuleData)),
+		FirstModuleDataAddr:    uintptr(unsafe.Pointer(&firstModuleData)),
 	}
 	reply := &struct{}{}
 	if err := client.Call("Tracer.Attach", attachArgs, reply); err != nil {

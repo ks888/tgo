@@ -91,6 +91,8 @@ var (
 
 	ProgramStartOnly string
 
+	ProgramFib string
+
 	ProgramSpecialFuncs             string
 	SpecialFuncsAddrMain            uint64
 	SpecialFuncsAddrFirstModuleData uint64
@@ -122,6 +124,9 @@ func init() {
 		panic(err)
 	}
 	if err := buildProgramStartOnly(srcDirname); err != nil {
+		panic(err)
+	}
+	if err := buildProgramFib(srcDirname); err != nil {
 		panic(err)
 	}
 	if err := buildProgramSpecialFuncs(srcDirname); err != nil {
@@ -367,6 +372,12 @@ func buildProgramStartOnly(srcDirname string) error {
 	ProgramStartOnly = srcDirname + "/testdata/startOnly"
 
 	return buildProgram(ProgramStartOnly)
+}
+
+func buildProgramFib(srcDirname string) error {
+	ProgramFib = srcDirname + "/testdata/fib"
+
+	return buildProgram(ProgramFib)
 }
 
 func buildProgramSpecialFuncs(srcDirname string) error {
