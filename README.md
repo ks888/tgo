@@ -44,8 +44,8 @@ func main() {
 When you run the program, the trace logs are printed:
 
 ```shell
-% go build fibonacci.go
-% ./fibonacci 3
+% go build fib.go
+% ./fib 3
 \ (#01) strconv.ParseInt(s = "3", base = 10, bitSize = 64)
 |\ (#01) strconv.ParseUint(s = "3", base = 10, bitSize = 64)
 |/ (#01) strconv.ParseUint() (~r3 = 3, ~r4 = nil)
@@ -66,9 +66,9 @@ When you run the program, the trace logs are printed:
 ### Features
 
 * As easy as print debug: just insert 1-2 line(s) to your code
-* The verbosity level of the trace logs is customizable
-* Works with optimized binary
-  * though logs may lack some information. See the usage below for more details.
+* But more powerful: visually tells you what's actually going on in your code
+* Works without debugging info
+  * It's actually important for testing. See the usage below for more details.
 * Support Linux/Mac OS X
 
 ### Install
@@ -151,7 +151,7 @@ When you build and run this program, you can see the function trace logs of `fib
 / (#01) fmt.Println() (n = 2, err = nil)
 ```
 
-If this example doesn't work, check the error value `tracer.Start()` returns.
+All the examples in this doc are available in the `examples` directory. If this example doesn't work, check the error value `tracer.Start()` returns.
 
 In this example, you may omit the the `tracer.Stop()` line because tracing automatically ends when the caller function of `tracer.Start()` returns.
 
@@ -206,35 +206,59 @@ In this example, the trace level is 2. Because the default level is 1, now the t
 
 Note that the input args of `fmt.Fprintln` is `-` (not available) here. It's likely the debugging info are omitted due to optimization. To see the complete result, set `"-gcflags=-N"` (fast, but may not complete) or `"-gcflags=all=-N"` (slow, but complete) to `GOFLAGS` environment variable.
 
-#### Works with optimized binary
-
-As the last example above shows, the binary is optimized by default. Further, if you run the program with `go run` or `go test`, some debugging info, such as DWARF sections, are dropped. 
-
-Fortunately, tgo works even in such a case. Let's run the simple example above using `go run`:
-
-```
-% go run simple.go
-\ (#01) main.fib(0x3, 0x0)
-/ (#01) main.fib() (0x3, 0x2)
-\ (#01) fmt.Println(0xc0000d1f78, 0x1, 0x1, 0xc00013c368, 0x0, 0x0)
-2
-/ (#01) fmt.Println() (0xc0000d1f78, 0x1, 0x1, 0x2, 0x0, 0x0)
+```shell
+% GOFLAGS="-gcflags=all=-N" go build tracelevel.go
 ```
 
-Functions are traced as usual, but its args part is the entire args value in the stack frame, shown by pointer size. In this example, `\ (#01) main.fib(0x3, 0x0)` means the 1st 8 byte of args value is 0x3, which is the input args of the `main.fib()`. Also, the next 8 byte of args value is 0x0, which is the initial value of the return value. Because it's difficult to separate input args from the return args, all the args are shown in any case. Actually, this format is same as the stack trace shown in the case of panic.
+#### Works without debugging info
+
+If you run the program with `go test` or `go run`, debugging info, such as DWARF data, are dropped. Fortunately, tgo works even in such a case. Let's trace the test for the fib function:
+
+```golang
+package main
+
+import (
+	"testing"
+
+	"github.com/ks888/tgo/lib/tracer"
+)
+
+func TestFib(t *testing.T) {
+	tracer.Start()
+	actual := fib(3)
+	tracer.Stop()
+
+	if actual != 2 {
+		t.Errorf("wrong: %v", actual)
+	}
+}
+```
+
+```
+% go test -v fib.go fib_test.go
+=== RUN   TestFib
+\ (#20) command-line-arguments.fib(0x3, 0x0)
+/ (#20) command-line-arguments.fib() (0x3, 0x2)
+--- PASS: TestFib (0.46s)
+PASS
+ok      command-line-arguments  0.478s
+```
+
+Functions are traced as usual, but args are the entire args value, divided by pointer size. In this example, `\ (#20) command-line-arguments.fib(0x3, 0x0)` indicates 1st input args is `0x3` and the initial return value is `0x0`. Because it's difficult to separate input args from the return args without debugging info, all args are shown in any case. Actually, this format imitates the stack trace shown in the case of panic.
 
 If you want to show the args as usual, set `"-ldflags=-w=false"` to `GOFLAGS` environment variable so that the debugging info is included in the binary. For example:
 
 ```
-% GOFLAGS="-ldflags=-w=false" go run simple.go
-\ (#01) main.fib()
-/ (#01) main.fib() ()
-\ (#01) fmt.Println(a = []{int(2)})
-2
-/ (#01) fmt.Println() (n = 2, err = nil)
+% GOFLAGS="-ldflags=-w=false" go test -v fib.go fib_test.go
+=== RUN   TestFib
+\ (#06) command-line-arguments.fib(n = 3)
+/ (#06) command-line-arguments.fib() (~r1 = 2)
+--- PASS: TestFib (0.55s)
+PASS
+ok      command-line-arguments  0.570s
 ```
 
-Note that GOFLAGS is not supported in go 1.10 or earlier. Also, some debugging info may be still insufficient especially in `go run` case. Consider using `go build` in that case.
+Note that GOFLAGS is not supported in go 1.10 or earlier.
 
 #### Tips
 

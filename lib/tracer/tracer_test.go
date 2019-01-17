@@ -24,19 +24,6 @@ func TestStartStop(t *testing.T) {
 	}
 }
 
-// TestFib checks the demo in README works as expected.
-func TestFib(t *testing.T) {
-	cmd := exec.Command(testutils.ProgramFib)
-	out, _ := cmd.CombinedOutput()
-
-	if strings.Count(string(out), "main.fib") != 2 {
-		t.Errorf("unexpected output: %s", string(out))
-	}
-	if strings.Count(string(out), "fmt.Println") != 2 && strings.Count(string(out), "fmt.Fprintln") != 2 /* inlined */ {
-		t.Errorf("unexpected output: %s", string(out))
-	}
-}
-
 func TestStart(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramStartOnly)
 	out, _ := cmd.CombinedOutput()
