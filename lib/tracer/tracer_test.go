@@ -28,7 +28,7 @@ func TestStart(t *testing.T) {
 	cmd := exec.Command(testutils.ProgramStartOnly)
 	out, _ := cmd.CombinedOutput()
 
-	if strings.Count(string(out), "fmt.Println") != 2 && strings.Count(string(out), "fmt.Fprintln") != 2 /* inlined */ {
+	if strings.Count(string(out), "main.f") != 2 {
 		t.Errorf("unexpected output: %s", string(out))
 	}
 }

@@ -695,6 +695,12 @@ func (p *Process) ReadInstructions(f *Function) ([]x86asm.Inst, error) {
 		return nil, err
 	}
 
+	for addr, bp := range p.breakpoints {
+		if f.StartAddr <= addr && addr < f.EndAddr {
+			copy(buff[addr-f.StartAddr:], bp.orgInsts)
+		}
+	}
+
 	var pos int
 	var insts []x86asm.Inst
 	for pos < len(buff) {

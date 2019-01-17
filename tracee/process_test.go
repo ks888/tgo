@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ks888/tgo/testutils"
+	"golang.org/x/arch/x86/x86asm"
 )
 
 var helloworldAttr = Attributes{
@@ -432,6 +433,33 @@ func TestReadInstructions(t *testing.T) {
 		if len(insts) == 0 {
 			t.Errorf("empty insts")
 		}
+	}
+}
+
+func TestReadInstructions_SetBreakpointBefore(t *testing.T) {
+	proc, err := LaunchProcess(testutils.ProgramHelloworld, nil, helloworldAttr)
+	if err != nil {
+		t.Fatalf("failed to launch process: %v", err)
+	}
+	defer proc.Detach()
+
+	f, err := proc.FindFunction(testutils.HelloworldAddrMain)
+	if err != nil {
+		t.Fatalf("failed to find function: %v", err)
+	}
+
+	proc.SetBreakpoint(f.StartAddr)
+
+	insts, err := proc.ReadInstructions(f)
+	if err != nil {
+		t.Fatalf("failed to read instructions: %v", err)
+	}
+
+	if len(insts) == 0 {
+		t.Errorf("empty insts")
+	}
+	if insts[0].Op == x86asm.INT {
+		t.Errorf("breakpoint is not reset")
 	}
 }
 

@@ -2,18 +2,18 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/ks888/tgo/lib/tracer"
 )
 
 func tracedFunc() {
-	if err := tracer.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "%v", err)
-		return
-	}
+	// do not change this order. Test the case in which the tracing point is same as the call-inst breakpoint.
+	tracer.Start()
+	f()
+}
 
-	fmt.Println("traced")
+//go:noinline
+func f() {
 }
 
 func main() {

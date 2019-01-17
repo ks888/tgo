@@ -248,10 +248,12 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	}
 
 	if !c.tracingPoints.Inside(goRoutineInfo.ID) {
-		if c.tracingPoints.IsStartAddress(breakpointAddr) {
-			return c.enterTracepoint(threadID, goRoutineInfo)
+		if !c.tracingPoints.IsStartAddress(breakpointAddr) {
+			return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 		}
-		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
+		if err := c.enterTracepoint(threadID, goRoutineInfo); err != nil {
+			return err
+		}
 	}
 
 	if c.tracingPoints.IsEndAddress(breakpointAddr) {
@@ -290,8 +292,8 @@ func (c *Controller) enterTracepoint(threadID int, goRoutineInfo tracee.GoRoutin
 		c.tracingPoints.Enter(goRoutineID)
 	}
 
-	breakpointAddr := goRoutineInfo.CurrentPC - 1
-	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
+	// not single step here, because tracing point may be used as breakpoint as well.
+	return nil
 }
 
 func (c *Controller) exitTracepoint(threadID int, goRoutineID int64, breakpointAddr uint64) error {
@@ -342,7 +344,7 @@ func (c *Controller) alterCallInstBreakpoints(enable bool, goRoutineID int64, pc
 
 func (c *Controller) setDeferredFuncBreakpoints(goRoutineInfo tracee.GoRoutineInfo) error {
 	nextAddr := goRoutineInfo.NextDeferFuncAddr
-	if nextAddr == 0x0 /* no deferred func */ {
+	if nextAddr == 0x0 /* no deferred func */ || c.breakpoints.Hit(nextAddr, goRoutineInfo.ID) /* exist already */ {
 		return nil
 	}
 
@@ -412,7 +414,7 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, breakpointAddr uint6
 		return err
 	}
 
-	currStackDepth := len(remainingFuncs) + 1 // add the currently calling funciont
+	currStackDepth := len(remainingFuncs) + 1 // add the currently calling function
 	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {
 		currStackDepth -= c.countSkippedFuncs(status.callingFunctions, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
 	}
