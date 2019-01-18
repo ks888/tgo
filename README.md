@@ -151,7 +151,7 @@ When you build and run this program, you can see the function trace logs of `fib
 / (#01) fmt.Println() (n = 2, err = nil)
 ```
 
-All the examples in this doc are available in the `examples` directory. If this example doesn't work, check the error value `tracer.Start()` returns.
+All the examples in this doc are available in the `_examples` directory. If this example doesn't work, check the error value `tracer.Start()` returns.
 
 In this example, you may omit the the `tracer.Stop()` line because tracing automatically ends when the caller function of `tracer.Start()` returns.
 
