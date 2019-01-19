@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/ks888/tgo/debugapi"
-	"github.com/ks888/tgo/log"
 	"github.com/ks888/tgo/tracee"
 	"golang.org/x/arch/x86/x86asm"
 )
@@ -302,7 +301,7 @@ func (c *Controller) exitTracepoint(threadID int, goRoutineID int64, breakpointA
 			return err
 		}
 
-		c.tracingPoints.Exit()
+		c.tracingPoints.Exit(goRoutineID)
 	}
 
 	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
@@ -615,65 +614,4 @@ func (c *Controller) findCallInstAddresses(f *tracee.Function) ([]uint64, error)
 // Interrupt interrupts the main loop.
 func (c *Controller) Interrupt() {
 	c.interruptCh <- true
-}
-
-type tracingPoints struct {
-	startAddressList []uint64
-	endAddressList   []uint64
-	goRoutinesInside []int64
-}
-
-// IsStartAddress returns true if the addr is same as the start address.
-func (p *tracingPoints) IsStartAddress(addr uint64) bool {
-	for _, startAddr := range p.startAddressList {
-		if startAddr == addr {
-			return true
-		}
-	}
-	return false
-}
-
-// IsEndAddress returns true if the addr is same as the end address.
-func (p *tracingPoints) IsEndAddress(addr uint64) bool {
-	for _, endAddr := range p.endAddressList {
-		if endAddr == addr {
-			return true
-		}
-	}
-	return false
-}
-
-// Empty returns true if no go routines are inside the tracing point
-func (p *tracingPoints) InsideAny() bool {
-	return len(p.goRoutinesInside) != 0
-}
-
-// Enter updates the list of the go routines which are inside the tracing point.
-// It does nothing if the go routine has already entered.
-func (p *tracingPoints) Enter(goRoutineID int64) {
-	for _, existingGoRoutine := range p.goRoutinesInside {
-		if existingGoRoutine == goRoutineID {
-			return
-		}
-	}
-
-	log.Debugf("Start tracing of go routine #%d", goRoutineID)
-	p.goRoutinesInside = append(p.goRoutinesInside, goRoutineID)
-	return
-}
-
-// Exit clears the inside go routines list.
-func (p *tracingPoints) Exit() {
-	log.Debugf("End tracing of all go routines")
-	p.goRoutinesInside = nil
-}
-
-// Inside returns true if the go routine is inside the tracing point.
-func (p *tracingPoints) Inside(goRoutineID int64) bool {
-	for _, existingGoRoutine := range p.goRoutinesInside {
-		if existingGoRoutine == goRoutineID {
-			return true
-		}
-	}
-	return false
 }
