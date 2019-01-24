@@ -243,14 +243,11 @@ func TestStackFrameAt_NoDwarfCase(t *testing.T) {
 	if stackFrame.Function.EndAddr == 0 {
 		t.Errorf("end addr is 0")
 	}
-	if len(stackFrame.Function.Parameters) != 2 {
+	if len(stackFrame.Function.Parameters) != 1 {
 		t.Errorf("wrong number of params")
 	}
 	if stackFrame.Function.Parameters[0].IsOutput {
 		t.Errorf("should be input parameter")
-	}
-	if !stackFrame.Function.Parameters[1].IsOutput {
-		t.Errorf("should be output parameter")
 	}
 }
 

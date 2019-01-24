@@ -512,15 +512,13 @@ func (p *Process) findFunctionByModuleData(pc uint64) (*Function, error) {
 	}
 
 	numParams := int(args) / 8 // the actual number of params is unknown. Assumes the each parameter has 1 ptr size.
-	params := make([]Parameter, 0, numParams*2)
+	params := make([]Parameter, 0, numParams)
 	for i := 0; i < numParams; i++ {
 		param := Parameter{
 			Typ:    &dwarf.PtrType{CommonType: dwarf.CommonType{ByteSize: 8}, Type: &dwarf.VoidType{}},
 			Offset: i * 8,
 			Exist:  true,
 		}
-		params = append(params, param)
-		param.IsOutput = true
 		params = append(params, param)
 	}
 

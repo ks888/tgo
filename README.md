@@ -46,21 +46,21 @@ When you run the program, the trace logs are printed:
 ```shell
 % go build fib.go
 % ./fib 3
-\ (#01) strconv.ParseInt(s = "3", base = 10, bitSize = 64)
-|\ (#01) strconv.ParseUint(s = "3", base = 10, bitSize = 64)
-|/ (#01) strconv.ParseUint() (~r3 = 3, ~r4 = nil)
-/ (#01) strconv.ParseInt() (i = 3, err = nil)
-\ (#01) main.fib(n = 3)
-|\ (#01) main.fib(n = 2)
-|/ (#01) main.fib() (~r1 = 1)
-|\ (#01) main.fib(n = 1)
-|/ (#01) main.fib() (~r1 = 1)
-/ (#01) main.fib() (~r1 = 2)
-\ (#01) fmt.Println(a = []{int(2)})
-|\ (#01) fmt.Fprintln(a = -, w = -)
+\ (#01) strconv.ParseInt(s = "3", base = 10, bitSize = 64) (...)
+|\ (#01) strconv.ParseUint(s = "3", base = 10, bitSize = 64) (...)
+|/ (#01) strconv.ParseUint(s = "3", base = 10, bitSize = 64) (~r3 = 3, ~r4 = nil)
+/ (#01) strconv.ParseInt(s = "3", base = 10, bitSize = 64) (i = 3, err = nil)
+\ (#01) main.fib(n = 3) (...)
+|\ (#01) main.fib(n = 2) (...)
+|/ (#01) main.fib(n = 2) (~r1 = 1)
+|\ (#01) main.fib(n = 1) (...)
+|/ (#01) main.fib(n = 1) (~r1 = 1)
+/ (#01) main.fib(n = 3) (~r1 = 2)
+\ (#01) fmt.Println(a = []{int(2)}) (...)
+|\ (#01) fmt.Fprintln(a = -, w = -) (...)
 2
-|/ (#01) fmt.Fprintln() (n = 2, err = nil)
-/ (#01) fmt.Println() (n = 2, err = nil)
+|/ (#01) fmt.Fprintln(a = -, w = -) (n = 2, err = nil)
+/ (#01) fmt.Println(a = []{int(2)}) (n = 2, err = nil)
 ```
 
 ### Features
@@ -144,11 +144,11 @@ When you build and run this program, you can see the function trace logs of `fib
 ```shell
 % go build simple.go
 % ./simple
-\ (#01) main.fib(n = 3)
-/ (#01) main.fib() (~r1 = 2)
-\ (#01) fmt.Println(a = []{int(2)})
+\ (#01) main.fib(n = 3) (...)
+/ (#01) main.fib(n = 3) (~r1 = 2)
+\ (#01) fmt.Println(a = []{int(2)}) (...)
 2
-/ (#01) fmt.Println() (n = 2, err = nil)
+/ (#01) fmt.Println(a = []{int(2)}) (n = 2, err = nil)
 ```
 
 All the examples in this doc are available in the `_examples` directory. If this example doesn't work, check the error value `tracer.Start()` returns.
@@ -191,17 +191,17 @@ In this example, the trace level is 2. Because the default level is 1, now the t
 ```shell
 % go build tracelevel.go
 % ./tracelevel
-\ (#01) main.fib(n = 3)
-|\ (#01) main.fib(n = 2)
-|/ (#01) main.fib() (~r1 = 1)
-|\ (#01) main.fib(n = 1)
-|/ (#01) main.fib() (~r1 = 1)
-/ (#01) main.fib() (~r1 = 2)
-\ (#01) fmt.Println(a = []{int(2)})
-|\ (#01) fmt.Fprintln(a = -, w = -)
+\ (#01) main.fib(n = 3) (...)
+|\ (#01) main.fib(n = 2) (...)
+|/ (#01) main.fib(n = 2) (~r1 = 1)
+|\ (#01) main.fib(n = 1) (...)
+|/ (#01) main.fib(n = 1) (~r1 = 1)
+/ (#01) main.fib(n = 3) (~r1 = 2)
+\ (#01) fmt.Println(a = []{int(2)}) (...)
+|\ (#01) fmt.Fprintln(a = -, w = -) (...)
 2
-|/ (#01) fmt.Fprintln() (n = 2, err = nil)
-/ (#01) fmt.Println() (n = 2, err = nil)
+|/ (#01) fmt.Fprintln(a = -, w = -) (n = 2, err = nil)
+/ (#01) fmt.Println(a = []{int(2)}) (n = 2, err = nil)
 ```
 
 Note that the input args of `fmt.Fprintln` is `-` (not available) here. It's likely the debugging info are omitted due to optimization. To see the complete result, set `"-gcflags=-N"` (fast, but may not complete) or `"-gcflags=all=-N"` (slow, but complete) to `GOFLAGS` environment variable.
@@ -237,25 +237,25 @@ func TestFib(t *testing.T) {
 ```
 % go test -v fib.go fib_test.go
 === RUN   TestFib
-\ (#20) command-line-arguments.fib(0x3, 0x0)
-/ (#20) command-line-arguments.fib() (0x3, 0x2)
+\ (#06) command-line-arguments.fib(0x3, 0x0) ()
+/ (#06) command-line-arguments.fib(0x3, 0x2) ()
 --- PASS: TestFib (0.46s)
 PASS
-ok      command-line-arguments  0.478s
+ok      command-line-arguments  0.485s
 ```
 
-Functions are traced as usual, but args are the entire args value, divided by pointer size. In this example, `\ (#20) command-line-arguments.fib(0x3, 0x0)` indicates 1st input args is `0x3` and the initial return value is `0x0`. Because it's difficult to separate input args from the return args without debugging info, all args are shown in any case. Actually, this format imitates the stack trace shown in the case of panic.
+Functions are traced as usual, but args are the entire args value, divided by pointer size. In this example, `\ (#06) command-line-arguments.fib(0x3, 0x0) ()` indicates 1st input args is `0x3` and the initial return value is `0x0`. Because it's difficult to separate input args from the return args without debugging info, all args are shown as the input args. Actually, this format imitates the stack trace shown in the case of panic.
 
 If you want to show the args as usual, set `"-ldflags=-w=false"` to `GOFLAGS` environment variable so that the debugging info is included in the binary. For example:
 
 ```
 % GOFLAGS="-ldflags=-w=false" go test -v fib.go fib_test.go
 === RUN   TestFib
-\ (#06) command-line-arguments.fib(n = 3)
-/ (#06) command-line-arguments.fib() (~r1 = 2)
+\ (#18) command-line-arguments.fib(n = 3) (...)
+/ (#18) command-line-arguments.fib(n = 3) (~r1 = 2)
 --- PASS: TestFib (0.55s)
 PASS
-ok      command-line-arguments  0.570s
+ok      command-line-arguments  0.578s
 ```
 
 Note that GOFLAGS is not supported in go 1.10 or earlier.
