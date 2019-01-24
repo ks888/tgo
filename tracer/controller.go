@@ -567,22 +567,32 @@ func (c *Controller) printableFunc(f *tracee.Function) bool {
 }
 
 func (c *Controller) printFunctionInput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {
-	var args []string
+	var inputArgs []string
 	for _, arg := range stackFrame.InputArguments {
-		args = append(args, arg.ParseValue(c.parseLevel))
+		inputArgs = append(inputArgs, arg.ParseValue(c.parseLevel))
 	}
 
-	fmt.Fprintf(c.outputWriter, "%s\\ (#%02d) %s(%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+	var outputArgs string
+	if len(stackFrame.OutputArguments) > 0 {
+		outputArgs = "..."
+	}
+
+	fmt.Fprintf(c.outputWriter, "%s\\ (#%02d) %s(%s) (%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(inputArgs, ", "), outputArgs)
 
 	return nil
 }
 
 func (c *Controller) printFunctionOutput(goRoutineID int64, stackFrame *tracee.StackFrame, depth int) error {
-	var args []string
-	for _, arg := range stackFrame.OutputArguments {
-		args = append(args, arg.ParseValue(c.parseLevel))
+	var inputArgs []string
+	for _, arg := range stackFrame.InputArguments {
+		inputArgs = append(inputArgs, arg.ParseValue(c.parseLevel))
 	}
-	fmt.Fprintf(c.outputWriter, "%s/ (#%02d) %s() (%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(args, ", "))
+
+	var outputArgs []string
+	for _, arg := range stackFrame.OutputArguments {
+		outputArgs = append(outputArgs, arg.ParseValue(c.parseLevel))
+	}
+	fmt.Fprintf(c.outputWriter, "%s/ (#%02d) %s(%s) (%s)\n", strings.Repeat("|", depth-1), goRoutineID, stackFrame.Function.Name, strings.Join(inputArgs, ", "), strings.Join(outputArgs, ", "))
 
 	return nil
 }
