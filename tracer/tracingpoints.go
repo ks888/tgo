@@ -28,28 +28,28 @@ func (p *tracingPoints) IsEndAddress(addr uint64) bool {
 	return false
 }
 
-// Enter updates the list of the go routines which are inside the tracing point.
-// It does nothing if the go routine has already entered.
+// Enter updates the inside go routines list.
+// If one go routine call this method N times, the go routine needs to call the Exit method N times to exit.
 func (p *tracingPoints) Enter(goRoutineID int64) {
-	for _, existingGoRoutine := range p.goRoutinesInside {
-		if existingGoRoutine == goRoutineID {
-			return
-		}
+	if !p.Inside(goRoutineID) {
+		log.Debugf("Start tracing of go routine #%d", goRoutineID)
 	}
 
-	log.Debugf("Start tracing of go routine #%d", goRoutineID)
 	p.goRoutinesInside = append(p.goRoutinesInside, goRoutineID)
 	return
 }
 
-// Exit clears the inside go routines list.
+// Exit removes the go routine from the inside go routines list.
 func (p *tracingPoints) Exit(goRoutineID int64) {
-	log.Debugf("End tracing of go routine #%d", goRoutineID)
 	for i, existingGoRoutine := range p.goRoutinesInside {
 		if existingGoRoutine == goRoutineID {
 			p.goRoutinesInside = append(p.goRoutinesInside[0:i], p.goRoutinesInside[i+1:]...)
-			return
+			break
 		}
+	}
+
+	if !p.Inside(goRoutineID) {
+		log.Debugf("End tracing of go routine #%d", goRoutineID)
 	}
 	return
 }

@@ -336,5 +336,6 @@ Note that GOFLAGS is not supported in go 1.10 or earlier.
 
 There are some random tips:
 * There are more options to change the tgo's behaviors. See the [godoc](https://godoc.org/github.com/ks888/tgo/lib/tracer) for details.
-* When a go routine calls `tracer.Start()`, it means only that go routine is traced. Other go routines are not affected. Similarly, `tracer.Stop()` just stops the tracing of the go routine which called the Stop function.
+* When a go routine calls `tracer.Start()`, it means only that go routine is traced. Other go routines are not affected.
+  * Similarly, `tracer.Stop()` just stops the tracing of the go routine which called that function.
 * Builtin functions are not traced. These functions are usually replaced with `runtime` package functions or assembly instructions.

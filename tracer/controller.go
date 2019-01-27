@@ -111,7 +111,7 @@ func (c *Controller) AttachTracee(pid int, attrs Attributes) error {
 	return err
 }
 
-// AddStartTracePoint adds the starting point of the tracing. The go routines which executed one of these addresses start to be traced.
+// AddStartTracePoint adds the starting point of the tracing. The go routines which passed one of the starting points before are traced.
 func (c *Controller) AddStartTracePoint(startAddr uint64) error {
 	select {
 	case c.pendingStartTracePoint <- startAddr:
@@ -122,7 +122,7 @@ func (c *Controller) AddStartTracePoint(startAddr uint64) error {
 	return nil
 }
 
-// AddEndTracePoint adds the ending point of the tracing. The tracing is disabled when any go routine executes any of these addresses.
+// AddEndTracePoint adds the ending point of the tracing. The go routines which passed one of the ending points are not traced anymore.
 func (c *Controller) AddEndTracePoint(endAddr uint64) error {
 	select {
 	case c.pendingEndTracePoint <- endAddr:
@@ -246,22 +246,19 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 
-	if !c.tracingPoints.Inside(goRoutineInfo.ID) {
-		if !c.tracingPoints.IsStartAddress(breakpointAddr) {
-			return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
-		}
+	if c.tracingPoints.IsStartAddress(breakpointAddr) {
 		if err := c.enterTracepoint(threadID, goRoutineInfo); err != nil {
 			return err
 		}
 	}
-
 	if c.tracingPoints.IsEndAddress(breakpointAddr) {
-		return c.exitTracepoint(threadID, goRoutineInfo.ID, goRoutineInfo.CurrentPC-1)
-	} else if c.tracingPoints.IsStartAddress(breakpointAddr) {
-		// the tracing point may be used as the break point as well. If not, return here.
-		if _, ok := c.breakpointTypes[breakpointAddr]; !ok {
-			return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
+		if err := c.exitTracepoint(threadID, goRoutineInfo.ID, goRoutineInfo.CurrentPC-1); err != nil {
+			return err
 		}
+	}
+
+	if !c.tracingPoints.Inside(goRoutineInfo.ID) {
+		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 
 	switch c.breakpointTypes[breakpointAddr] {
@@ -272,39 +269,36 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 	case breakpointTypeReturn:
 		return c.handleTrapAfterFunctionReturn(threadID, goRoutineInfo)
 	default:
-		return fmt.Errorf("unknown breakpoint: %#x", breakpointAddr)
+		// maybe it's just the tracing point
+		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 }
 
 func (c *Controller) enterTracepoint(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
 	goRoutineID := goRoutineInfo.ID
 
-	if !c.tracingPoints.Inside(goRoutineID) {
-		if err := c.setCallInstBreakpoints(goRoutineID, goRoutineInfo.CurrentPC); err != nil {
-			return err
-		}
-
-		if err := c.setDeferredFuncBreakpoints(goRoutineInfo); err != nil {
-			return err
-		}
-
-		c.tracingPoints.Enter(goRoutineID)
+	if err := c.setCallInstBreakpoints(goRoutineID, goRoutineInfo.CurrentPC); err != nil {
+		return err
 	}
 
-	// not single step here, because tracing point may be used as breakpoint as well.
+	if err := c.setDeferredFuncBreakpoints(goRoutineInfo); err != nil {
+		return err
+	}
+
+	c.tracingPoints.Enter(goRoutineID)
 	return nil
 }
 
 func (c *Controller) exitTracepoint(threadID int, goRoutineID int64, breakpointAddr uint64) error {
-	if c.tracingPoints.Inside(goRoutineID) {
+	c.tracingPoints.Exit(goRoutineID)
+
+	if !c.tracingPoints.Inside(goRoutineID) {
 		if err := c.breakpoints.ClearAllByGoRoutineID(goRoutineID); err != nil {
 			return err
 		}
-
-		c.tracingPoints.Exit(goRoutineID)
 	}
 
-	return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
+	return nil
 }
 
 func (c *Controller) setCallInstBreakpoints(goRoutineID int64, pc uint64) error {
