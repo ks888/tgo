@@ -4,7 +4,7 @@
 [![Build Status](https://travis-ci.com/ks888/tgo.svg?branch=master)](https://travis-ci.com/ks888/tgo)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ks888/tgo)](https://goreportcard.com/report/github.com/ks888/tgo)
 
-### Example
+### Examples
 
 In this example, the functions called between `tracer.Start()` and `tracer.Stop()` are traced.
 
@@ -27,7 +27,6 @@ func fib(n int) int {
 }
 
 func main() {
-	tracer.SetTraceLevel(2)
 	tracer.Start()
 
 	var n int64
@@ -47,21 +46,94 @@ When you run the program, the trace logs are printed:
 % go build fib.go
 % ./fib 3
 \ (#01) strconv.ParseInt(s = "3", base = 10, bitSize = 64) (...)
-|\ (#01) strconv.ParseUint(s = "3", base = 10, bitSize = 64) (...)
-|/ (#01) strconv.ParseUint(s = "3", base = 10, bitSize = 64) (~r3 = 3, ~r4 = nil)
 / (#01) strconv.ParseInt(s = "3", base = 10, bitSize = 64) (i = 3, err = nil)
 \ (#01) main.fib(n = 3) (...)
-|\ (#01) main.fib(n = 2) (...)
-|/ (#01) main.fib(n = 2) (~r1 = 1)
-|\ (#01) main.fib(n = 1) (...)
-|/ (#01) main.fib(n = 1) (~r1 = 1)
 / (#01) main.fib(n = 3) (~r1 = 2)
 \ (#01) fmt.Println(a = []{int(2)}) (...)
-|\ (#01) fmt.Fprintln(a = -, w = -) (...)
 2
-|/ (#01) fmt.Fprintln(a = -, w = -) (n = 2, err = nil)
 / (#01) fmt.Println(a = []{int(2)}) (n = 2, err = nil)
 ```
+
+Now let's use the tgo to boost your debugging. The example below sorts the int slice using the quicksort, *but it has the bug*.
+
+```golang
+package main
+
+import (
+	"fmt"
+
+	"github.com/ks888/tgo/lib/tracer"
+)
+
+func qsort(data []int, start, end int) {
+	if end-start <= 1 {
+		return
+	}
+
+	index := partition(data, start, end)
+	qsort(data, start, index-1)
+	qsort(data, index, end)
+	return
+}
+
+func partition(data []int, start, end int) int {
+	pivot := data[(start+end)/2]
+	left, right := start, end
+	for {
+		for left <= end && data[left] < pivot {
+			left++
+		}
+		for right >= start && data[right] > pivot {
+			right--
+		}
+		if left > right {
+			return left
+		}
+
+		data[left], data[right] = data[right], data[left]
+		left++
+		right--
+	}
+}
+
+func main() {
+	tracer.SetTraceLevel(2) // will be explained later
+	tracer.Start()
+
+	testdata := []int{3, 1, 2, 5, 4}
+	qsort(testdata, 0, len(testdata)-1)
+
+	tracer.Stop()
+
+	fmt.Println(testdata)
+}
+```
+
+The result is `[2 1 3 4 5]`, which is obviously not sorted.
+
+```shell
+% go build qsort.go
+% ./qsort
+\ (#01) main.qsort(data = []{3, 1, 2, 5, 4}, start = 0, end = 4) ()
+|\ (#01) main.partition(data = []{3, 1, 2, 5, 4}, start = 0, end = 4) (...)
+|/ (#01) main.partition(data = []{2, 1, 3, 5, 4}, start = 0, end = 4) (~r3 = 2)
+|\ (#01) main.qsort(data = []{2, 1, 3, 5, 4}, start = 0, end = 1) ()
+|/ (#01) main.qsort(data = []{2, 1, 3, 5, 4}, start = 0, end = 1) ()
+|\ (#01) main.qsort(data = []{2, 1, 3, 5, 4}, start = 2, end = 4) ()
+|/ (#01) main.qsort(data = []{2, 1, 3, 4, 5}, start = 2, end = 4) ()
+/ (#01) main.qsort(data = []{2, 1, 3, 4, 5}, start = 0, end = 4) ()
+[2 1 3 4 5]
+```
+
+Now the trace logs help you find a bug.
+
+1. The 1st line of the logs shows `main.qsort` is called properly. `main.qsort` sorts the `data` between `start` and `end` (inclusive).
+2. The 2nd and 3rd lines tell us `main.partition` works as expected here. `main.partition` partitions the `data` between `start` and `end` (inclusive) and returns the pivot index.
+3. The 4th and 5th lines are ... strange. `start` is 0 and `end` is 1, but the `data` between 0 and 1 is not sorted.
+
+Let's see the implementation of `main.qsort`, assuming `start` is 0 and `end` is 1. It becomes apparent the `if` statement at the 1st line has the off-by-one error. `end-start <= 1` should be `end-start <= 0`. We found the bug.
+
+It's possible to use print debugging instead, but we may need to scatter print functions and run the code again and again. Also, it's likely the logs are less structured. The tgo approach is faster and clearer and so can boost your debugging.
 
 ### Features
 
@@ -244,7 +316,7 @@ PASS
 ok      command-line-arguments  0.485s
 ```
 
-Functions are traced as usual, but args are the entire args value, divided by pointer size. In this example, `\ (#06) command-line-arguments.fib(0x3, 0x0) ()` indicates 1st input args is `0x3` and the initial return value is `0x0`. Because it's difficult to separate input args from the return args without debugging info, all args are shown as the input args. Actually, this format imitates the stack trace shown in the case of panic.
+Functions are traced as usual, but args are the entire args value, divided by pointer size. In this example, `\ (#06) command-line-arguments.fib(0x3, 0x0) ()` indicates 1st input args is `0x3` and the initial return value is `0x0`. Because it's difficult to separate input args from the return args without debugging info, all args are shown as the input args. This format imitates the stack trace shown in the case of panic.
 
 If you want to show the args as usual, set `"-ldflags=-w=false"` to `GOFLAGS` environment variable so that the debugging info is included in the binary. For example:
 

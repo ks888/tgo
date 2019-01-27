@@ -16,7 +16,6 @@ func fib(n int) int {
 }
 
 func main() {
-	tracer.SetTraceLevel(2)
 	tracer.Start()
 
 	var n int64
