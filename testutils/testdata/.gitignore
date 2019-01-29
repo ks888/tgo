@@ -7,4 +7,5 @@
 !typeprint.go
 !startStop.go
 !startOnly.go
+!recursiveStartStop.go
 !specialFuncs.go

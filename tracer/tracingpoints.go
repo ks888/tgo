@@ -5,7 +5,6 @@ import "github.com/ks888/tgo/log"
 type tracingPoints struct {
 	startAddressList []uint64
 	endAddressList   []uint64
-	goRoutinesInside []int64
 }
 
 // IsStartAddress returns true if the addr is same as the start address.
@@ -28,35 +27,37 @@ func (p *tracingPoints) IsEndAddress(addr uint64) bool {
 	return false
 }
 
-// Enter updates the inside go routines list.
-// If one go routine call this method N times, the go routine needs to call the Exit method N times to exit.
-func (p *tracingPoints) Enter(goRoutineID int64) {
-	if !p.Inside(goRoutineID) {
+type tracingGoRoutines []int64
+
+// Add adds the go routine to the tracing list.
+// If one go routine call this method N times, the go routine needs to call the Remove method N times to exit.
+func (t *tracingGoRoutines) Add(goRoutineID int64) {
+	if !t.Tracing(goRoutineID) {
 		log.Debugf("Start tracing of go routine #%d", goRoutineID)
 	}
 
-	p.goRoutinesInside = append(p.goRoutinesInside, goRoutineID)
+	*t = append(*t, goRoutineID)
 	return
 }
 
-// Exit removes the go routine from the inside go routines list.
-func (p *tracingPoints) Exit(goRoutineID int64) {
-	for i, existingGoRoutine := range p.goRoutinesInside {
+// Remove removes the go routine from the tracing list.
+func (t *tracingGoRoutines) Remove(goRoutineID int64) {
+	for i, existingGoRoutine := range *t {
 		if existingGoRoutine == goRoutineID {
-			p.goRoutinesInside = append(p.goRoutinesInside[0:i], p.goRoutinesInside[i+1:]...)
+			*t = append((*t)[0:i], (*t)[i+1:]...)
 			break
 		}
 	}
 
-	if !p.Inside(goRoutineID) {
+	if !t.Tracing(goRoutineID) {
 		log.Debugf("End tracing of go routine #%d", goRoutineID)
 	}
 	return
 }
 
-// Inside returns true if the go routine is inside the tracing point.
-func (p *tracingPoints) Inside(goRoutineID int64) bool {
-	for _, existingGoRoutine := range p.goRoutinesInside {
+// Tracing returns true if the go routine is traced.
+func (t *tracingGoRoutines) Tracing(goRoutineID int64) bool {
+	for _, existingGoRoutine := range *t {
 		if existingGoRoutine == goRoutineID {
 			return true
 		}

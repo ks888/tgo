@@ -21,11 +21,6 @@ func main() {
 
 	fmt.Println("traced")
 
-	// start again (should be no-op)
-	if err := tracer.Start(); err != nil {
-		panic(err)
-	}
-
 	arr := tracedFunc()
 	arr = append(arr, 1)
 

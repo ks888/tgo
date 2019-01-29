@@ -225,8 +225,6 @@ When you build and run this program, you can see the function trace logs of `fib
 
 All the examples in this doc are available in the `_examples` directory. If this example doesn't work, check the error value `tracer.Start()` returns.
 
-In this example, you may omit the the `tracer.Stop()` line because tracing automatically ends when the caller function of `tracer.Start()` returns.
-
 #### Set TraceLevel
 
 You often need a little deeper trace logs. For example, you may want to know the functions `fib()` and `fmt.Println()` call internally. You can do that by adjusting the trace level with `tracer.SetTraceLevel()`.

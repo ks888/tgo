@@ -67,12 +67,12 @@ func Start() error {
 	serverMtx.Lock()
 	defer serverMtx.Unlock()
 
-	pcs := make([]uintptr, 2)
+	pcs := make([]uintptr, 1)
 	_ = runtime.Callers(2, pcs)
-	startTracePoint, endTracePoint := pcs[0], pcs[1]
+	startTracePoint := pcs[0]
 
 	if serverCmd == nil {
-		err := initialize(startTracePoint, endTracePoint)
+		err := initialize(startTracePoint)
 		if err != nil {
 			_ = terminateServer()
 			return fmt.Errorf("failed to start tracer: %v", err)
@@ -81,13 +81,10 @@ func Start() error {
 	}
 
 	reply := &struct{}{} // sometimes the nil reply value causes panic even if the reply is not written.
-	if err := client.Call("Tracer.AddStartTracePoint", startTracePoint, reply); err != nil {
-		return err
-	}
-	return client.Call("Tracer.AddEndTracePoint", endTracePoint, reply)
+	return client.Call("Tracer.AddStartTracePoint", startTracePoint, reply)
 }
 
-func initialize(startTracePoint, endTracePoint uintptr) error {
+func initialize(startTracePoint uintptr) error {
 	addr, err := startServer()
 	if err != nil {
 		return err
@@ -118,10 +115,6 @@ func initialize(startTracePoint, endTracePoint uintptr) error {
 	}
 	reply := &struct{}{}
 	if err := client.Call("Tracer.Attach", attachArgs, reply); err != nil {
-		return err
-	}
-
-	if err := client.Call("Tracer.AddEndTracePoint", endTracePoint, reply); err != nil {
 		return err
 	}
 

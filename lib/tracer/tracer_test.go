@@ -19,7 +19,14 @@ func TestStartStop(t *testing.T) {
 	if strings.Count(string(out), "main.tracedFunc") != 2 {
 		t.Errorf("unexpected output: %s", string(out))
 	}
-	if strings.Count(string(out), "fmt.Println") != 4 && strings.Count(string(out), "fmt.Fprintln") != 4 /* inlined */ {
+
+	if strings.Count(string(out), "fmt.Println") == 0 {
+		// inlined
+		if strings.Count(string(out), "fmt.Fprintln") != 4 {
+			t.Errorf("unexpected output: %s", string(out))
+		}
+	} else if strings.Count(string(out), "fmt.Println") != 4 {
+		// not inlined
 		t.Errorf("unexpected output: %s", string(out))
 	}
 }
@@ -29,6 +36,15 @@ func TestStart(t *testing.T) {
 	out, _ := cmd.CombinedOutput()
 
 	if strings.Count(string(out), "main.f") != 2 {
+		t.Errorf("unexpected output: %s", string(out))
+	}
+}
+
+func TestRecursiveStartStop(t *testing.T) {
+	cmd := exec.Command(testutils.ProgramRecursiveStartStop)
+	out, _ := cmd.CombinedOutput()
+
+	if strings.Count(string(out), "main.dec") != 6 {
 		t.Errorf("unexpected output: %s", string(out))
 	}
 }

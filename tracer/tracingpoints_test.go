@@ -2,36 +2,36 @@ package tracer
 
 import "testing"
 
-func TestTracingPoints_EnterAndExit(t *testing.T) {
-	points := tracingPoints{}
+func TestTracingGoRoutines_AddAndRemove(t *testing.T) {
+	list := tracingGoRoutines{}
 	var id int64 = 1
-	points.Enter(id)
-	if !points.Inside(id) {
+	list.Add(id)
+	if !list.Tracing(id) {
 		t.Errorf("go routine id %d is not traced", id)
 	}
 
-	points.Exit(1)
-	if points.Inside(id) {
+	list.Remove(1)
+	if list.Tracing(id) {
 		t.Errorf("go routine id %d is still traced", id)
 	}
 }
 
-func TestTracingPoints_MultipleEnterAndExit(t *testing.T) {
-	points := tracingPoints{}
+func TestTracingGoRoutines_MultipleAddAndRemove(t *testing.T) {
+	list := tracingGoRoutines{}
 	var id int64 = 1
-	points.Enter(id)
-	if !points.Inside(id) {
+	list.Add(id)
+	if !list.Tracing(id) {
 		t.Errorf("go routine id %d is not traced", id)
 	}
-	points.Enter(id)
+	list.Add(id)
 
-	points.Exit(1)
-	if !points.Inside(id) {
+	list.Remove(1)
+	if !list.Tracing(id) {
 		t.Errorf("go routine id %d is not traced", id)
 	}
 
-	points.Exit(1)
-	if points.Inside(id) {
+	list.Remove(1)
+	if list.Tracing(id) {
 		t.Errorf("go routine id %d is still traced", id)
 	}
 }

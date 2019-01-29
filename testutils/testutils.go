@@ -91,6 +91,8 @@ var (
 
 	ProgramStartOnly string
 
+	ProgramRecursiveStartStop string
+
 	ProgramSpecialFuncs             string
 	SpecialFuncsAddrMain            uint64
 	SpecialFuncsAddrFirstModuleData uint64
@@ -122,6 +124,9 @@ func init() {
 		panic(err)
 	}
 	if err := buildProgramStartOnly(srcDirname); err != nil {
+		panic(err)
+	}
+	if err := buildProgramRecursiveStartStop(srcDirname); err != nil {
 		panic(err)
 	}
 	if err := buildProgramSpecialFuncs(srcDirname); err != nil {
@@ -367,6 +372,12 @@ func buildProgramStartOnly(srcDirname string) error {
 	ProgramStartOnly = srcDirname + "/testdata/startOnly"
 
 	return buildProgram(ProgramStartOnly)
+}
+
+func buildProgramRecursiveStartStop(srcDirname string) error {
+	ProgramRecursiveStartStop = srcDirname + "/testdata/recursiveStartStop"
+
+	return buildProgram(ProgramRecursiveStartStop)
 }
 
 func buildProgramSpecialFuncs(srcDirname string) error {
