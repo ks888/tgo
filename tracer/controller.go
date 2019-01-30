@@ -17,15 +17,14 @@ const chanBufferSize = 64
 // ErrInterrupted indicates the tracer is interrupted due to the Interrupt() call.
 var ErrInterrupted = errors.New("interrupted")
 
-type breakpointType int
+type breakpointHint int
 
 const (
-	// These types determine the handling of hit-breakpoints.
-	breakpointTypeUnknown breakpointType = iota
-	breakpointTypeCall
-	breakpointTypeDeferredFunc
-	breakpointTypeReturn
-	breakpointTypeReturnAndCall
+	// These hints are used to determine how to handle a go routine which hit a breakpoint.
+	// No need to cover all the breakpoints.
+	breakpointHintUnknown breakpointHint = iota
+	breakpointHintCall
+	breakpointHintDeferredFunc
 )
 
 // Controller controls the associated tracee process.
@@ -35,7 +34,7 @@ type Controller struct {
 	statusStore         map[int64]goRoutineStatus
 	callInstAddrCache   map[uint64][]uint64
 
-	breakpointTypes map[uint64]breakpointType
+	breakpointHints map[uint64]breakpointHint
 	breakpoints     Breakpoints
 
 	tracingPoints     tracingPoints
@@ -66,13 +65,6 @@ func (status goRoutineStatus) usedStackSize() uint64 {
 	return 0
 }
 
-func (status goRoutineStatus) lastFunctionAddr() uint64 {
-	if len(status.callingFunctions) > 0 {
-		return status.callingFunctions[len(status.callingFunctions)-1].StartAddr
-	}
-	return 0
-}
-
 type callingFunction struct {
 	*tracee.Function
 	returnAddress          uint64
@@ -85,7 +77,7 @@ func NewController() *Controller {
 	return &Controller{
 		outputWriter:           os.Stdout,
 		statusStore:            make(map[int64]goRoutineStatus),
-		breakpointTypes:        make(map[uint64]breakpointType),
+		breakpointHints:        make(map[uint64]breakpointHint),
 		callInstAddrCache:      make(map[uint64][]uint64),
 		interruptCh:            make(chan bool, chanBufferSize),
 		pendingStartTracePoint: make(chan uint64, chanBufferSize),
@@ -255,15 +247,19 @@ func (c *Controller) handleTrapEventOfThread(threadID int) error {
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 
-	switch c.breakpointTypes[breakpointAddr] {
-	case breakpointTypeCall, breakpointTypeReturnAndCall:
+	status, _ := c.statusStore[goRoutineInfo.ID]
+	if status.usedStackSize() > goRoutineInfo.UsedStackSize {
+		if err := c.handleTrapAfterFunctionReturn(threadID, goRoutineInfo); err != nil {
+			return err
+		}
+	}
+
+	switch c.breakpointHints[breakpointAddr] {
+	case breakpointHintCall:
 		return c.handleTrapBeforeFunctionCall(threadID, goRoutineInfo)
-	case breakpointTypeDeferredFunc:
+	case breakpointHintDeferredFunc:
 		return c.handleTrapAtDeferredFuncCall(threadID, goRoutineInfo)
-	case breakpointTypeReturn:
-		return c.handleTrapAfterFunctionReturn(threadID, goRoutineInfo)
 	default:
-		// maybe it's just the tracing point
 		return c.handleTrapAtUnrelatedBreakpoint(threadID, breakpointAddr)
 	}
 }
@@ -284,10 +280,6 @@ func (c *Controller) enterTracepoint(threadID int, goRoutineInfo tracee.GoRoutin
 	goRoutineID := goRoutineInfo.ID
 
 	if err := c.setCallInstBreakpoints(goRoutineID, goRoutineInfo.CurrentPC); err != nil {
-		return err
-	}
-
-	if err := c.setDeferredFuncBreakpoints(goRoutineInfo); err != nil {
 		return err
 	}
 
@@ -329,7 +321,7 @@ func (c *Controller) alterCallInstBreakpoints(enable bool, goRoutineID int64, pc
 	for _, callInstAddr := range callInstAddresses {
 		if enable {
 			err = c.breakpoints.SetConditional(callInstAddr, goRoutineID)
-			c.breakpointTypes[callInstAddr] = breakpointTypeCall
+			c.breakpointHints[callInstAddr] = breakpointHintCall
 		} else {
 			err = c.breakpoints.ClearConditional(callInstAddr, goRoutineID)
 		}
@@ -338,19 +330,6 @@ func (c *Controller) alterCallInstBreakpoints(enable bool, goRoutineID int64, pc
 		}
 	}
 
-	return nil
-}
-
-func (c *Controller) setDeferredFuncBreakpoints(goRoutineInfo tracee.GoRoutineInfo) error {
-	nextAddr := goRoutineInfo.NextDeferFuncAddr
-	if nextAddr == 0x0 /* no deferred func */ || c.breakpoints.Hit(nextAddr, goRoutineInfo.ID) /* exist already */ {
-		return nil
-	}
-
-	if err := c.breakpoints.SetConditional(nextAddr, goRoutineInfo.ID); err != nil {
-		return err
-	}
-	c.breakpointTypes[nextAddr] = breakpointTypeDeferredFunc
 	return nil
 }
 
@@ -369,20 +348,12 @@ func (c *Controller) handleTrapAtUnrelatedBreakpoint(threadID int, breakpointAdd
 }
 
 func (c *Controller) handleTrapBeforeFunctionCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	breakpointAddr := goRoutineInfo.CurrentPC - 1
-
-	var err error
-	if c.breakpointTypes[breakpointAddr] == breakpointTypeReturnAndCall {
-		err = c.handleTrapAfterFunctionReturn(threadID, goRoutineInfo)
-	} else {
-		err = c.process.SingleStep(threadID, breakpointAddr)
-	}
-	if err != nil {
+	if err := c.process.SingleStep(threadID, goRoutineInfo.CurrentPC-1); err != nil {
 		return err
 	}
 
 	// Now the go routine jumped to the beginning of the function.
-	goRoutineInfo, err = c.process.CurrentGoRoutineInfo(threadID)
+	goRoutineInfo, err := c.process.CurrentGoRoutineInfo(threadID)
 	if err != nil {
 		return err
 	}
@@ -403,7 +374,6 @@ func (c *Controller) handleTrapBeforeFunctionCall(threadID int, goRoutineInfo tr
 // It is because some function, such as runtime.duffzero, directly jumps to the middle of the function and
 // the breakpoint address is not explicit in that case.
 func (c *Controller) handleTrapAtFunctionCall(threadID int, breakpointAddr uint64, goRoutineInfo tracee.GoRoutineInfo) error {
-	status, _ := c.statusStore[goRoutineInfo.ID]
 	stackFrame, err := c.currentStackFrame(goRoutineInfo)
 	if err != nil {
 		return err
@@ -412,28 +382,19 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, breakpointAddr uint6
 	// unwinded here in some cases:
 	// * just recovered from panic.
 	// * the last function used 'JMP' to call the next function and didn't change the SP. e.g. runtime.deferreturn
-	remainingFuncs, _, err := c.unwindFunctions(status.callingFunctions, goRoutineInfo)
+	remainingFuncs, _, err := c.unwindFunctions(goRoutineInfo, goRoutineInfo.UsedStackSize)
 	if err != nil {
 		return err
 	}
 
 	currStackDepth := len(remainingFuncs) + 1 // add the currently calling function
-	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {
-		currStackDepth -= c.countSkippedFuncs(status.callingFunctions, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
-	}
-
 	callingFunc := callingFunction{
 		Function:               stackFrame.Function,
 		returnAddress:          stackFrame.ReturnAddress,
 		usedStackSize:          goRoutineInfo.UsedStackSize,
 		setCallInstBreakpoints: currStackDepth < c.traceLevel,
 	}
-	remainingFuncs, err = c.appendFunction(remainingFuncs, callingFunc, goRoutineInfo.ID)
-	if err != nil {
-		return err
-	}
-
-	if err := c.setDeferredFuncBreakpoints(goRoutineInfo); err != nil {
+	if err = c.addFunction(callingFunc, goRoutineInfo.ID); err != nil {
 		return err
 	}
 
@@ -443,29 +404,28 @@ func (c *Controller) handleTrapAtFunctionCall(threadID int, breakpointAddr uint6
 		}
 	}
 
-	if err := c.process.SingleStep(threadID, breakpointAddr); err != nil {
-		return err
+	return c.process.SingleStep(threadID, breakpointAddr)
+}
+
+func (c *Controller) unwindFunctions(goRoutineInfo tracee.GoRoutineInfo, currUsedStackSize uint64) ([]callingFunction, []callingFunction, error) {
+	remainingFuncs, unwindedFuncs, err := c.doUnwindFunctions(goRoutineInfo, currUsedStackSize)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	c.statusStore[goRoutineInfo.ID] = goRoutineStatus{callingFunctions: remainingFuncs}
-	return nil
+	return remainingFuncs, unwindedFuncs, nil
 }
 
-func (c *Controller) countSkippedFuncs(callingFuncs []callingFunction, usedStackSize uint64) int {
-	for i := len(callingFuncs) - 1; i >= 0; i-- {
-		if callingFuncs[i].usedStackSize < usedStackSize {
-			return len(callingFuncs) - 1 - i
-		}
-	}
-	return len(callingFuncs) - 1
-}
+func (c *Controller) doUnwindFunctions(goRoutineInfo tracee.GoRoutineInfo, currUsedStackSize uint64) ([]callingFunction, []callingFunction, error) {
+	status, _ := c.statusStore[goRoutineInfo.ID]
+	callingFuncs := status.callingFunctions
 
-func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineInfo tracee.GoRoutineInfo) ([]callingFunction, []callingFunction, error) {
 	for i := len(callingFuncs) - 1; i >= 0; i-- {
-		if callingFuncs[i].usedStackSize < goRoutineInfo.UsedStackSize {
+		if callingFuncs[i].usedStackSize < currUsedStackSize {
 			return callingFuncs[0 : i+1], callingFuncs[i+1:], nil
 
-		} else if callingFuncs[i].usedStackSize == goRoutineInfo.UsedStackSize {
+		} else if callingFuncs[i].usedStackSize == currUsedStackSize {
 			currFunction, err := c.process.FindFunction(goRoutineInfo.CurrentPC)
 			if err != nil {
 				return nil, nil, err
@@ -490,26 +450,28 @@ func (c *Controller) unwindFunctions(callingFuncs []callingFunction, goRoutineIn
 	return nil, callingFuncs, nil
 }
 
-func (c *Controller) appendFunction(callingFuncs []callingFunction, newFunc callingFunction, goRoutineID int64) ([]callingFunction, error) {
+func (c *Controller) addFunction(newFunc callingFunction, goRoutineID int64) error {
+	status, _ := c.statusStore[goRoutineID]
+	c.statusStore[goRoutineID] = goRoutineStatus{callingFunctions: append(status.callingFunctions, newFunc)}
+
 	if err := c.breakpoints.SetConditional(newFunc.returnAddress, goRoutineID); err != nil {
-		return nil, err
-	}
-	if typ, ok := c.breakpointTypes[newFunc.returnAddress]; ok && typ == breakpointTypeCall {
-		c.breakpointTypes[newFunc.returnAddress] = breakpointTypeReturnAndCall
-	} else {
-		c.breakpointTypes[newFunc.returnAddress] = breakpointTypeReturn
+		return err
 	}
 
 	if newFunc.setCallInstBreakpoints {
-		if err := c.setCallInstBreakpoints(goRoutineID, newFunc.StartAddr); err != nil {
-			return nil, err
-		}
+		return c.setCallInstBreakpoints(goRoutineID, newFunc.StartAddr)
 	}
-
-	return append(callingFuncs, newFunc), nil
+	return nil
 }
 
 func (c *Controller) handleTrapAtDeferredFuncCall(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
+	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {
+		_, _, err := c.unwindFunctions(goRoutineInfo, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
+		if err != nil {
+			return err
+		}
+	}
+
 	if err := c.handleTrapAtFunctionCall(threadID, goRoutineInfo.CurrentPC-1, goRoutineInfo); err != nil {
 		return err
 	}
@@ -518,34 +480,43 @@ func (c *Controller) handleTrapAtDeferredFuncCall(threadID int, goRoutineInfo tr
 }
 
 func (c *Controller) handleTrapAfterFunctionReturn(threadID int, goRoutineInfo tracee.GoRoutineInfo) error {
-	status, _ := c.statusStore[goRoutineInfo.ID]
-
-	remainingFuncs, unwindedFuncs, err := c.unwindFunctions(status.callingFunctions, goRoutineInfo)
+	remainingFuncs, unwindedFuncs, err := c.unwindFunctions(goRoutineInfo, goRoutineInfo.UsedStackSize)
 	if err != nil {
 		return err
 	}
 	returnedFunc := unwindedFuncs[0].Function
 
 	currStackDepth := len(remainingFuncs) + 1 // include returnedFunc for now
-	if goRoutineInfo.Panicking && goRoutineInfo.PanicHandler != nil {
-		currStackDepth -= c.countSkippedFuncs(remainingFuncs, goRoutineInfo.PanicHandler.UsedStackSizeAtDefer)
+	prevStackFrame, err := c.prevStackFrame(goRoutineInfo, returnedFunc.StartAddr)
+	if err != nil {
+		return err
+	}
+
+	if currStackDepth <= c.traceLevel && prevStackFrame.Function.Name == "runtime.deferproc" {
+		if err := c.setBreakpointToDeferredFunc(goRoutineInfo); err != nil {
+			return err
+		}
 	}
 
 	if currStackDepth <= c.traceLevel && c.printableFunc(returnedFunc) {
-		prevStackFrame, err := c.prevStackFrame(goRoutineInfo, returnedFunc.StartAddr)
-		if err != nil {
-			return err
-		}
 		if err := c.printFunctionOutput(goRoutineInfo.ID, prevStackFrame, currStackDepth); err != nil {
 			return err
 		}
 	}
 
-	if err := c.process.SingleStep(threadID, goRoutineInfo.CurrentPC-1); err != nil {
-		return err
+	return nil
+}
+
+func (c *Controller) setBreakpointToDeferredFunc(goRoutineInfo tracee.GoRoutineInfo) error {
+	nextAddr := goRoutineInfo.NextDeferFuncAddr
+	if nextAddr == 0x0 /* no deferred func */ {
+		return nil
 	}
 
-	c.statusStore[goRoutineInfo.ID] = goRoutineStatus{callingFunctions: remainingFuncs}
+	if err := c.breakpoints.SetConditional(nextAddr, goRoutineInfo.ID); err != nil {
+		return err
+	}
+	c.breakpointHints[nextAddr] = breakpointHintDeferredFunc
 	return nil
 }
 
